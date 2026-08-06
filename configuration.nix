@@ -4,9 +4,20 @@
   imports = [
     ./hardware-configuration.nix
     ./desktops.nix
+    ./gpu.nix
+    ./asus.nix
     ./gaming.nix
     ./fontsAndNeeds.nix
   ];
+
+  # No swap device exists on this machine and btrfs makes swapfiles awkward.
+  # Compressed swap in RAM covers memory spikes (rebuilds, CS2 + browser)
+  # without touching the disk.
+  zramSwap = {
+    enable = true;
+    algorithm = "zstd";
+    memoryPercent = 50;
+  };
 
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
@@ -14,9 +25,16 @@
 
   nix.settings = {
     experimental-features = [ "nix-command" "flakes" ];
+
+    # Prebuilt Noctalia v5 binaries, so a rebuild downloads instead of
+    # compiling a C++ shell from source.
+    substituters = [ "https://noctalia.cachix.org" ];
+    trusted-public-keys = [
+      "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4="
+    ];
   };
 
-  networking.hostName = "daf3r-starter"; #Change this to the host name of your choice, this is also how you will reference the flake to update.
+  networking.hostName = "daf3r-starter"; # must match the nixosConfigurations attribute in flake.nix
   networking.networkmanager.enable = true;
   services.printing.enable = true;
 
@@ -33,11 +51,11 @@
   i18n.defaultLocale = "en_US.UTF-8";
 
   programs.fish.enable = true;
-
-  users.users.daf3r = { #Change username here
+  programs.nix-ld.enable = true;
+  users.users.daf3r = {
     isNormalUser = true;
-    description = "Noctalia is Great!!"; # Change this to the long form user name of your choice. (This only shows on login in)
-    extraGroups = [ "networkmanager" "wheel" ];
+    description = "daf3r";
+    extraGroups = [ "networkmanager" "wheel" "video" ];
     shell = pkgs.fish;
   };
 

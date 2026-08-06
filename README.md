@@ -1,59 +1,92 @@
-# Nixtalia
-A starter nix config to try out Noctalia on Niri, Hyprland, and Mango  
+# daf3r's NixOS
 
-Keybinds for all three:  
+Hyprland + [Noctalia v5](https://docs.noctalia.dev/v5/) on an ASUS ROG Strix G17 (G713PV).
 
-SUPER + D = App menu  
-SUPER + F1 = Control Center  
-SUPER + F2 = Settings Menu  
-SUPER + F3 = Clipboard History  
-SUPER + F4 = Sessions Menu  
+Rebuild:
 
-SUPER + B = Zen Browser    
-SUPER + RETURN = Kitty    
+```
+sudo nixos-rebuild switch --flake ~/nixos-config
+```
 
+(`nrs` is the fish abbreviation for that. `flakeup` = `nix flake update`, `ns` = nix search.)
 
-The mango settings are stock for MaoMao's Mango settings. DMS is also included if you want to try it. I think for now, only DMS is officially supporting Mango.  
+The flake output is named after `networking.hostName`, so `--flake ~/nixos-config`
+resolves `daf3r-starter` without spelling out the attribute.
 
-How to try this easily:  
+## Layout
 
-Install Nix with the Graphical KDE install
+| File | What it holds |
+|---|---|
+| `configuration.nix` | Host basics, zram, users, Nix settings + Noctalia's binary cache |
+| `desktops.nix` | Hyprland, SDDM, xdg portals, Noctalia's NixOS module |
+| `gpu.nix` | NVIDIA RTX 4060 as primary GPU (see the note below) |
+| `asus.nix` | asusd: fan profiles, keyboard RGB, ROG key, battery limit |
+| `gaming.nix` | Steam, gamescope, gamemode, Proton-GE |
+| `noctalia.nix` | Noctalia v5 settings, declarative (home-manager) |
+| `home.nix` | home-manager entrypoint, out-of-store symlinks |
+| `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Packages |
+| `pkgs/brave-origin.nix` | Brave Origin, packaged from Brave's own `.deb` |
+| `config/hypr/hyprland.conf` | Live-editable Hyprland config |
+| `config/nvim/` | LazyVim |
 
+`config/` is symlinked out of the Nix store, so edits there apply without a rebuild.
+Noctalia is the exception — it is fully declarative, see below.
 
+## Keybinds
 
-Download this folder  
-Unzip and but it in home  
-cd ~/nixtalia
-Delete my hardware-configuration if it is there
-sudo cp /etc/nixos/hardware-configuration.nix ~/nixtalia/hardware-configuration.nix
-sudo nixos-rebuild switch --flake .#nixtalia-starter  
+| Keys | Action |
+|---|---|
+| `SUPER + D` / `SUPER + Space` | App launcher |
+| `SUPER + F1` | Control Center |
+| `SUPER + F2` | Noctalia Settings |
+| `SUPER + F3` | Clipboard history |
+| `SUPER + F4` | Session menu |
+| `SUPER + W` | Wallpaper picker |
+| `SUPER + L` | Lock screen |
+| `ALT + Tab` | Window switcher |
+| `Print` / `SHIFT + Print` | Screenshot region / fullscreen |
+| `SUPER + Return` | kitty |
+| `SUPER + B` | Brave Origin |
+| `SUPER + E` | Dolphin |
+| `SUPER + K` | Kate |
+| `SUPER + Q` | Close window |
 
-This will install everything. Then reboot. When you get to the login screen, you can choose your WM in the bottom left.  
+All the Noctalia binds go through `noctalia msg <verb>`. Run `noctalia msg --help`
+for the full verb list — this is the v5 syntax and it replaced v4's
+`noctalia-shell ipc call <panel> <verb>`.
 
-Have fun!!  
+## Noctalia settings are declarative
 
+`~/.config/noctalia/config.toml` is a read-only symlink into the Nix store,
+generated from `programs.noctalia.settings` in `noctalia.nix` and validated on
+every rebuild by `noctalia config validate`.
 
+**Changes made in Noctalia's own Settings GUI do not survive a rebuild.** Use the
+GUI to find what you like, then write it back into `noctalia.nix`. The full set
+of keys with defaults is in the upstream `example.toml`.
 
+## GPU note
 
-Make it yours:  
+This laptop's internal panel (`eDP-2`) and `HDMI-A-1` are both wired to the
+NVIDIA RTX 4060; every connector on the AMD iGPU reads `disconnected`. The
+display MUX is in discrete mode, so NVIDIA is the primary GPU and PRIME offload
+does not apply. `supergfxd` is deliberately disabled — see `asus.nix` for why.
+Switch GPU modes in the BIOS.
 
-Open configuration.nix in the file editor of your choice file  
-  Look for the comments and it will show you where to change some names  
-  
-Open home.nix  
-  Again, look for the comments for what to do to make changes  
-  
-Open apps.nix  
-  The comment will show you where to add new app names to install them. From command line, type ns and then ctrl+n. This will let you search for any programs so you can find the name to add to apps.nix  
-  
-Add any wallpapers you would like to the ~/nixtalia/Pictures/Wallpapers folder and you will be able to find them in Noctalia  
+## CS2
 
-Any changes you want to make to the WMs should be done in their respective config folder. Noctalia changes can just be done in Noctalia's settings and they will stay.  
+Steam is installed with the 32-bit runtime, gamescope and gamemode. Set CS2's
+launch options to:
 
-Shortcuts  
+```
+gamemoderun %command%
+```
 
-ns = Nix Search  
-nrs = Shortcut to rebuild  
-flakeup = Shortcut to update flake  
+Tearing is enabled for CS2 only, via a `windowrule` matching `class:^(cs2)$`.
 
+## Bumping Brave Origin
 
+Brave Origin is not in nixpkgs. Get the new version and hash from
+<https://brave-browser-apt-release.s3.brave.com/dists/stable/main/binary-amd64/Packages>,
+then update `version` and `hash` in `pkgs/brave-origin.nix`
+(`nix hash convert --hash-algo sha256 --to sri <sha256 from the index>`).

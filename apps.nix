@@ -1,7 +1,6 @@
 { config, pkgs, ... }:
 
 {
-
   programs.mangohud = {
     enable = true;
     settings = {
@@ -11,15 +10,20 @@
   };
 
   home.packages = with pkgs; [
-    kdePackages.dolphin
-    kdePackages.kate
-    vivaldi
+    # Brave Origin is not in nixpkgs, so it is packaged locally from Brave's
+    # own .deb — see ./pkgs/brave-origin.nix for how to bump it.
+    (pkgs.callPackage ./pkgs/brave-origin.nix { })
+
+    kdePackages.dolphin # SUPER+E in hyprland.conf
+    kdePackages.kate # SUPER+K
     filezilla
     spotify
     vesktop
-    pcmanfm
-    pywalfox-native
-    spicetify-cli
-    #You can add any apps you want to install here
   ];
+
+  # Removed from the starter: pcmanfm (second file manager nothing launches),
+  # spicetify-cli (only useful with a Spotify theming template configured;
+  # v5 templates are opt-in via theme.templates.builtin_ids), vivaldi and
+  # firefox (you asked for brave-origin), pywalfox-native (drove v4's pywalfox
+  # template, which no longer exists in v5).
 }
