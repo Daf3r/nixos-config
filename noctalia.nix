@@ -61,16 +61,14 @@ in
         templates.enable_builtin_templates = true;
       };
 
+      # Off on purpose — v5.0.0 mis-sizes the wallpaper surface under fractional
+      # monitor scales, and eDP-1 runs at 1.6. swww draws the background
+      # instead; see ./wallpaper.nix for the full write-up and the replacement
+      # for [wallpaper.automation]. `directory` stays so that theme.source =
+      # "wallpaper" and the wallpaper-set IPC keep resolving the same folder.
       wallpaper = {
-        enabled = true;
+        enabled = false;
         directory = wallpapers;
-        fill_mode = "crop";
-        transition_duration = 1500;
-        automation = {
-          enabled = true;
-          interval_seconds = 900;
-          order = "random";
-        };
       };
 
       bar.main = {
@@ -80,7 +78,9 @@ in
         reserve_space = true;
         shadow = true;
 
-        start = [ "launcher" "wallpaper" "workspaces" "cpu" "ram" "temp" ];
+        # No "wallpaper" widget: it drives the disabled wallpaper module, so its
+        # panel would open onto nothing. `wallpaper-rotate` handles rotation.
+        start = [ "launcher" "workspaces" "cpu" "ram" "temp" ];
         center = [ "clock" "media" ];
         end = [
           "audio_visualizer"
@@ -107,8 +107,11 @@ in
         unit = "celsius";
       };
 
+      # Off: the warm shift at night threw the colours off. Re-enable by
+      # flipping this back to true — turning it off in the Settings GUI alone
+      # does not survive a rebuild.
       nightlight = {
-        enabled = true;
+        enabled = false;
         temperature_day = 6500;
         temperature_night = 4000;
       };

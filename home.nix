@@ -20,6 +20,7 @@ in
     ./terminal.nix
     ./apps.nix
     ./noctalia.nix
+    ./wallpaper.nix
   ];
 
   home.username = "daf3r";

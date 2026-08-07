@@ -25,6 +25,24 @@
   # this to true and re-read ./gpu.nix at the same time — the two must agree.
   services.supergfxd.enable = false;
 
+  # asusd persists the Aura *mode and colour* in /etc/asusd/aura_19b6.ron, but
+  # not the backlight level — asus::kbd_backlight comes up at 0 on every boot,
+  # which reads as "the RGB is dead" even though the mode is set correctly.
+  # Restore it here. 3 is max on this board (see max_brightness); Fn+F3/F4 still
+  # overrides it at runtime.
+  #
+  # Colour is white, set once with: asusctl aura static -c FFFFFF
+  systemd.services.asus-kbd-backlight = {
+    description = "Restore keyboard backlight brightness at boot";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "asusd.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.bash}/bin/bash -c 'echo 3 > /sys/class/leds/asus::kbd_backlight/brightness'";
+    };
+  };
+
   # Cap charging to preserve the battery when the laptop lives on AC. asusctl
   # persists this across reboots.  Change with: asusctl -c 100
   systemd.services.asus-battery-charge-limit = {
