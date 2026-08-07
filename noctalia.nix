@@ -2,6 +2,12 @@
 
 let
   wallpapers = "${config.home.homeDirectory}/nixos-config/Pictures/Wallpapers";
+
+  # Noctalia ships exactly two sounds in its own package; there is no separate
+  # sound theme to install. Referencing them through the flake input keeps the
+  # store path correct across upgrades instead of pinning a hash by hand.
+  noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  sounds = "${noctaliaPkg}/share/noctalia/assets/sounds";
 in
 {
   imports = [ inputs.noctalia.homeModules.default ];
@@ -132,11 +138,29 @@ in
         reserve_space = true;
         shadow = true;
 
+        # Groups adjacent widgets into rounded pills instead of floating them
+        # on the bar background. capsule_group is left at its default: it takes
+        # explicit groupings, and the automatic behaviour is what reads well
+        # with the three sections below.
+        capsule = true;
+        capsule_fill = "surface_variant";
+        capsule_opacity = 1.0;
+        hover_highlight = true;
+
+        # Rebalanced. The system readouts moved from start to end so that
+        # `active_window` has room on the left, where the eye already goes for
+        # workspaces — it shows what actually has focus, which matters far more
+        # when the screen is split between an editor and Brave than knowing CPU
+        # load does.
+        #
         # No "wallpaper" widget: it drives the disabled wallpaper module, so its
         # panel would open onto nothing. `wallpaper-rotate` handles rotation.
-        start = [ "launcher" "workspaces" "cpu" "ram" "temp" ];
+        start = [ "launcher" "workspaces" "active_window" ];
         center = [ "clock" "media" ];
         end = [
+          "cpu"
+          "ram"
+          "temp"
           "audio_visualizer"
           "notifications"
           "tray"
@@ -147,6 +171,35 @@ in
           "clipboard"
           "control-center"
           "session"
+        ];
+      };
+
+      # The dock is off by default. auto_hide plus reserve_space = false is the
+      # combination that matters here: eDP-1 is only 900 logical pixels tall at
+      # scale 1.6, and a reserved dock would eat that on top of the 34px bar.
+      # This way it stays out of the way until the pointer reaches the edge.
+      dock = {
+        enabled = true;
+        auto_hide = true;
+        reserve_space = false;
+        position = "bottom";
+
+        icon_size = 40;
+        magnification = true;
+        magnification_scale = 1.35;
+        show_running = true;
+        show_instance_count = true;
+
+        # Desktop-entry ids without the .desktop suffix. brave-origin is the
+        # locally packaged build (see ./pkgs/brave-origin.nix); it also ships a
+        # com.brave.Origin.desktop, but hyprland.conf launches brave-origin, so
+        # matching that keeps a running window from docking as a second icon.
+        pinned = [
+          "brave-origin"
+          "kitty"
+          "org.kde.dolphin"
+          "spotify"
+          "vesktop"
         ];
       };
 
@@ -165,6 +218,115 @@ in
       };
 
       widget.clock.format = "{:%H:%M · %a %d %b}";
+
+      # Long titles are the norm in a browser and an editor, so cap the width
+      # and scroll on hover rather than letting the widget push the workspaces
+      # around every time the focus changes.
+      widget.active_window = {
+        max_length = 300;
+        min_length = 100;
+        title_scroll = "hover";
+        icon_size = 16;
+      };
+
+      # OSD sits opposite the bar. At top_center it shares an edge with a top
+      # bar, so volume and brightness popups land right against it; bottom is
+      # also where the eye is not while reading.
+      osd = {
+        position = "bottom_center";
+        offset_y = 24;
+        background_opacity = 0.97;
+        border = true;
+      };
+
+      # Dims and blurs whatever is behind an open panel, which separates the
+      # panel from a busy window underneath. Off by default.
+      backdrop = {
+        enabled = true;
+        blur_intensity = 0.5;
+        tint_intensity = 0.3;
+      };
+
+      # Rounds the physical screen corners to match decoration:rounding = 12 in
+      # config/hypr/hyprland.conf, so maximised windows stop looking square
+      # against the rounded ones.
+      shell.screen_corners = {
+        enabled = true;
+        size = 16;
+      };
+
+      # Keeps screenshots out of ~/Pictures, which is also where the wallpaper
+      # folder search would otherwise trip over them. filename_pattern is left
+      # empty on purpose — the built-in default already produces
+      # screenshot_<date>_<time>[-region].png.
+      shell.screenshot = {
+        directory = "${config.home.homeDirectory}/Pictures/Screenshots";
+        save_to_file = true;
+        copy_to_clipboard = true;
+        freeze_screen = true;
+      };
+
+      # Noctalia ships notification.wav and volume-change.wav and uses neither
+      # unless enable_sounds is on. The volume sound is deliberately left unset:
+      # it would fire on every keypress of the volume rocker.
+      audio = {
+        enable_sounds = true;
+        notification_sound = "${sounds}/notification.wav";
+        sound_volume = 0.4;
+      };
+
+      # 10% is very late on a laptop that idles around 15W; 20% leaves time to
+      # find a charger.
+      battery.warning_threshold = 20;
+
+      calendar.enabled = true;
+      control_center.calendar.show_week_numbers = true;
+
+      # The state file already holds two login boxes, one per output, positioned
+      # by hand — but the subsystem itself was left off, so none of it rendered.
+      # NOTE: [lockscreen_widgets] enabled is also present in the state file,
+      # and per-setting the state wins (see the README notes on precedence), so
+      # this may need flipping in the GUI instead. Verified after switching.
+      lockscreen_widgets.enabled = true;
+
+      # Corners are a compositor-wide pointer trap, which is a real hazard with
+      # CS2 in the mix, so only one corner is armed and it needs a deliberate
+      # half-second dwell. Bottom-left is the safest: it is diagonally opposite
+      # the bar's session/power controls, and away from the eDP-1 -> HDMI-A-1
+      # edge the pointer crosses all day.
+      #
+      # `command` is used rather than a named action so the binding is the same
+      # IPC verb the keybinds in hyprland.conf already use.
+      hot_corners = {
+        enabled = true;
+        delay_ms = 500;
+        bottom_left = {
+          action = "command";
+          command = "noctalia msg panel-toggle launcher";
+        };
+      };
+
+      # 19 hook points exist and all of them were empty. This is the one that
+      # earns its keep: music kept playing to an empty room when the idle timer
+      # locked the session. playerctl is already installed for the media keys.
+      hooks.session_locked = [ "playerctl pause" ];
+
+      # Plugins are fetched into ~/.local/state/noctalia/plugins/sources/ from
+      # the two git remotes already listed in [[plugins.source]]; only the ids
+      # named here are loaded. 11 official and ~80 community plugins are
+      # available — `catalog.toml` in each repo is the index.
+      #
+      # Both checkouts were found empty on 2026-08-07: normal blobless clones
+      # (partialclonefilter=blob:none, no sparse-checkout) whose working trees
+      # had been wiped with the deletions left staged in the index. Repaired
+      # with `git reset --hard HEAD` in each. If plugins ever go missing again,
+      # check `git -C <repo> status` there before assuming a config problem.
+      #
+      # wallhaven earns the first slot because only one image lives in
+      # Pictures/Wallpapers, which makes wallpaper-rotate's 900s shuffle a
+      # no-op. Point its download_dir at that folder in the plugin's own
+      # settings panel and swww starts having something to rotate through.
+      plugins.enabled = [ "noctalia/wallhaven" ];
 
       # Resolve coordinates from IP instead of hardcoding a city — the starter
       # config had the original author's "Seffner, FL" baked in here.
