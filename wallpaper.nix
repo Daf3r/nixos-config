@@ -22,7 +22,7 @@
 # Everything else Noctalia draws (bar, panels, lockscreen) is correct at 1.6 —
 # this is specific to the wallpaper surface.
 let
-  wallpapers = "${config.home.homeDirectory}/nixos-config/Pictures/Wallpapers";
+  wallpapers = "${config.home.homeDirectory}/Pictures/Wallpapers";
   noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   # The other half of the bridge: what actually paints the image.
@@ -104,4 +104,20 @@ let
 in
 {
   home.packages = [ pkgs.swww wallpaper-rotate wallpaper-apply ];
+
+  # Creates ~/Pictures/Wallpapers, which is NOT in this repo — the images there
+  # are other people's work and this repo is public.
+  #
+  # This is load-bearing, not tidiness. wallpaper-rotate is a
+  # writeShellApplication, so it runs under `set -euo pipefail`, and its `find`
+  # has no `2>/dev/null`: against a directory that does not exist, find exits
+  # non-zero, pipefail propagates it, and the script dies at login instead of
+  # simply having nothing to show. An *empty* directory is handled fine — `pick`
+  # returns nothing and `apply` bails on its own — so all this has to guarantee
+  # is that the path exists.
+  #
+  # (fastfetch's image folder needs no equivalent: fastfetch-random discards
+  # find's stderr and falls through to the config's own logo. See
+  # ./terminal/fastfetch.nix.)
+  home.file."Pictures/Wallpapers/.keep".text = "";
 }

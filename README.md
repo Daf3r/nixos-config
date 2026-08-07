@@ -70,9 +70,24 @@ repo are long on purpose.
 | `pkgs/brave-origin.nix` | Brave Origin, packaged from Brave's own `.deb` |
 | `devshells/` | Per-project toolchains — see [Dev shells](#dev-shells) |
 | `config/niri/config.kdl` | Live-editable niri config |
-| `config/nvim/` | LazyVim |
+| `config/nvim/` | LazyVim starter — third party, see below |
 | `config/starship.toml` | Prompt; holds a generated palette block |
 | `config/noctalia/palettes/` | Local colour palette, copied into the store |
+
+### What is not mine
+
+`config/nvim/` is the [LazyVim starter](https://github.com/LazyVim/starter), vendored
+as-is and redistributed under the Apache-2.0 licence it carries in
+`config/nvim/LICENSE`.
+
+`config/fastfetch/config.jsonc` is adapted from
+[israrkhan-cys/Arch-\_hyprland\_rice](https://github.com/israrkhan-cys/Arch-_hyprland_rice);
+the changes made to it are listed at the top of `terminal/fastfetch.nix`.
+
+**Wallpapers and fastfetch images are deliberately not in this repo.** They live in
+`~/Pictures/Wallpapers` and `~/Pictures/Fastfetch` because they are other people's work
+and this repo is public — clone it and you get an empty rotation, not a copyright problem.
+`wallpaper.nix` creates the first directory so nothing breaks on a fresh checkout.
 
 ### What applies live, and what needs a rebuild
 

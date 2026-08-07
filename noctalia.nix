@@ -1,7 +1,10 @@
 { config, lib, pkgs, inputs, ... }:
 
 let
-  wallpapers = "${config.home.homeDirectory}/nixos-config/Pictures/Wallpapers";
+  # Outside the repo on purpose: these are other people's images, and this repo
+  # is public. ./wallpaper.nix creates the directory so a fresh checkout does
+  # not land on a path that does not exist.
+  wallpapers = "${config.home.homeDirectory}/Pictures/Wallpapers";
 
   # Noctalia ships exactly two sounds in its own package; there is no separate
   # sound theme to install. Referencing them through the flake input keeps the

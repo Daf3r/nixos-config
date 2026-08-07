@@ -32,8 +32,13 @@
 #
 # fastfetch has no notion of a random logo: `logo.source` is a single path. So
 # the shell calls `fastfetch-random` instead, which picks one image and passes
-# it in. Images live in ../Pictures/Fastfetch — drop more in and they join the
+# it in. Images live in ~/Pictures/Fastfetch — drop more in and they join the
 # rotation with no rebuild.
+#
+# That directory is outside this repo on purpose: the images are other people's
+# work and this repo is public. Nothing creates it — fastfetch-random already
+# falls through to the config's own logo when the folder is missing, which is
+# the whole reason for the `2>/dev/null ... || true` below.
 #
 # --- Why jq is a dependency ---
 #
@@ -43,7 +48,7 @@
 # fine. It also refuses to create config.jsonc itself, which is the other half
 # of why the seeding below exists.
 let
-  fastfetchImages = "${config.home.homeDirectory}/nixos-config/Pictures/Fastfetch";
+  fastfetchImages = "${config.home.homeDirectory}/Pictures/Fastfetch";
 
   fastfetch-random = pkgs.writeShellApplication {
     name = "fastfetch-random";
