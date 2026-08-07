@@ -101,13 +101,28 @@ in `terminal/kitty.nix` and `gtk.nix` before changing those strings.
 
 ## Displays
 
-Both are pinned explicitly in `config/hypr/hyprland.conf`; `preferred`/`auto`
-picked the wrong refresh rates and put the external monitor on the wrong side.
+Both are pinned explicitly in `config/hypr/hyprland.conf` and
+`config/niri/config.kdl`; `preferred`/`auto` picked the wrong refresh rates and
+put the external monitor on the wrong side.
 
-| Output | Mode | Scale | Logical size |
+| Display | Mode | Scale | Logical size |
 |---|---|---|---|
-| `eDP-1` (laptop, left) | 2560x1440@240 | 1.6 | 1600x900 |
-| `HDMI-A-1` (MSI, right) | 1920x1080@100 | 1 | 1920x1080 |
+| Laptop panel, left | 2560x1440@240 | 1.6 | 1600x900 |
+| MSI MP243X, right | 1920x1080@100 | 1 | 1920x1080 |
+
+**Match monitors by EDID, never by connector name.** The panel has come up as
+both `eDP-1` and `eDP-2` across reboots of this machine with nothing changed —
+the NVIDIA driver numbers its eDP connector differently, and a second eDP on the
+AMD iGPU makes the index ambiguous. When the name does not match, the rules are
+ignored *entirely*: the 240 Hz panel runs at 60 and gets auto-placed to the
+right of the MSI, which looks like the monitors swapping sides. Hyprland uses
+`monitor = desc:<make model>`, niri uses the quoted `"make model serial"` string
+that `niri msg outputs` prints.
+
+niri additionally needs the refresh rate to match to three decimals —
+`2560x1440@240` is not found, `2560x1440@240.002` is — and falls back silently.
+Hyprland accepts the rounded number, so the two files differ for the same
+hardware.
 
 Scale 1.6 was chosen because 2560/1.6 and 1440/1.6 are both integers, so there
 is no fractional-scaling blur.

@@ -13,8 +13,13 @@ let
   # output, and the MSI enumerates ahead of the panel.
   #
   # Overriding the config file is the whole fix: `mode=off` disables an output in
-  # weston, so the greeter has only eDP-1 to draw on. This affects the login
-  # screen alone; both monitors come up normally once a session starts.
+  # weston, so the greeter has only the laptop panel to draw on. This affects the
+  # login screen alone; both monitors come up normally once a session starts.
+  #
+  # Keying on HDMI-A-1 is safe even though the *panel's* connector name drifts
+  # between eDP-1 and eDP-2 across boots (see ./gpu.nix): there is only one HDMI
+  # connector, so that name does not move. Disabling the monitor we can name
+  # reliably is what makes this robust.
   #
   # The keyboard and libinput blocks are copied from what the module generates so
   # nothing is lost by replacing the file — keep them in step with

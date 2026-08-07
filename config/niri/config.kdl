@@ -49,14 +49,29 @@ input {
 // Get the exact strings from `niri msg outputs` inside a niri session. Hyprland
 // is more forgiving here and takes the rounded numbers in hyprland.conf, which
 // is why they differ between the two files for the same hardware.
-output "eDP-1" {
+// Outputs are matched by "make model serial", NOT by connector name.
+//
+// The connector name is not stable on this machine. It was eDP-1 when this file
+// was written and came up as eDP-2 after the next reboot, with no hardware or
+// configuration change — the NVIDIA driver simply numbered its eDP connector
+// differently. There are two eDP connectors in the system (one per GPU), which
+// is what makes the index shift possible.
+//
+// The consequence was total: with the block keyed on a name that no longer
+// existed, niri ignored mode, scale and position outright. The 240 Hz panel came
+// up at 60 and got auto-placed to the *right* of the MSI at x=3520, which is why
+// the monitors appeared swapped.
+//
+// These strings are what `niri msg outputs` prints in quotes. They come from the
+// EDID and do not change.
+output "California Institute of Technology MNH301CA3-1 Unknown" {
     mode "2560x1440@240.002"
     scale 1.6
     position x=0 y=0
     variable-refresh-rate on-demand=true
 }
 
-output "HDMI-A-1" {
+output "Microstep MSI MP243X PB5H735601263" {
     mode "1920x1080@99.999"
     scale 1
     position x=1600 y=0
