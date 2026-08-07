@@ -107,6 +107,11 @@
     settings = {
       user = {
         name = "Daf3r";
+        # GitHub's noreply address rather than the real one. Every commit
+        # records the author email in plain text and this repo is public, so
+        # the personal address would be readable in the history of anything
+        # ever pushed. The noreply form still links commits to the GitHub
+        # account, so contribution graphs and mentions keep working.
         email = "87869353+Daf3r@users.noreply.github.com";
       };
       init.defaultBranch = "main";
