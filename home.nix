@@ -13,6 +13,7 @@ let
   configs = {
     nvim = "nvim";
     hypr = "hypr";
+    niri = "niri";
   };
 in
 {

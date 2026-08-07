@@ -26,7 +26,19 @@
     kdePackages.kate # SUPER+K
     filezilla
     spotify
+
+    # Two Discord clients on purpose, because they are not interchangeable here.
+    #
+    # vesktop is the one Noctalia can theme: its `discord` community template
+    # writes CSS into ~/.config/vesktop/themes/ (and webcord/legcord), and the
+    # official client has no equivalent — it would need BetterDiscord or Vencord
+    # injected before it could load a stylesheet at all. vesktop also tends to
+    # behave better under Wayland, screenshare included, since Vencord is built in.
+    #
+    # discord is the official build, added on request. It works, it just stays
+    # the one window on the desktop that ignores the palette.
     vesktop
+    discord
   ];
 
   # Removed from the starter: pcmanfm (second file manager nothing launches),

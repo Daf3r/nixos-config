@@ -159,6 +159,8 @@ in
             "qt" # writes qt5ct + qt6ct colour schemes
             "hyprland" # window border colours; replaces the hardcoded
             # cyan->green gradient in config/hypr/hyprland.conf
+            "niri" # same idea for the niri session's focus ring; writes
+            # config/niri/noctalia.kdl, also gitignored
           ];
 
           enable_community_templates = true;

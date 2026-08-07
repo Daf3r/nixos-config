@@ -10,11 +10,29 @@ in
 {
   imports = [ inputs.noctalia.nixosModules.default ];
 
-  # Hyprland is the only compositor now. Niri, Mango and Plasma 6 were dropped
-  # along with the nixtalia starter config.
+  # Hyprland stays the default, known-good session. Mango and Plasma 6 were
+  # dropped along with the nixtalia starter config.
   programs.hyprland = {
     enable = true;
     xwayland.enable = true; # CS2 and Steam's overlay still need it
+  };
+
+  # niri, installed *alongside* Hyprland rather than replacing it — both appear
+  # in SDDM's session list, so trying it costs nothing and Hyprland is always
+  # one logout away. Its config is config/niri/config.kdl, symlinked out of the
+  # store by home.nix and validated with `niri validate`.
+  #
+  # It is a different paradigm, not an upgrade: scrollable tiling, where windows
+  # sit in one infinite horizontal strip instead of subdividing a fixed screen.
+  # Noctalia supports both compositors natively and ships a `niri` theme
+  # template, so the shell is identical either way.
+  programs.niri = {
+    enable = true;
+
+    # Off: this defaults to true and would pull in Nautilus purely to act as the
+    # GNOME portal's file chooser. Dolphin is the file manager here, and
+    # xdg-desktop-portal-gtk (configured below) already provides FileChooser.
+    useNautilus = false;
   };
 
   # System side of Noctalia v5. The shell itself, its settings and its autostart
@@ -78,5 +96,15 @@ in
     ddcutil # now actually used: noctalia.nix sets brightness.enable_ddcutil
 
     sddmTheme # must be here, not in sddm.extraPackages — see the note above
+
+    # X11 support for the niri session. Unlike programs.hyprland, the niri
+    # module sets enableXWayland = false: niri has no built-in XWayland and
+    # instead integrates xwayland-satellite, spawning it on demand when the
+    # first X11 client connects. It only has to be on PATH — config/niri/
+    # config.kdl deliberately does not spawn it, and documents the fallback if
+    # the on-demand handshake ever fails.
+    #
+    # Not optional here: Steam and CS2 are both X11.
+    xwayland-satellite
   ];
 }
