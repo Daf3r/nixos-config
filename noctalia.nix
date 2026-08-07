@@ -287,25 +287,38 @@ in
         #
         # No "wallpaper" widget: it drives the disabled wallpaper module, so its
         # panel would open onto nothing. `wallpaper-rotate` handles rotation.
-        start = [ "workspaces" "active_window" ];
-        center = [ "group:now" ];
+        # `clock` is alone in the centre, and that is the whole point of this
+        # arrangement. It was briefly grouped with `media`, which centred the
+        # pair — so the group's width tracked the track title and the clock slid
+        # sideways every time the song changed. Measured at ~17px between
+        # "Nothing playing" and a long video title, in the same crop of two
+        # screenshots. A clock is glanced at rather than looked for, so it has
+        # to be in the same place every time; alone and centred, its own width
+        # barely varies and it never moves.
+        #
+        # `media` therefore lives in `start`, and *before* `active_window` on
+        # purpose. The left lane is left-anchored, so whatever comes first has a
+        # fixed left edge and only grows rightwards. Put it after the window
+        # title and the title's length would shove it around instead.
+        # `active_window` goes last because it is the only thing here that can
+        # move without costing anything: it is text you read, not a target you
+        # aim at.
+        start = [ "workspaces" "media" "active_window" ];
+        center = [ "clock" ];
         end = [ "group:alerts" "group:status" "group:system" ];
 
-        # Six pills instead of fifteen. The grouping is by what the widgets are
-        # *for*, so each pill reads as one thing:
+        # Seven pills instead of fifteen. The grouping is by what the widgets
+        # are *for*, so each pill reads as one thing:
         #
-        #   now      what is happening   — the time and what is playing
         #   alerts   what wants you      — unread notifications and the tray
         #   status   how the machine is  — heat, link, sound, charge
         #   system   what you can do     — Control Center and the session menu
         #
-        # workspaces and active_window stay ungrouped on the left: they are the
-        # two things scanned most often, and a shared pill would slow that down.
+        # The three on the left stay ungrouped. workspaces and active_window are
+        # what get scanned most and a shared pill would slow that down, and
+        # `media` is left out of a pill with the window title because two
+        # truncated names sharing one container read as one confusing string.
         capsule_group = [
-          {
-            id = "now";
-            members = [ "clock" "media" ];
-          }
           {
             id = "alerts";
             members = [ "notifications" "tray" ];
