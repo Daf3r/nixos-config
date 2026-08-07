@@ -47,6 +47,17 @@ in
     # runtime, so this is not a development dependency that could move into a
     # devshell.
     gcc
+
+    # python3 is here for the same reason as gcc, not as a language toolchain:
+    # Claude Code's security-guidance plugin runs its hooks through
+    # `sg-python.sh`, which probes python3, python and `py -3` and gives up if
+    # none answer. On a system without any of them the plugin fails on every
+    # prompt, commit and push — quietly, with a non-blocking error that says
+    # nothing about what it stopped doing.
+    #
+    # A devshell cannot cover this: the hooks run in Claude Code's environment,
+    # outside direnv. Project Python belongs in ./devshells as usual.
+    python3
     (pkgs.writeShellApplication {
       name = "ns";
       runtimeInputs = with pkgs; [
