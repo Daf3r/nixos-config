@@ -114,10 +114,39 @@ let
   rpath = lib.makeLibraryPath deps + ":" + lib.makeSearchPathOutput "lib" "lib64" deps;
   binpath = lib.makeBinPath deps;
 
+  # These names have to exist in the Chromium build or they do nothing at all —
+  # unknown --enable-features entries are dropped without a warning, so the flag
+  # looks applied and the acceleration never happens.
+  #
+  # That is exactly what was wrong here until 2026-08-07. This list said
+  # VaapiVideoDecoder and VaapiVideoEncoder, which is the nixpkgs `brave`
+  # spelling and correct for older Chromium; neither string exists anywhere in
+  # the 1.93.132 binary (Chromium ~140 renamed them). Symptom: Brave burning 80%
+  # of a CPU core on a 1080p video with `nvidia-smi` reporting 0% decoder use
+  # and the laptop at 92 °C, while libva, nvidia_drv_video.so and the render
+  # node were all correct and blameless.
+  #
+  # Verify after any Brave bump, because this will break again silently:
+  #   strings <store-path>/opt/brave.com/brave-origin/brave | grep -x <name>
+  #
+  # The feature names alone were still not enough — decoder use stayed at 0%.
+  # The rest of the recipe comes from nvidia-vaapi-driver's own README and is
+  # applied in preFixup below: LIBVA_DRIVER_NAME=nvidia, --ignore-gpu-blocklist
+  # and --use-gl=angle --use-angle=gl. All three went in together and decode
+  # started working, so which one was decisive is untested; the ANGLE backend is
+  # the likeliest, since libva finds nvidia_drv_video.so unaided (`vainfo` needs
+  # no variable) and the blocklist is meant to be bypassed by
+  # VaapiIgnoreDriverChecks already. Do not drop any of them casually.
   enableFeatures =
     lib.optionals enableVideoAcceleration [
-      "VaapiVideoDecoder"
-      "VaapiVideoEncoder"
+      # The Linux GL accelerated-decode path; replaced VaapiVideoDecoder.
+      "AcceleratedVideoDecodeLinuxGL"
+      # Chromium blocks VA-API on NVIDIA by default regardless of the above, so
+      # without this the decode path is enabled and then refused for this GPU.
+      "VaapiOnNvidiaGPUs"
+      # nvidia-vaapi-driver is not on Chromium's allowlist of known-good VA-API
+      # drivers, and failing that check is a silent refusal too.
+      "VaapiIgnoreDriverChecks"
     ]
     ++ lib.optional enableVulkan "Vulkan";
 
@@ -200,6 +229,12 @@ stdenv.mkDerivation {
       --suffix PATH            : ${lib.makeBinPath [ xorg.xrandr ]}
       --add-flags "--enable-features=${lib.concatStringsSep "," enableFeatures}"
       --add-flags "--disable-features=${lib.concatStringsSep "," disableFeatures}"
+      ${lib.optionalString enableVideoAcceleration ''
+        --set LIBVA_DRIVER_NAME nvidia
+        --add-flags "--ignore-gpu-blocklist"
+        --add-flags "--use-gl=angle"
+        --add-flags "--use-angle=gl"
+      ''}
       ${lib.optionalString (commandLineArgs != "") "--add-flags ${lib.escapeShellArg commandLineArgs}"}
     )
   '';
