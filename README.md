@@ -89,6 +89,13 @@ Two files here are written *by* Noctalia's theme templates rather than by hand:
 
 ### What is not mine
 
+**This config started from [TimothyBear11/nixtalia](https://github.com/TimothyBear11/nixtalia)**,
+a starter for trying Noctalia on niri, Hyprland and Mango. Almost nothing of it survives —
+Mango, Plasma and Hyprland are gone, every module has been rewritten, and what `git blame`
+still matches is Nix syntax that cannot be written any other way: `{ pkgs, ... }:`, braces,
+and option names like `boot.loader.systemd-boot.enable`. The starter's own commits are not
+in this history, so this line is the attribution.
+
 `config/nvim/` is the [LazyVim starter](https://github.com/LazyVim/starter), vendored
 as-is and redistributed under the Apache-2.0 licence it carries in
 `config/nvim/LICENSE`.

@@ -134,10 +134,10 @@
   # Authentication itself has to be done by hand once — it is a browser flow:
   #   gh auth login
   #
-  # Worth knowing for this machine specifically: ~/nixos-config's `origin` still
-  # points at TimothyBear11/nixtalia, the upstream starter, so `git push` has
-  # never been possible. Once logged in, `gh repo create` can make your own and
-  # point origin at it.
+  # `origin` used to point at the upstream starter, so `git push` was never
+  # possible from here. Since 2026-08-07 it points at Daf3r/nixos-config and
+  # pushing works — that repo was made with `gh repo create --source=.`, which
+  # is the shortest path from a local repo to a published one.
   programs.gh = {
     enable = true;
 
