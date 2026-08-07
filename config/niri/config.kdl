@@ -231,21 +231,31 @@ binds {
     Mod+Shift+Slash { show-hotkey-overlay; }
 
     // --- Noctalia IPC. Identical verbs to the Hyprland session. ---
-    Mod+D     { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
+    //
+    // Mod+Space is the launcher here. The Hyprland session also opens it on Mod
+    // alone (a `bindr` release-bind), which niri cannot do: `Mod { ... }` is
+    // rejected as an invalid value and there is no on-release property, so a
+    // bind always needs a real key. Mod+D was dropped in both.
     Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
     Mod+F1    { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
     Mod+F2    { spawn "noctalia" "msg" "settings-toggle"; }
     Mod+F3    { spawn "noctalia" "msg" "panel-toggle" "clipboard"; }
     Mod+F4    { spawn "noctalia" "msg" "panel-toggle" "session"; }
     Mod+L     { spawn "noctalia" "msg" "session" "lock"; }
-    Mod+W     { spawn "wallpaper-rotate"; }
     Alt+Tab   { spawn "noctalia" "msg" "window-switcher"; }
 
     // --- Apps ---
     Mod+Return { spawn "kitty"; }
     Mod+E      { spawn "dolphin"; }
-    Mod+B      { spawn "brave-origin"; }
     Mod+K      { spawn "kate"; }
+
+    // Brave on both W and B. W is the one asked for; B predates it and costs
+    // nothing to keep.
+    Mod+W      { spawn "brave-origin"; }
+    Mod+B      { spawn "brave-origin"; }
+
+    // Wallpaper shuffle moved off Mod+W to make room for the browser.
+    Mod+Shift+W { spawn "wallpaper-rotate"; }
 
     // --- Window management ---
     Mod+Q repeat=false { close-window; }
@@ -329,6 +339,9 @@ binds {
     // Noctalia's capture writes the PNG to ~/Pictures/Screenshots *and* puts it
     // on the clipboard as image/png (shell.screenshot.copy_to_clipboard in
     // ../../noctalia.nix), so it can be pasted straight into Discord or Brave.
+    // Mod+Shift+S is the Windows / Snipping Tool muscle memory and is the one
+    // that will actually get used; Print is kept because it costs nothing.
+    Mod+Shift+S { spawn "noctalia" "msg" "screenshot-region"; }
     Print       { spawn "noctalia" "msg" "screenshot-region"; }
     Shift+Print { spawn "noctalia" "msg" "screenshot-fullscreen"; }
 
