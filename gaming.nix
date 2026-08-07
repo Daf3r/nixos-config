@@ -47,6 +47,30 @@
   # also drives the fan curve hard, and this laptop is used quietly most of the
   # time. Uncomment the custom hooks below to trade that noise for the frames;
   # they revert on exit, so it only applies while a game is running.
+  # Without this, gamemode activates and then silently changes nothing.
+  #
+  # Its own polkit policy ships every action denied — allow_any, allow_inactive
+  # and allow_active are all "no" — because upstream expects the administrator
+  # to decide who may use it. Nothing in nixpkgs fills that in, so the result
+  # was `gamemode is active` in one breath and this in the journal in the next:
+  #
+  #   pkexec: daf3r: Error executing command as another user: Not authorized
+  #   gamemoded: Failed to update split_lock_mitigate
+  #
+  # The four helpers are the whole privileged surface: the CPU governor, GPU
+  # clock states, CPU pinning, and a couple of kernel sysctls. Granting them to
+  # the `gamemode` group rather than to everyone means the authorisation is
+  # something you opt into by adding a user to that group — see
+  # ./configuration.nix.
+  security.polkit.extraConfig = ''
+    polkit.addRule(function(action, subject) {
+      if (action.id.indexOf("com.feralinteractive.GameMode.") == 0
+          && subject.isInGroup("gamemode")) {
+        return polkit.Result.YES;
+      }
+    });
+  '';
+
   programs.gamemode = {
     enable = true;
 

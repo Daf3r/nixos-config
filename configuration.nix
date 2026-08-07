@@ -125,7 +125,11 @@
     # docker: without it every docker command needs sudo, because the daemon
     # socket is root-owned. Note this is effectively root access to the host —
     # standard for a single-user development machine, worth knowing anyway.
-    extraGroups = [ "networkmanager" "wheel" "video" "i2c" "docker" ];
+    # gamemode: the polkit rule in ./gaming.nix grants the privileged helpers —
+    # CPU governor, GPU clocks — to this group rather than to every local user.
+    # programs.gamemode creates the group but deliberately leaves it empty, so
+    # without this line gamemode activates and is denied everything it tries.
+    extraGroups = [ "networkmanager" "wheel" "video" "i2c" "docker" "gamemode" ];
     shell = pkgs.fish;
   };
 
