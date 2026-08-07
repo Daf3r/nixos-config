@@ -1,5 +1,7 @@
 # daf3r's NixOS
 
+**English** · [Español](README.es.md)
+
 A single-machine NixOS flake: **[niri](https://github.com/YaLTeR/niri)** scrollable tiling,
 **[Noctalia v5](https://docs.noctalia.dev/v5/)** as the shell, on an ASUS ROG Strix G17 (G713PV)
 with an RTX 4060 and a 240 Hz panel.
