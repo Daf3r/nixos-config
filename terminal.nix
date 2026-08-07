@@ -10,10 +10,12 @@
   ];
 
   home.packages = with pkgs; [
-    btop
     fastfetch
-    gh
   ];
+
+  # btop and gh moved out of this list: both are declared through their
+  # home-manager modules in ./terminal/tools.nix, which installs the same
+  # binaries and additionally configures them.
 
   # kitty moved out of this list: it is installed by programs.kitty in
   # ./terminal/kitty.nix, which also manages kitty.conf. Listing the package

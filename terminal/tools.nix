@@ -109,6 +109,40 @@
     };
   };
 
+  # GitHub CLI. The binary was already installed as a bare package; declaring it
+  # here adds the parts that make it actually useful.
+  #
+  # The important one is gitCredentialHelper, on by default: after a single
+  # `gh auth login`, plain `git push` and `git clone` over HTTPS authenticate
+  # through gh's stored token. No personal access token to paste, no SSH key to
+  # generate, and nothing secret lands in this repo.
+  #
+  # Authentication itself has to be done by hand once — it is a browser flow:
+  #   gh auth login
+  #
+  # Worth knowing for this machine specifically: ~/nixos-config's `origin` still
+  # points at TimothyBear11/nixtalia, the upstream starter, so `git push` has
+  # never been possible. Once logged in, `gh repo create` can make your own and
+  # point origin at it.
+  programs.gh = {
+    enable = true;
+
+    settings = {
+      git_protocol = "https"; # pairs with the credential helper above
+      editor = "nvim";
+      prompt = "enabled";
+
+      aliases = {
+        pv = "pr view";
+        pc = "pr create";
+        prs = "pr list";
+        iss = "issue list";
+        # Clone into ~/GitHub rather than wherever the shell happens to be.
+        cl = "repo clone";
+      };
+    };
+  };
+
   # delta replaces git's diff output with syntax-highlighted, side-by-side
   # hunks. It applies to every diff git shows — `git diff`, `git show`,
   # `git log -p` — so it is a single setting that changes all of them.
