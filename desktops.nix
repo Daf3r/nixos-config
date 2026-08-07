@@ -1,5 +1,12 @@
 { config, pkgs, inputs, ... }:
 
+let
+  # embeddedTheme rewrites ConfigFile= in the theme's metadata.desktop, so the
+  # chosen variant is baked into the derivation. Change the string and rebuild.
+  sddmTheme = pkgs.sddm-astronaut.override {
+    embeddedTheme = "hyprland_kath";
+  };
+in
 {
   imports = [ inputs.noctalia.nixosModules.default ];
 
@@ -28,9 +35,35 @@
     extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
   };
 
+  # Creates the i2c group, loads i2c-dev and installs the udev rules that let
+  # members of that group reach /dev/i2c-*. ddcutil (already in the package list
+  # below) needs all three; users.users.daf3r joins the group in
+  # ./configuration.nix. Verify after a reboot with `ddcutil detect`.
+  hardware.i2c.enable = true;
+
   services.displayManager.sddm = {
     enable = true;
     wayland.enable = true;
+
+    # The stock SDDM greeter is the Qt default. sddm-astronaut bundles ten
+    # variants and `embeddedTheme` picks which one is compiled in — swap the
+    # string and rebuild to change it, no other edit needed. The full set is
+    # astronaut, black_hole, cyberpunk, hyprland_kath, jake_the_dog,
+    # japanese_aesthetic, pixel_sakura, pixel_sakura_static,
+    # post-apocalyptic_hacker and purple_leaves; previews are in the upstream
+    # README at github.com/Keyitdev/sddm-astronaut-theme.
+    #
+    # hyprland_kath, jake_the_dog and pixel_sakura use a video/gif background,
+    # which is why the package propagates qtmultimedia.
+    theme = "sddm-astronaut-theme";
+    package = pkgs.kdePackages.sddm; # Qt6 build; the theme is Qt6-only
+
+    # The theme itself goes in environment.systemPackages below, because SDDM
+    # discovers themes under /run/current-system/sw/share/sddm/themes.
+    # extraPackages is for Qt plugins and QML libraries only — here, the
+    # qtsvg / qtmultimedia / qtvirtualkeyboard the theme's QML imports at
+    # runtime, which the greeter cannot resolve on its own.
+    extraPackages = sddmTheme.propagatedBuildInputs;
   };
 
   # Keyboard layout for the login screen; Hyprland sets its own in hyprland.conf.
@@ -40,6 +73,8 @@
     # Noctalia is a native binary and screenshots/clipboard are built in, so no
     # grim/slurp/wl-clipboard needed. These two are the exceptions:
     playerctl # Noctalia has no media-control IPC verb; the media keys use this
-    ddcutil # only consumed if you set brightness.enable_ddcutil = true
+    ddcutil # now actually used: noctalia.nix sets brightness.enable_ddcutil
+
+    sddmTheme # must be here, not in sddm.extraPackages — see the note above
   ];
 }

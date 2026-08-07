@@ -55,7 +55,10 @@
   users.users.daf3r = {
     isNormalUser = true;
     description = "daf3r";
-    extraGroups = [ "networkmanager" "wheel" "video" ];
+    # i2c: required for ddcutil to talk DDC/CI to the external MSI over HDMI.
+    # Without it the brightness keys only ever move the laptop panel, because
+    # the internal panel has a sysfs backlight and an external monitor does not.
+    extraGroups = [ "networkmanager" "wheel" "video" "i2c" ];
     shell = pkgs.fish;
   };
 

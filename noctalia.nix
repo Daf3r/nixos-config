@@ -6,6 +6,13 @@ in
 {
   imports = [ inputs.noctalia.homeModules.default ];
 
+  # Custom palettes are read from ~/.config/noctalia/palettes/<name>.json, which
+  # theme.custom_palette below selects by bare name. The Noctalia home-manager
+  # module only owns config.toml in that directory, so dropping another file
+  # alongside it is safe.
+  xdg.configFile."noctalia/palettes/AyuBlueFixed.json".source =
+    ./config/noctalia/palettes/AyuBlueFixed.json;
+
   programs.noctalia = {
     enable = true;
 
@@ -53,12 +60,59 @@ in
 
       theme = {
         mode = "dark";
-        source = "wallpaper"; # regenerate the palette from the current wallpaper
-        wallpaper_scheme = "m3-content";
 
-        # Opt in to app theming with the ids from
-        # `noctalia theme --list-templates`, e.g. [ "kitty" "foot" "gtk" ].
-        templates.enable_builtin_templates = true;
+        # Was source = "wallpaper", which was dead config for two independent
+        # reasons. First, the Settings GUI had written source = "builtin" into
+        # ~/.local/state/noctalia/settings.toml, and the state file wins per
+        # setting. Second, and more fundamental: deriving the palette from the
+        # wallpaper requires Noctalia to know when the wallpaper changed, and
+        # its wallpaper module is disabled here because swww owns the
+        # background (see ./wallpaper.nix) — so nothing would ever re-trigger
+        # the regeneration even if this key had taken effect.
+        #
+        # A fixed palette is the honest answer while swww does the rotation:
+        # the templates below then render one stable set of colours instead of
+        # drifting every 900s. Change it with
+        #   noctalia msg color-scheme-set community "<name>"
+        # which writes the state file, then mirror it back here so the two
+        # agree. `noctalia msg color-scheme-get` prints what is actually live.
+        # Not source = "community" / "Ayu Blue": that palette ships its ANSI
+        # yellow and blue slots swapped in all four groups, which inverts every
+        # program that colours by ANSI name (ls directories, warnings, and
+        # config/starship.toml's bg:yellow + fg:blue). ./config/noctalia/
+        # palettes/AyuBlueFixed.json is the same palette with those two keys
+        # put back; its header documents the evidence. Drop the custom copy and
+        # go back to "community" once upstream fixes it.
+        source = "custom";
+        custom_palette = "AyuBlueFixed";
+
+        # App theming. These render the palette into each app's own config;
+        # `noctalia msg templates-apply` re-runs them on demand.
+        #
+        # Two of them write inside this repo rather than into ~/.config, since
+        # config/hypr is symlinked out of the store and starship.toml is read
+        # via $STARSHIP_CONFIG:
+        #   hyprland -> config/hypr/noctalia.conf  (gitignored, generated)
+        #   starship -> config/starship.toml       (block between markers)
+        # Both are idempotent and, with a fixed palette, only change when the
+        # palette does.
+        #
+        # Full list: `noctalia theme --list-templates`.
+        templates = {
+          enable_builtin_templates = true;
+          builtin_ids = [
+            "kitty" # colours only; the rest of kitty is ./terminal/kitty.nix
+            "starship" # defines [palettes.noctalia]; config/starship.toml already
+            # styles with blue/cyan/green/yellow, so it adopts the
+            # palette without rewriting a single module
+            "btop"
+            "gtk3"
+            "gtk4"
+            "qt" # writes qt5ct + qt6ct colour schemes
+            "hyprland" # window border colours; replaces the hardcoded
+            # cyan->green gradient in config/hypr/hyprland.conf
+          ];
+        };
       };
 
       # Off on purpose — v5.0.0 mis-sizes the wallpaper surface under fractional
@@ -94,6 +148,20 @@ in
           "control-center"
           "session"
         ];
+      };
+
+      # The internal panel has a sysfs backlight, the external MSI does not —
+      # so without DDC/CI the brightness keys silently only ever moved eDP-1.
+      # ddcutil talks to the monitor over the HDMI i2c bus; desktops.nix sets
+      # hardware.i2c.enable and configuration.nix puts daf3r in the i2c group,
+      # which are both required for this to do anything.
+      #
+      # sync_all_monitors stays false on purpose: the panel and the MSI have
+      # very different peak brightness, so one shared level suits neither.
+      # `noctalia msg brightness-set <connector> <value>` targets one output.
+      brightness = {
+        enable_ddcutil = true;
+        sync_all_monitors = false;
       };
 
       widget.clock.format = "{:%H:%M · %a %d %b}";

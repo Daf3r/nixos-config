@@ -3,15 +3,19 @@
 {
   imports = [
     ./terminal/fish.nix
+    ./terminal/kitty.nix
     ./terminal/nvim.nix
   ];
 
   home.packages = with pkgs; [
-    kitty # the terminal hyprland.conf binds to SUPER+Return
     btop
     fastfetch
     gh
   ];
+
+  # kitty moved out of this list: it is installed by programs.kitty in
+  # ./terminal/kitty.nix, which also manages kitty.conf. Listing the package
+  # here as well would be redundant.
 
   # Removed from the starter's list:
   #   foot, kdePackages.konsole -> two extra terminals nothing launches

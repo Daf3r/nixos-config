@@ -46,10 +46,12 @@ let
         [ -n "$img" ] || return 0
         swww img "$img" --transition-type fade --transition-duration 1.5
 
-        # Noctalia's theme.source = "wallpaper" derives the palette from the
-        # path it has on record. The drawing module is off, but wallpaper-set
-        # still updates that path, so m3-content theming keeps following the
-        # wallpaper.
+        # Keeps Noctalia's record of the current wallpaper in step with what
+        # swww is actually showing, so `noctalia msg wallpaper-get` and any
+        # surface that reports the path stay truthful. This used to also drive
+        # the palette via theme.source = "wallpaper"; that is no longer the
+        # case — noctalia.nix now pins a fixed palette, precisely because the
+        # disabled wallpaper module means Noctalia never observes a change.
         noctalia msg wallpaper-set "$img" >/dev/null 2>&1 || true
       }
 
