@@ -150,6 +150,10 @@ in
     filezilla
     spotify
 
+    # Nextcloud desktop sync client. Qt, so it picks up the platform theme and
+    # palette wired in ../qt.nix rather than falling back to Breeze.
+    nextcloud-client
+
     # Two Discord clients on purpose, because they are not interchangeable here.
     #
     # vesktop is the one Noctalia can theme: its `discord` community template
