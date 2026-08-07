@@ -30,11 +30,22 @@ in
   home.username = "daf3r";
   home.homeDirectory = "/home/daf3r";
   home.stateVersion = "25.05";
-  home.sessionPath = [ "$HOME/.npm-global/bin" ];
   programs.home-manager.enable = true;
 
+  # home.sessionPath used to carry $HOME/.npm-global/bin, for packages installed
+  # with `npm i -g`. The directory is empty and the approach is superseded:
+  # per-project toolchains now come from ./devshells through direnv, so a global
+  # npm prefix has nothing left to hold. One line to restore if that changes.
+
   home.packages = with pkgs; [
-    nodejs
+    # nodejs is deliberately absent here: ./terminal/nvim.nix already installs
+    # it — LazyVim needs it for the language servers that ship as npm packages —
+    # and declaring the same package in two files only makes it unclear which
+    # one is the reason it is present.
+    #
+    # gcc stays. Neovim's treesitter compiles its parsers with a C compiler at
+    # runtime, so this is not a development dependency that could move into a
+    # devshell.
     gcc
     (pkgs.writeShellApplication {
       name = "ns";
