@@ -190,23 +190,40 @@ in
         capsule = true;
         capsule_fill = "surface_variant";
         capsule_opacity = 1.0;
+        capsule_padding = 4;
         hover_highlight = true;
 
-        # Rebalanced. The system readouts moved from start to end so that
-        # `active_window` has room on the left, where the eye already goes for
-        # workspaces — it shows what actually has focus, which matters far more
-        # when the screen is split between an editor and Brave than knowing CPU
-        # load does.
+        # The binding constraint is eDP-1, not the 2560px panel it sounds like:
+        # at scale 1.6 the bar is 1600 logical pixels wide, and HDMI-A-1 gives
+        # 1920. The default margin_ends of 100 spends 200 of those 1600 on empty
+        # edges, which is what tipped the widget row over and made the sysmon
+        # readouts silently drop off. Widget spacing is trimmed for the same
+        # reason.
+        margin_ends = 16;
+        widget_spacing = 4;
+        padding = 10;
+
+        # `active_window` earns its space — what has focus matters more than
+        # load average when the screen is split between an editor and Brave —
+        # but an earlier revision added it while leaving thirteen widgets in
+        # `end`, and the row overflowed 1600 logical pixels. Noctalia drops the
+        # overflow silently instead of eliding it, and what disappeared was
+        # cpu/ram/temp: the first three of `end`, and the only three that had
+        # been visible before the change.
+        #
+        # So the readouts go back to `start`, which was never the crowded side,
+        # and `audio_visualizer` is dropped — it is the one widget here that
+        # conveys nothing, and it was costing the width they needed.
+        #
+        # Anything added below comes out of the same 1600px. Check it against a
+        # screenshot of eDP-1, not the 1920px MSI, or an overflow will be
+        # invisible from the wide monitor.
         #
         # No "wallpaper" widget: it drives the disabled wallpaper module, so its
         # panel would open onto nothing. `wallpaper-rotate` handles rotation.
-        start = [ "launcher" "workspaces" "active_window" ];
+        start = [ "launcher" "workspaces" "cpu" "ram" "temp" "active_window" ];
         center = [ "clock" "media" ];
         end = [
-          "cpu"
-          "ram"
-          "temp"
-          "audio_visualizer"
           "notifications"
           "tray"
           "network"
@@ -268,10 +285,19 @@ in
       # and scroll on hover rather than letting the widget push the workspaces
       # around every time the focus changes.
       widget.active_window = {
-        max_length = 300;
-        min_length = 100;
+        max_length = 190;
+        min_length = 60;
         title_scroll = "hover";
         icon_size = 16;
+      };
+
+      # Trimmed from the 220 default for the same 1600px budget as the bar
+      # layout above. Both of these are variable-width, so they are where the
+      # slack has to come from.
+      widget.media = {
+        max_length = 150;
+        min_length = 60;
+        title_scroll = "hover";
       };
 
       # OSD sits opposite the bar. At top_center it shares an edge with a top
