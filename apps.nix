@@ -126,8 +126,34 @@ in
 
   programs.mangohud = {
     enable = true;
+
+    # Not `full`. That switch turns on every readout MangoHud has — VRAM, RAM,
+    # swap, engine version, resolution, battery, per-core CPU — which is a lot
+    # of text to sit on top of a shooter, and none of it answers the question
+    # you actually have while playing.
+    #
+    # What is left is the set that does: the frametime graph is the one to
+    # watch. A flat line at a low framerate means the machine is simply
+    # working; a jagged one at a high average means stutter, and those two feel
+    # very different while pointing at completely different causes.
     settings = {
-      full = true;
+      fps = true;
+      frametime = true;
+      frame_timing = true; # the graph itself
+
+      gpu_stats = true;
+      gpu_temp = true;
+      cpu_stats = true;
+      cpu_temp = true;
+
+      # Top left, out of the way of the crosshair and the radar.
+      position = "top-left";
+      font_size = 20;
+      background_alpha = "0.35";
+      round_corners = 8;
+
+      # Toggle it off mid-game without restarting.
+      toggle_hud = "Shift_R+F12";
 
       # The starter capped this at 144, which predates knowing what panel this
       # is: eDP-1 runs at 240 Hz, so that threw away 96 Hz of headroom in a game
