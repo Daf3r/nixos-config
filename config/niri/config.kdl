@@ -181,15 +181,39 @@ animations {
     slowdown 1.0
 }
 
-// CS2 gets a plain floating fullscreen window and tearing is left to gamescope.
-// niri is a non-stacking compositor, and upstream is explicit that many games
-// misbehave under one: the cursor escapes the window on multi-monitor setups,
-// resolution comes out wrong, or input grabs fail. The recommended fix is to
-// wrap the game in gamescope, which is already installed (../../gaming.nix).
-// In Steam, set CS2's launch options to:
-//   gamescope -f -W 2560 -H 1440 -r 240 -- gamemoderun %command%
+// CS2. niri is a non-stacking compositor and upstream is explicit that games
+// misbehave under one: the cursor escapes the window on multi-monitor setups
+// (which this is), the resolution comes out wrong, or the input grab fails. The
+// recommended fix is to wrap the game in gamescope — already installed, see
+// ../../gaming.nix — so it renders into its own nested compositor and niri only
+// ever sees one well-behaved fullscreen surface.
+//
+// Steam launch options, on the laptop panel:
+//   gamescope -f -W 2560 -H 1440 -r 240 --force-grab-cursor -e -- gamemoderun %command%
+//
+// On the MSI instead, the numbers change:  -W 1920 -H 1080 -r 100
+//
+//   -f                  fullscreen
+//   -W -H               *physical* pixels, not the 1600x900 logical size the
+//                       panel reports at scale 1.6
+//   -r                  refresh cap; matches the mode set in `output` above
+//   --force-grab-cursor keeps the pointer inside the game across two monitors,
+//                       which is the failure most likely to show up here
+//   -e                  Steam integration, so the overlay works
+//
+// If something is wrong, the order to check: no gamescope at all first (CS2 has
+// a native Wayland path and may simply work), then gamescope without -r, then
+// without --force-grab-cursor. Hyprland needs none of this — its config has a
+// tearing windowrule instead — so a bad session is always one logout away.
 window-rule {
     match app-id=r#"^cs2$"#
+    open-fullscreen true
+    variable-refresh-rate true
+}
+
+// gamescope itself, when CS2 is wrapped in it.
+window-rule {
+    match app-id=r#"^gamescope$"#
     open-fullscreen true
     variable-refresh-rate true
 }
@@ -253,6 +277,11 @@ binds {
     // nothing to keep.
     Mod+W      { spawn "brave-origin"; }
     Mod+B      { spawn "brave-origin"; }
+
+    // The official client, not vesktop — it is the one in daily use. Note that
+    // only vesktop takes Noctalia's palette (see the discord template note in
+    // ../../noctalia.nix), so this is the window that stays its own colour.
+    Mod+D      { spawn "discord"; }
 
     // Wallpaper shuffle moved off Mod+W to make room for the browser.
     Mod+Shift+W { spawn "wallpaper-rotate"; }
