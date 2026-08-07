@@ -283,6 +283,122 @@ wrong package manager in the wrong repo and rewrite a lockfile.
 
 ---
 
+## Installing this from scratch
+
+Two audiences here: someone rebuilding this exact laptop, and someone who wants the config
+on different hardware. The steps are the same; the difference is how much of it applies,
+which is [spelled out below](#what-does-not-travel).
+
+### 0. Before reinstalling — try the boot menu first
+
+If this machine still boots at all, a broken rebuild is almost never worth reinstalling
+over. systemd-boot lists **every previous generation** at startup; pick the last one that
+worked and you are back, with the broken generation still on disk to inspect.
+
+```fish
+nixos-rebuild list-generations       # what is available
+sudo nixos-rebuild switch --rollback # step back one, from a working session
+```
+
+Only what follows is for a genuinely dead disk or a new machine.
+
+### 1. Install NixOS normally
+
+Boot the official installer and partition however you like — this config does not depend on
+the layout. For reference, this machine uses:
+
+| Mount | Filesystem | Notes |
+|---|---|---|
+| `/boot` | vfat, 1 GB | EFI system partition |
+| `/` | btrfs | top-level subvolume (`subvolid=5`) |
+| `/home` | btrfs | `subvol=home`, same partition |
+| `/nix` | btrfs | `subvol=nix`, same partition |
+
+No swap partition — `configuration.nix` enables zram instead. UEFI and systemd-boot, so
+Secure Boot must be off.
+
+> **Set the hostname to `daf3r-starter`.** The flake output is named after
+> `networking.hostName`, so a different hostname means `--flake ~/nixos-config` cannot find
+> the configuration. On other hardware, rename it in both `flake.nix` and
+> `configuration.nix` instead.
+
+### 2. Clone the repo
+
+```fish
+nix-shell -p git --run 'git clone https://github.com/Daf3r/nixos-config ~/nixos-config'
+```
+
+It has to be at `~/nixos-config`. Several paths are written out in full — the out-of-store
+symlinks in `home.nix`, the devshell references in each project's `.envrc` — and none of
+them resolve from anywhere else.
+
+### 3. Generate the hardware config
+
+> **This is the step that catches people.** `hardware-configuration.nix` is **gitignored**,
+> because it holds the filesystem UUIDs of one specific disk. It is not in the clone, and
+> `configuration.nix` imports it, so the build fails until it exists.
+
+The installer already wrote a correct one for your partitions. Copy it in:
+
+```fish
+sudo cp /etc/nixos/hardware-configuration.nix ~/nixos-config/
+sudo chown $USER ~/nixos-config/hardware-configuration.nix
+```
+
+If you are doing this from a live ISO before the first boot, it is at
+`/mnt/etc/nixos/hardware-configuration.nix`. To regenerate it later — after adding a disk,
+say — `sudo nixos-generate-config --show-hardware-config` prints a fresh one from the
+currently mounted filesystems.
+
+### 4. Build
+
+```fish
+sudo nixos-rebuild switch --flake ~/nixos-config
+```
+
+First build pulls a lot. Noctalia's binary cache is declared in `configuration.nix`, so the
+shell itself comes down prebuilt rather than compiling.
+
+### 5. Log out — not optional
+
+`daf3r` belongs to `networkmanager`, `wheel`, `video`, `i2c`, `docker` and `gamemode`, and
+**group membership is inherited when a session starts**. Until a fresh login, three things
+are quietly broken:
+
+| Group | What stays broken |
+|---|---|
+| `gamemode` | Every privileged helper is refused by polkit. `gamemoded -s` still says "active" |
+| `i2c` | Brightness keys only move the laptop panel; `ddcutil detect` finds nothing |
+| `docker` | Every command needs sudo |
+
+Check with `groups` after logging back in, then `gamemoded -t` for the honest gamemode test.
+
+### 6. What the repo cannot give you
+
+- **Wallpapers.** Not in the repo, [on purpose](#what-is-not-mine). Drop images into
+  `~/Pictures/Wallpapers` — `wallpaper.nix` creates the directory, and `wallpaper-rotate`
+  picks them up with no rebuild. Same for `~/Pictures/Fastfetch`.
+- **Noctalia's app theming.** Run `noctalia msg templates-apply` once so the templates
+  render the palette into kitty, GTK, Qt and niri. They **fail silently** when they cannot
+  write — check that each target file actually changed rather than trusting the exit code.
+- **Secrets.** Nothing in here is encrypted because nothing in here is a secret. SSH keys,
+  the WireGuard tunnel and the GNOME keyring are all outside this repo and restored by hand.
+
+### What does not travel
+
+Roughly half of this is this-laptop-specific and will need editing on other hardware:
+
+| File | Why it is specific |
+|---|---|
+| `config/niri/config.kdl` | `output` blocks match by EDID strings from *these* two monitors |
+| `gamemode.nix` | The panel is named by the same EDID string |
+| `gpu.nix` | Assumes an NVIDIA dGPU driving every connector, MUX in discrete mode |
+| `asus.nix` | asusd — ROG hardware only |
+| `hardware-configuration.nix` | Regenerated per machine, as above |
+| `devshells/` | Toolchains for two specific projects |
+
+Everything else — the shell, the terminal, the theming, the app set — is portable.
+
 ## Maintenance
 
 **Bumping Brave Origin.** Not in nixpkgs — it ships only through Brave's own apt/rpm
