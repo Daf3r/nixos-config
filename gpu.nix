@@ -4,8 +4,13 @@
 # iGPU (0000:09:00.0).
 #
 # PRIME offload does NOT apply to this machine. Checked /sys/class/drm: the
-# internal panel (eDP-2) and HDMI-A-1 are both wired to the NVIDIA card, and
-# every connector on the AMD iGPU reads "disconnected". The display MUX is in
+# internal panel (card1-eDP-1) and card1-HDMI-A-1 are both wired to the NVIDIA
+# card, and every connector on the AMD iGPU reads "disconnected".
+#
+# Card numbers matter when reading that directory, because both GPUs expose an
+# eDP connector: card1-eDP-1 is the panel, and card2-eDP-2 is the iGPU's unused
+# one. An earlier version of this comment named eDP-2 as the panel, which sent
+# you looking at the one connector that is not attached to anything. The display MUX is in
 # discrete mode, so NVIDIA has to be the primary GPU — offload would leave the
 # desktop rendering on a GPU that drives no outputs.
 #

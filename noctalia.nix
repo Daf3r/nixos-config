@@ -94,17 +94,21 @@ in
         #
         # A fixed palette is the honest answer while swww does the rotation:
         # the templates below then render one stable set of colours instead of
-        # drifting every 900s. Change it with
-        #   noctalia msg color-scheme-set community "<name>"
-        # which writes the state file, then mirror it back here so the two
+        # drifting every 900s.
+        #
+        # It is "custom" rather than the community "Ayu Blue" it is copied from
+        # because that palette ships its ANSI yellow and blue slots swapped in
+        # all four groups, inverting every program that colours by ANSI name —
+        # ls directories, warnings, and config/starship.toml's bg:yellow and
+        # fg:blue among them. ./config/noctalia/palettes/AyuBlueFixed.json is
+        # the same palette with those two keys put back, and its header records
+        # the evidence. Once upstream fixes it, this can go back to
+        # source = "community" / community_palette = "Ayu Blue" and the local
+        # copy can be deleted.
+        #
+        # To change palette: `noctalia msg color-scheme-set <source> <name>`
+        # writes the state file, then mirror the choice back here so the two
         # agree. `noctalia msg color-scheme-get` prints what is actually live.
-        # Not source = "community" / "Ayu Blue": that palette ships its ANSI
-        # yellow and blue slots swapped in all four groups, which inverts every
-        # program that colours by ANSI name (ls directories, warnings, and
-        # config/starship.toml's bg:yellow + fg:blue). ./config/noctalia/
-        # palettes/AyuBlueFixed.json is the same palette with those two keys
-        # put back; its header documents the evidence. Drop the custom copy and
-        # go back to "community" once upstream fixes it.
         source = "custom";
         custom_palette = "AyuBlueFixed";
 

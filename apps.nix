@@ -22,8 +22,9 @@
   ];
 
   # Removed from the starter: pcmanfm (second file manager nothing launches),
-  # spicetify-cli (only useful with a Spotify theming template configured;
-  # v5 templates are opt-in via theme.templates.builtin_ids), vivaldi and
+  # spicetify-cli (only useful with the Spotify theming template enabled, and
+  # that one is a *community* template, so it would go in
+  # theme.templates.community_ids — not builtin_ids), vivaldi and
   # firefox (you asked for brave-origin), pywalfox-native (drove v4's pywalfox
   # template, which no longer exists in v5).
 }

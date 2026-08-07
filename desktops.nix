@@ -38,7 +38,9 @@ in
   # Creates the i2c group, loads i2c-dev and installs the udev rules that let
   # members of that group reach /dev/i2c-*. ddcutil (already in the package list
   # below) needs all three; users.users.daf3r joins the group in
-  # ./configuration.nix. Verify after a reboot with `ddcutil detect`.
+  # ./configuration.nix. Verify with `ddcutil detect`, which should name the MSI
+  # MP243X on an /dev/i2c-* bus. No reboot is needed: a switch restarts
+  # systemd-udevd, which is enough for the new rules to take effect.
   hardware.i2c.enable = true;
 
   services.displayManager.sddm = {
