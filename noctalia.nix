@@ -232,9 +232,14 @@ in
         shadow = true;
 
         # Groups adjacent widgets into rounded pills instead of floating them
-        # on the bar background. capsule_group is left at its default: it takes
-        # explicit groupings, and the automatic behaviour is what reads well
-        # with the three sections below.
+        # on the bar background.
+        #
+        # On its own this draws one pill per widget, which is what made the bar
+        # feel busy: fifteen widgets meant fifteen containers in a row, and the
+        # borders were doing as much of the visual noise as the contents. The
+        # capsule_group blocks below collapse related widgets into shared
+        # pills — six containers instead of fifteen — without changing what any
+        # of them shows.
         capsule = true;
         capsule_fill = "surface_variant";
         capsule_opacity = 1.0;
@@ -251,36 +256,68 @@ in
         widget_spacing = 4;
         padding = 10;
 
-        # `active_window` earns its space — what has focus matters more than
-        # load average when the screen is split between an editor and Brave —
-        # but an earlier revision added it while leaving thirteen widgets in
-        # `end`, and the row overflowed 1600 logical pixels. Noctalia drops the
-        # overflow silently instead of eliding it, and what disappeared was
-        # cpu/ram/temp: the first three of `end`, and the only three that had
-        # been visible before the change.
+        # Trimmed on 2026-08-07 from fifteen widgets to twelve. Each of the five
+        # removed was carrying no information, checked against the machine
+        # rather than guessed at:
         #
-        # So the readouts go back to `start`, which was never the crowded side,
-        # and `audio_visualizer` is dropped — it is the one widget here that
-        # conveys nothing, and it was costing the width they needed.
+        #   launcher    the fourth way to open it. A bare SUPER tap (keyd, see
+        #               ../keyboard.nix), SUPER+Space and the bottom-left hot
+        #               corner were already three.
+        #   cpu         reads 1% at rest and is the least actionable number
+        #               here. `temp` stays: it turns red past
+        #               system.monitor.cpu_temp_activity_threshold and is the
+        #               one readout that has ever prompted an action on this
+        #               laptop.
+        #   ram         showed "7.1 GiB" absolute against 30 GiB installed, so
+        #               reading it meant doing the division. Noctalia has no
+        #               percentage mode for it.
+        #   bluetooth   powered on with zero paired devices — a permanently
+        #               dead icon. Add it back if headphones ever arrive.
+        #   clipboard   SUPER+F3, and it is also a Control Center tab.
         #
-        # Anything added below comes out of the same 1600px. Check it against a
-        # screenshot of eDP-1, not the 1920px MSI, or an overflow will be
-        # invisible from the wide monitor.
+        # `battery` stays despite reading 100% on AC all day: this is a laptop,
+        # and the widget's job is the 20% warning, which cannot fire from a
+        # panel that is not on screen.
+        #
+        # The old warning still holds. At scale 1.6 eDP-1 gives the bar 1600
+        # logical pixels, HDMI-A-1 gives 1920, and Noctalia drops overflowing
+        # widgets *silently* rather than eliding them. Anything added here comes
+        # out of that 1600 — check it against a screenshot of eDP-1, never the
+        # wide monitor, or the overflow is invisible from where you are looking.
         #
         # No "wallpaper" widget: it drives the disabled wallpaper module, so its
         # panel would open onto nothing. `wallpaper-rotate` handles rotation.
-        start = [ "launcher" "workspaces" "cpu" "ram" "temp" "active_window" ];
-        center = [ "clock" "media" ];
-        end = [
-          "notifications"
-          "tray"
-          "network"
-          "bluetooth"
-          "volume"
-          "battery"
-          "clipboard"
-          "control-center"
-          "session"
+        start = [ "workspaces" "active_window" ];
+        center = [ "group:now" ];
+        end = [ "group:alerts" "group:status" "group:system" ];
+
+        # Six pills instead of fifteen. The grouping is by what the widgets are
+        # *for*, so each pill reads as one thing:
+        #
+        #   now      what is happening   — the time and what is playing
+        #   alerts   what wants you      — unread notifications and the tray
+        #   status   how the machine is  — heat, link, sound, charge
+        #   system   what you can do     — Control Center and the session menu
+        #
+        # workspaces and active_window stay ungrouped on the left: they are the
+        # two things scanned most often, and a shared pill would slow that down.
+        capsule_group = [
+          {
+            id = "now";
+            members = [ "clock" "media" ];
+          }
+          {
+            id = "alerts";
+            members = [ "notifications" "tray" ];
+          }
+          {
+            id = "status";
+            members = [ "temp" "network" "volume" "battery" ];
+          }
+          {
+            id = "system";
+            members = [ "control-center" "session" ];
+          }
         ];
       };
 
