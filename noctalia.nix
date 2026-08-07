@@ -1,4 +1,4 @@
-{ config, pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, ... }:
 
 let
   wallpapers = "${config.home.homeDirectory}/nixos-config/Pictures/Wallpapers";
@@ -18,6 +18,22 @@ in
   # alongside it is safe.
   xdg.configFile."noctalia/palettes/AyuBlueFixed.json".source =
     ./config/noctalia/palettes/AyuBlueFixed.json;
+
+  # The discord and heroiclauncher community templates write straight to
+  # $XDG_CONFIG_HOME/<app>/themes/ and do not create the directory first, so on
+  # a machine where neither app has been launched yet templates-apply reports
+  # ok and silently writes nothing. Both apps are installed (vesktop in
+  # ./apps.nix, heroic in ./gaming.nix), so seed the two directories and the
+  # templates land on the first run instead of the first launch.
+  #
+  # A plain mkdir rather than a home.file entry: the .keep marker that would
+  # otherwise be needed to materialise an empty directory would sit in the
+  # themes list of both apps.
+  home.activation.seedAppThemeDirs =
+    lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      run mkdir -p "${config.xdg.configHome}/vesktop/themes" \
+                   "${config.xdg.configHome}/heroic/themes"
+    '';
 
   programs.noctalia = {
     enable = true;
@@ -104,6 +120,28 @@ in
         # palette does.
         #
         # Full list: `noctalia theme --list-templates`.
+        # Community templates are cached under
+        # ~/.local/state/noctalia/community-templates/. Each folder arrives
+        # holding only template.toml; catalog.json lists the rest of the files
+        # (the CSS/JSONC inputs and apply.sh) with md5s, and they are fetched
+        # lazily. Listing an id here is what triggers that fetch.
+        #
+        # Only templates whose app is actually installed are enabled — the rest
+        # would render colours into a config nothing reads. Deliberately left
+        # out, with the reason, so this does not get re-litigated:
+        #
+        #   neovim         writes $XDG_CONFIG_HOME/nvim/lua/matugen.lua, and
+        #                  ~/.config/nvim resolves out of the store into
+        #                  config/nvim in this repo — so it would commit noise
+        #                  on every palette change, and LazyVim would still
+        #                  need a require() before it did anything.
+        #   papirus-icons  recolours the icon theme in place; Papirus is served
+        #                  read-only from the Nix store, so it cannot work here.
+        #   steam          targets steamui/skins/Material-Theme/, which is only
+        #                  present if that skin was installed inside Steam.
+        #   spicetify      would need spicetify-cli back in ./apps.nix.
+        #   zen-browser    Zen is installed but brave-origin is the browser
+        #                  hyprland.conf actually launches.
         templates = {
           enable_builtin_templates = true;
           builtin_ids = [
@@ -117,6 +155,13 @@ in
             "qt" # writes qt5ct + qt6ct colour schemes
             "hyprland" # window border colours; replaces the hardcoded
             # cyan->green gradient in config/hypr/hyprland.conf
+          ];
+
+          enable_community_templates = true;
+          community_ids = [
+            "fastfetch" # runs on every fish start, so the most visible of the three
+            "discord" # -> ~/.config/vesktop/themes/, pick it in Vesktop settings
+            "heroiclauncher" # -> ~/.config/heroic/themes/, pick it in Heroic
           ];
         };
       };

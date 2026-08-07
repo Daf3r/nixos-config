@@ -2,6 +2,7 @@
 
 {
   imports = [
+    ./terminal/fastfetch.nix
     ./terminal/fish.nix
     ./terminal/kitty.nix
     ./terminal/nvim.nix
