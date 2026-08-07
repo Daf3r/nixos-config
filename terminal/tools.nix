@@ -105,6 +105,15 @@
   programs.git = {
     enable = true;
     settings = {
+      # WATCH OUT: home-manager writes this to ~/.config/git/config, and git
+      # ignores that file entirely when ~/.gitconfig exists — it is not a merge,
+      # the older path simply wins. A stray ~/.gitconfig left by the NixOS
+      # install silently overrode this block for two days, so `git config
+      # --global user.email` kept answering the old address after a rebuild that
+      # had clearly succeeded.
+      #
+      # `git config --global --show-origin user.email` names the file that is
+      # actually winning. If it is not the store symlink, delete ~/.gitconfig.
       user = {
         name = "Daf3r";
         # GitHub's noreply address rather than the real one. Every commit
