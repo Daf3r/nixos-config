@@ -181,30 +181,30 @@ animations {
     slowdown 1.0
 }
 
-// CS2. niri is a non-stacking compositor and upstream is explicit that games
-// misbehave under one: the cursor escapes the window on multi-monitor setups
-// (which this is), the resolution comes out wrong, or the input grab fails. The
-// recommended fix is to wrap the game in gamescope — already installed, see
-// ../../gaming.nix — so it renders into its own nested compositor and niri only
-// ever sees one well-behaved fullscreen surface.
+// CS2. Launch options: EMPTY. It runs on its own Wayland path and works.
 //
-// Steam launch options, on the laptop panel:
-//   gamescope -f -W 2560 -H 1440 -r 240 --force-grab-cursor -e -- gamemoderun %command%
+// This is worth writing down because the obvious advice is wrong here. niri is
+// non-stacking, and upstream warns that games misbehave under one — cursor
+// escaping on multi-monitor setups, wrong resolution, failed input grabs — with
+// gamescope as the recommended wrapper. Tried that first and it broke the game:
+// CS2 initialised Vulkan and then never presented a window.
 //
-// On the MSI instead, the numbers change:  -W 1920 -H 1080 -r 100
+// The cause is gamescope on NVIDIA, not niri and not CS2:
 //
-//   -f                  fullscreen
-//   -W -H               *physical* pixels, not the 1600x900 logical size the
-//                       panel reports at scale 1.6
-//   -r                  refresh cap; matches the mode set in `output` above
-//   --force-grab-cursor keeps the pointer inside the game across two monitors,
-//                       which is the failure most likely to show up here
-//   -e                  Steam integration, so the overlay works
+//   vulkan: vkGetPhysicalDeviceFormatProperties2 returned zero modifiers
+//           for DRM format 0x38344241
 //
-// If something is wrong, the order to check: no gamescope at all first (CS2 has
-// a native Wayland path and may simply work), then gamescope without -r, then
-// without --force-grab-cursor. Hyprland needs none of this — its config has a
-// tearing windowrule instead — so a bad session is always one logout away.
+// The driver exposes no DRM format modifiers for the formats gamescope wants to
+// allocate its output buffers in, so it renders and has nowhere to put the
+// result. Reproducible with `gamescope -- sleep 3` — nothing to do with Steam.
+//
+// If gamescope is ever needed again, `--backend sdl` gets past it: with that
+// backend gamescope selects the 4060 and reports modifier support. Verified,
+// though not needed so far. Resolution and stretching go in CS2's own video
+// settings, not in gamescope.
+//
+// Hyprland remains one logout away and needs none of this — its config carries
+// a tearing windowrule instead.
 window-rule {
     match app-id=r#"^cs2$"#
     open-fullscreen true

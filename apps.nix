@@ -148,7 +148,6 @@ in
     kdePackages.dolphin # SUPER+E in hyprland.conf
     kdePackages.kate # SUPER+K
     filezilla
-    spotify
 
     # Nextcloud desktop sync client. Qt, so it picks up the platform theme and
     # palette wired in ../qt.nix rather than falling back to Breeze.
