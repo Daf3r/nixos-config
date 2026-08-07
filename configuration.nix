@@ -8,6 +8,7 @@
     ./asus.nix
     ./gaming.nix
     ./fontsAndNeeds.nix
+    ./keyboard.nix
   ];
 
   # No swap device exists on this machine and btrfs makes swapfiles awkward.

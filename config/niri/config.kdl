@@ -247,6 +247,17 @@ window-rule {
     draw-border-with-background false
 }
 
+// Floating windows are dialogs, and a dialog's content decides its size —
+// nothing is going to resize it to fit. clip-to-geometry from the rule above
+// cuts whatever does not fit instead of letting the window grow, which is how
+// the Steam sign-in dialog lost the QR code off its bottom edge.
+//
+// The rounded corners stay; only the clipping is lifted.
+window-rule {
+    match is-floating=true
+    clip-to-geometry false
+}
+
 binds {
     // "Mod" is Super on a TTY session, which is what SDDM starts.
     // Bindings mirror config/hypr/hyprland.conf wherever the concept exists in
@@ -256,10 +267,12 @@ binds {
 
     // --- Noctalia IPC. Identical verbs to the Hyprland session. ---
     //
-    // Mod+Space is the launcher here. The Hyprland session also opens it on Mod
-    // alone (a `bindr` release-bind), which niri cannot do: `Mod { ... }` is
-    // rejected as an invalid value and there is no on-release property, so a
-    // bind always needs a real key. Mod+D was dropped in both.
+    // A bare SUPER tap opens the launcher. niri cannot bind a modifier on its
+    // own — `Mod { ... }` is rejected outright — so keyd turns a tap-and-release
+    // of left Super into F13 before niri ever sees it, while holding it still
+    // behaves as the Meta modifier for every binding below. See
+    // ../../keyboard.nix. Mod+Space stays as the explicit alternative.
+    F13       { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
     Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
     Mod+F1    { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
     Mod+F2    { spawn "noctalia" "msg" "settings-toggle"; }
