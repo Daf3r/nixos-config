@@ -2,18 +2,14 @@
 
 # Makes a bare SUPER tap open the app launcher.
 #
-# Neither compositor can do this properly on its own. niri rejects a
-# modifier-only bind outright — `Mod { ... }` is an invalid value and there is no
-# on-release property — so there is nothing to configure there at all. Hyprland
-# has `bindr`, which fires on release, but it fires whether or not another key
-# was pressed in between, so SUPER+E would open Dolphin *and* the launcher.
+# niri cannot do this on its own: it rejects a modifier-only bind outright —
+# `Mod { ... }` is an invalid value and there is no on-release property — so
+# there is nothing to configure there at all.
 #
-# keyd solves it a layer lower, at evdev, before either compositor sees the key.
+# keyd solves it a layer lower, at evdev, before the compositor sees the key.
 # `overload(meta, ...)` means: hold it and it is the Meta modifier exactly as
 # before, so every SUPER+<key> binding keeps working; tap and release it alone
-# and it emits the chord instead. Both configs bind that chord to the launcher,
-# and the behaviour is identical in either session — which the compositor-side
-# approaches could not manage.
+# and it emits the chord instead. config.kdl binds that chord to the launcher.
 #
 # The chord is Ctrl+Alt+Shift+P, and the reason it is not simply F13 matters.
 # F13 was the obvious choice — a real Linux keycode (183) no physical keyboard

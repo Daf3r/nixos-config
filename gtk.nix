@@ -6,8 +6,8 @@
 # settings.ini survived that migration and still pointed at `breeze_cursors`
 # and the `breeze` icon theme, neither of which is installed any more — so GTK
 # apps were asking for a cursor and icon set that do not exist and silently
-# falling back. Nothing declared a cursor theme at all, which is why Hyprland
-# was drawing its built-in default arrow.
+# falling back. Nothing declared a cursor theme at all, which is why the
+# compositor was drawing its built-in default arrow.
 #
 # Division of labour with Noctalia, same shape as ./terminal/kitty.nix:
 #   Noctalia owns  gtk-{3.0,4.0}/noctalia.css  (the generated palette)
@@ -30,11 +30,17 @@
 # returns without touching the file. Same trick as the `include` line in
 # ./terminal/kitty.nix. The import string has to keep matching that test.
 {
-  # Sets XCURSOR_THEME/SIZE for X11 and gtk.cursorTheme for GTK. It also sets
-  # HYPRCURSOR_THEME/SIZE, but only in home.sessionVariables — which Hyprland
-  # does not see, because SDDM execs it directly rather than through a login
-  # shell. config/hypr/hyprland.conf therefore sets the same four variables
-  # itself; keep the values here and there in step.
+  # Sets XCURSOR_THEME/SIZE for X11 and gtk.cursorTheme for GTK. Those land in
+  # home.sessionVariables, which SDDM does not source — it execs the session
+  # directly rather than through a login shell — so config/niri/config.kdl
+  # repeats XCURSOR_THEME/SIZE in its own `environment` block; keep the theme
+  # and size here and there in step.
+  #
+  # hyprcursor.enable was dropped with Hyprland. It was the better format on the
+  # 1.6-scaled panel — vector, so it stays sharp where XCursor's fixed-size
+  # bitmaps get resampled soft — but niri cannot read it: `strings` over the
+  # niri binary finds 34 xcursor references and zero for hyprcursor. Leaving it
+  # on would have generated a cursor theme nothing loads.
   home.pointerCursor = {
     package = pkgs.bibata-cursors;
     name = "Bibata-Modern-Ice";
@@ -42,11 +48,6 @@
 
     gtk.enable = true;
     x11.enable = true;
-
-    # eDP-1 runs at scale 1.6. XCursor ships fixed-size bitmaps, so at a
-    # fractional scale it gets resampled and comes out soft; hyprcursor is
-    # vector and stays sharp. This is the reason to prefer it here.
-    hyprcursor.enable = true;
   };
 
   gtk = {

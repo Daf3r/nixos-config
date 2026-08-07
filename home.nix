@@ -12,7 +12,6 @@ let
   # ever produced a dangling symlink.
   configs = {
     nvim = "nvim";
-    hypr = "hypr";
     niri = "niri";
   };
 in

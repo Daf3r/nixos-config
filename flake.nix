@@ -1,5 +1,5 @@
 {
-  description = "daf3r's NixOS — Hyprland + Noctalia v5";
+  description = "daf3r's NixOS — niri + Noctalia v5";
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-unstable";

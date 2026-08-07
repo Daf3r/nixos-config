@@ -1,8 +1,9 @@
-// niri — scrollable-tiling Wayland compositor, installed alongside Hyprland
-// rather than replacing it. Pick either from SDDM; Hyprland stays the known-good
-// session, so nothing here can strand you.
+// niri — scrollable-tiling Wayland compositor, and the only session on this
+// machine since 2026-08-07. It replaced Hyprland, which ran alongside it for a
+// while as the fallback and was removed once niri had proven itself as the
+// daily driver.
 //
-// The paradigm is genuinely different, not a nicer Hyprland. Windows live in one
+// The paradigm is genuinely different. Windows live in one
 // infinite horizontal strip per workspace and you scroll along it instead of
 // splitting a fixed screen. Nothing ever resizes to make room for a new window.
 // That maps well onto editor-plus-browser, which is most of the work on this
@@ -22,8 +23,8 @@ input {
 
     touchpad {
         tap
-        // Matches input.touchpad.natural_scroll = false in hyprland.conf.
-        // Omitting natural-scroll disables it, which is the same thing.
+        // Natural scrolling stays off. Omitting natural-scroll disables it,
+        // so there is deliberately no line for it here.
         dwt
     }
 
@@ -32,9 +33,7 @@ input {
     focus-follows-mouse max-scroll-amount="0%"
 }
 
-// Same physical layout as config/hypr/hyprland.conf: laptop panel on the LEFT,
-// external MSI on the RIGHT. The numbers must agree with that file, since both
-// compositors drive the same two screens.
+// Physical layout: laptop panel on the LEFT, external MSI on the RIGHT.
 //
 // eDP-1 at scale 1.6 gives a 1600x900 logical size — 2560/1.6 and 1440/1.6 are
 // both integers, so no fractional-scaling blur. That is also why HDMI-A-1 starts
@@ -46,9 +45,8 @@ input {
 // and ran the 240 Hz panel at 60. Worse than cosmetic: it then throttled vblanks
 // to match the 60 Hz it believed in, while the panel was scanning out at ~129 Hz.
 //
-// Get the exact strings from `niri msg outputs` inside a niri session. Hyprland
-// is more forgiving here and takes the rounded numbers in hyprland.conf, which
-// is why they differ between the two files for the same hardware.
+// Get the exact strings from `niri msg outputs` inside a niri session — the
+// rounded numbers a human would write are the ones that get rejected.
 // Outputs are matched by "make model serial", NOT by connector name.
 //
 // The connector name is not stable on this machine. It was eDP-1 when this file
@@ -98,8 +96,8 @@ layout {
     // window with dead space beside it looks broken rather than tiled, and came
     // back here once it was clear that side-by-side is the normal case and a
     // full-screen single window is the exception. niri cannot have both
-    // automatically: unlike Hyprland's dwindle it never subdivides the screen
-    // to fit a new window, so the width a window opens at is the width it keeps.
+    // automatically: it never subdivides the screen to fit a new window, so the
+    // width a window opens at is the width it keeps.
     //
     // The exception is cheap: Mod+R cycles up through the presets above, and
     // Mod+F fullscreens outright.
@@ -130,13 +128,13 @@ layout {
     }
 }
 
-// Noctalia is the shell here exactly as it is under Hyprland — the same binary,
-// the same config.toml, the same bar. It supports both compositors natively.
+// Noctalia is the shell: the bar, the launcher, the OSD and the lock screen.
+// Configured declaratively in ../../noctalia.nix, not here.
 spawn-at-startup "noctalia"
 
 // swww draws the wallpaper because Noctalia v5.0.0 mis-sizes its own wallpaper
 // surface at fractional scales, and eDP-1 runs at 1.6. See ../../wallpaper.nix
-// for the full write-up; this mirrors the exec-once pair in hyprland.conf.
+// for the full write-up.
 spawn-at-startup "swww-daemon"
 spawn-at-startup "wallpaper-rotate" "--watch"
 
@@ -154,16 +152,16 @@ spawn-at-startup "wallpaper-rotate" "--watch"
 //   environment { DISPLAY ":0"; }
 
 environment {
-    // Repeated from hyprland.conf for the same reason it is stated there: SDDM
-    // execs the compositor directly, so nothing sources the shell profile that
-    // home-manager's home.pointerCursor writes these into. Keep in step with
-    // ../../gtk.nix.
+    // Set here because SDDM execs the compositor directly, so nothing sources
+    // the shell profile that home-manager's home.pointerCursor writes these
+    // into. Keep in step with ../../gtk.nix.
+    //
+    // The matching HYPRCURSOR_THEME/SIZE pair was dropped with Hyprland: niri
+    // has no hyprcursor support at all, so they named a format nothing here
+    // can load.
     XCURSOR_THEME "Bibata-Modern-Ice"
     XCURSOR_SIZE "24"
-    HYPRCURSOR_THEME "Bibata-Modern-Ice"
-    HYPRCURSOR_SIZE "24"
 
-    // Noctalia is the polkit agent and the notification daemon in both sessions.
     NIXOS_OZONE_WL "1"
 }
 
@@ -202,9 +200,6 @@ animations {
 // backend gamescope selects the 4060 and reports modifier support. Verified,
 // though not needed so far. Resolution and stretching go in CS2's own video
 // settings, not in gamescope.
-//
-// Hyprland remains one logout away and needs none of this — its config carries
-// a tearing windowrule instead.
 window-rule {
     match app-id=r#"^cs2$"#
     open-fullscreen true
@@ -291,12 +286,13 @@ window-rule {
 
 binds {
     // "Mod" is Super on a TTY session, which is what SDDM starts.
-    // Bindings mirror config/hypr/hyprland.conf wherever the concept exists in
-    // both; the ones that have no Hyprland equivalent are grouped at the end.
+    // Everything above the "niri-only" group keeps the shortcuts carried over
+    // from the previous Hyprland session, so the muscle memory transfers.
+    // Bindings with no counterpart there are grouped at the end.
 
     Mod+Shift+Slash { show-hotkey-overlay; }
 
-    // --- Noctalia IPC. Identical verbs to the Hyprland session. ---
+    // --- Noctalia IPC ---
     //
     // A bare SUPER tap opens the launcher. niri cannot bind a modifier on its
     // own — `Mod { ... }` is rejected outright — so keyd turns a tap-and-release
@@ -340,14 +336,13 @@ binds {
     Mod+F { fullscreen-window; }
     Mod+Shift+F { toggle-windowed-fullscreen; }
 
-    // Focus, matching Hyprland's arrow binds.
+    // Focus, on the arrow keys.
     //
-    // niri's own convention is hjkl, but Mod+L is the lock-screen bind in the
-    // Hyprland session and `niri validate` rejects the duplicate outright.
-    // Muscle memory for locking the screen is worth more than vim keys that
-    // would only exist in one of the two sessions, so the whole hjkl set is
-    // left out rather than kept asymmetric. Mod+Comma / Mod+Period below are
-    // the column manipulation that has no Hyprland equivalent anyway.
+    // niri's own convention is hjkl, but Mod+L is already the lock-screen bind
+    // above and `niri validate` rejects the duplicate outright. Muscle memory
+    // for locking the screen is worth more than vim keys, so the whole hjkl set
+    // is left out rather than kept half-there. Mod+Comma / Mod+Period below are
+    // the column manipulation the arrows cannot express anyway.
     Mod+Left  { focus-column-left; }
     Mod+Right { focus-column-right; }
     Mod+Up    { focus-window-up; }
@@ -358,7 +353,7 @@ binds {
     Mod+Ctrl+Up    { move-window-up; }
     Mod+Ctrl+Down  { move-window-down; }
 
-    // --- Workspaces, matching Hyprland's SUPER+1..0 ---
+    // --- Workspaces, SUPER+1..0 ---
     Mod+1 { focus-workspace 1; }
     Mod+2 { focus-workspace 2; }
     Mod+3 { focus-workspace 3; }
@@ -385,8 +380,9 @@ binds {
     Mod+Ctrl+Shift+Left  { move-column-to-monitor-left; }
     Mod+Ctrl+Shift+Right { move-column-to-monitor-right; }
 
-    // --- Hardware keys. Routed through Noctalia so its OSD shows, exactly as
-    // the bindel/bindl lines do in hyprland.conf. ---
+    // --- Hardware keys. Routed through Noctalia rather than handled by niri,
+    // so its OSD shows. allow-when-locked is what keeps them working on the
+    // lock screen. ---
     XF86AudioRaiseVolume  allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }
     XF86AudioLowerVolume  allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }
     XF86AudioMute         allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }
@@ -396,8 +392,7 @@ binds {
     XF86KbdBrightnessUp   allow-when-locked=true { spawn "noctalia" "msg" "keyboard-backlight-up"; }
     XF86KbdBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "keyboard-backlight-down"; }
 
-    // Noctalia has no media-control IPC verb, so these use playerctl — same as
-    // the Hyprland session.
+    // Noctalia has no media-control IPC verb, so these use playerctl.
     XF86AudioPlay  allow-when-locked=true { spawn "playerctl" "play-pause"; }
     XF86AudioPause allow-when-locked=true { spawn "playerctl" "play-pause"; }
     XF86AudioNext  allow-when-locked=true { spawn "playerctl" "next"; }
@@ -405,9 +400,9 @@ binds {
 
     // --- Screenshots ---
     //
-    // Print and Shift+Print go through Noctalia, exactly as they do in
-    // hyprland.conf. An earlier revision pointed them at niri's own built-in
-    // screenshot instead, which looks like the key doing nothing if you expect
+    // Print and Shift+Print go through Noctalia rather than niri. An earlier
+    // revision pointed them at niri's own built-in screenshot instead, which
+    // looks like the key doing nothing if you expect
     // Noctalia's flow: niri opens an interactive picker that needs Enter to
     // confirm, whereas Noctalia's region capture is the one muscle memory was
     // trained on. It also meant the same key did two different things depending
@@ -428,15 +423,16 @@ binds {
     // key rather than the default for every capture.
     Mod+Print   { spawn "screenshot-annotate"; }
 
-    // niri's own screenshot UI is still reachable, just not on the keys Hyprland
-    // uses. Its per-window capture has no Noctalia equivalent.
+    // niri's own screenshot UI is still reachable, just not on the Print keys
+    // above. Its per-window capture has no Noctalia equivalent.
     Alt+Print       { screenshot; }
     Alt+Shift+Print { screenshot-window; }
 
-    // --- niri-only. No Hyprland equivalent, which is rather the point. ---
+    // --- niri-only. Nothing in the old session did these, which is rather the
+    // point of the move. ---
 
-    // The overview: a zoomed-out view of every workspace and window. This is
-    // the feature Hyprland has no answer to.
+    // The overview: a zoomed-out view of every workspace and window. The single
+    // feature that most justifies the move here.
     Mod+O repeat=false { toggle-overview; }
 
     // Cycle the focused column through the preset widths defined in `layout`.
@@ -458,8 +454,8 @@ binds {
 
     // ...and this makes a multi-window column render as *tabs* instead: one
     // window visible, an indicator listing the rest. It is niri's answer to
-    // Hyprland's window groups and their groupbar — the same key does the
-    // equivalent thing in config/hypr/hyprland.conf, so the habit transfers.
+    // Hyprland's window groups and their groupbar, and it is bound to the same
+    // key that did the equivalent thing there, so the habit transfers.
     Mod+G { toggle-column-tabbed-display; }
 
     // Move between the windows inside a column (or between tabs, when tabbed).
@@ -484,8 +480,7 @@ binds {
 // appends the line itself, and config/niri lives in the git repo (home.nix
 // symlinks it out of the store), so letting it edit this file would produce an
 // untracked diff on first run. Its guard looks for exactly this line, so it now
-// finds the include present and leaves the file alone. Same arrangement as the
-// `source` line at the bottom of config/hypr/hyprland.conf.
+// finds the include present and leaves the file alone.
 //
 // noctalia.kdl itself is generated and gitignored. If it is missing, niri logs
 // a config error and keeps the colours above; `noctalia msg templates-apply`

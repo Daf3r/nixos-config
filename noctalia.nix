@@ -45,8 +45,9 @@ in
   programs.noctalia = {
     enable = true;
 
-    # Hyprland starts the shell via exec-once, so no systemd user unit here.
-    # Enabling both would race and launch Noctalia twice.
+    # niri starts the shell via `spawn-at-startup "noctalia"` in config.kdl, so
+    # no systemd user unit here. Enabling both would race and launch Noctalia
+    # twice.
     systemd.enable = false;
 
     # Every rebuild runs `noctalia config validate` over the generated TOML, so
@@ -149,9 +150,9 @@ in
         # `noctalia msg templates-apply` re-runs them on demand.
         #
         # Two of them write inside this repo rather than into ~/.config, since
-        # config/hypr is symlinked out of the store and starship.toml is read
+        # config/niri is symlinked out of the store and starship.toml is read
         # via $STARSHIP_CONFIG:
-        #   hyprland -> config/hypr/noctalia.conf  (gitignored, generated)
+        #   niri     -> config/niri/noctalia.kdl   (gitignored, generated)
         #   starship -> config/starship.toml       (block between markers)
         # Both are idempotent and, with a fixed palette, only change when the
         # palette does.
@@ -178,7 +179,7 @@ in
         #                  present if that skin was installed inside Steam.
         #   spicetify      would need spicetify-cli back in ./apps.nix.
         #   zen-browser    Zen is installed but brave-origin is the browser
-        #                  hyprland.conf actually launches.
+        #                  config.kdl actually launches.
         templates = {
           enable_builtin_templates = true;
           builtin_ids = [
@@ -190,10 +191,9 @@ in
             "gtk3"
             "gtk4"
             "qt" # writes qt5ct + qt6ct colour schemes
-            "hyprland" # window border colours; replaces the hardcoded
-            # cyan->green gradient in config/hypr/hyprland.conf
-            "niri" # same idea for the niri session's focus ring; writes
-            # config/niri/noctalia.kdl, also gitignored
+            "niri" # focus-ring colours; writes config/niri/noctalia.kdl,
+            # which is gitignored and sourced from the bottom of
+            # config.kdl
           ];
 
           enable_community_templates = true;
@@ -299,7 +299,7 @@ in
 
         # Desktop-entry ids without the .desktop suffix. brave-origin is the
         # locally packaged build (see ./pkgs/brave-origin.nix); it also ships a
-        # com.brave.Origin.desktop, but hyprland.conf launches brave-origin, so
+        # com.brave.Origin.desktop, but config.kdl launches brave-origin, so
         # matching that keeps a running window from docking as a second icon.
         #
         # This is also the surface to use for "click the icon, go to the window".
@@ -313,7 +313,7 @@ in
           "brave-origin"
           "kitty"
           "org.kde.dolphin"
-          "spotify"
+          "apple-music"
           "vesktop"
           "discord"
         ];
@@ -364,20 +364,21 @@ in
         border = true;
       };
 
-      # Off, after trying it. It is meant to dim and blur behind an *open panel*
-      # and does that under Hyprland, but under niri it registers a permanent
-      # layer-shell surface on the background layer of every output — visible in
-      # `niri msg layers` as "noctalia-backdrop" sitting alongside "swww-daemon"
-      # — and washes the wallpaper in the palette's primary colour whether a
-      # panel is open or not. With Ayu blue that is a blue screen.
+      # Off, and it cannot be turned on here. It is meant to dim and blur behind
+      # an *open panel* — which it does under Hyprland — but under niri it
+      # registers a permanent layer-shell surface on the background layer of
+      # every output, visible in `niri msg layers` as "noctalia-backdrop"
+      # sitting alongside "swww-daemon", and washes the wallpaper in the
+      # palette's primary colour whether a panel is open or not. With Ayu blue
+      # that is a blue screen.
       #
-      # Re-enable only if you stay on Hyprland; it is a per-compositor bug, not
-      # a setting that needs tuning.
+      # It is a per-compositor bug, not a setting that needs tuning, so this
+      # stays off for as long as niri is the session.
       backdrop.enabled = false;
 
-      # Rounds the physical screen corners to match decoration:rounding = 12 in
-      # config/hypr/hyprland.conf, so maximised windows stop looking square
-      # against the rounded ones.
+      # Rounds the physical screen corners to match geometry-corner-radius 12 in
+      # config/niri/config.kdl, so maximised windows stop looking square against
+      # the rounded ones.
       shell.screen_corners = {
         enabled = true;
         size = 16;
@@ -424,7 +425,7 @@ in
       # edge the pointer crosses all day.
       #
       # `command` is used rather than a named action so the binding is the same
-      # IPC verb the keybinds in hyprland.conf already use.
+      # IPC verb the keybinds in config/niri/config.kdl already use.
       hot_corners = {
         enabled = true;
         delay_ms = 500;

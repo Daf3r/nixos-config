@@ -11,9 +11,9 @@
 # been observed as both card1-eDP-1 and card1-eDP-2 across reboots of this same
 # machine with nothing changed — the NVIDIA driver simply numbers its eDP
 # connector differently, and the presence of a second eDP on the iGPU makes the
-# index ambiguous. Both compositor configs therefore match monitors by EDID
-# make/model (`desc:` in hyprland.conf, the quoted name in niri's config.kdl)
-# rather than by connector. Getting this wrong is not subtle: the rules are
+# index ambiguous. niri's config.kdl therefore matches monitors by EDID
+# make/model — the quoted name in each `output` block — rather than by
+# connector. Getting this wrong is not subtle: the rules are
 # ignored wholesale and the displays come up at the wrong rate, in the wrong
 # order.
 #
@@ -30,7 +30,7 @@
 
   hardware.nvidia = {
     # Required for Wayland. Sets nvidia_drm.modeset=1, which is the single
-    # setting Hyprland actually depends on.
+    # setting the compositor actually depends on.
     modesetting.enable = true;
 
     # Ada (RTX 4060) runs the open kernel modules well, and they are the

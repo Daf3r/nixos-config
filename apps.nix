@@ -171,7 +171,7 @@ in
     # own .deb — see ./pkgs/brave-origin.nix for how to bump it.
     (pkgs.callPackage ./pkgs/brave-origin.nix { })
 
-    kdePackages.dolphin # SUPER+E in hyprland.conf
+    kdePackages.dolphin # SUPER+E in config/niri/config.kdl
     kdePackages.kate # SUPER+K
     filezilla
 
@@ -226,8 +226,9 @@ in
     satty
     screenshot-annotate # the two wired together; bound to SUPER+Print
 
-    # Pick a colour from anywhere on screen. Works under both compositors
-    # despite the name.
+    # Pick a colour from anywhere on screen. Kept after the Hyprland removal on
+    # purpose: it is a standalone wlroots-protocol tool, not part of that
+    # session, and it works fine under niri despite the name.
     hyprpicker
 
     # Prints the Wayland events a key produces. The tool to reach for when a
@@ -269,6 +270,41 @@ in
       "image/x-farbfeld"
     ];
     settings.Keywords = "photo;picture;";
+  };
+
+  # Apple Music, which has no Linux client at all — this is Brave in app mode,
+  # so it opens as its own frameless window instead of a tab.
+  #
+  # **`--class` does not work here and was removed.** In `--app=` mode Chromium
+  # derives the Wayland app_id from the app URL and the profile directory name
+  # and ignores the flag entirely — no warning, the window just comes up as
+  # `brave-music.apple.com__-Default`. Verified with `niri msg windows`.
+  #
+  # So StartupWMClass below spells out what Chromium actually produces, which is
+  # what lets the dock tie the running window to this entry instead of stacking
+  # it under the Brave icon. It is deterministic (URL + profile), but if either
+  # the URL or `--user-data-dir` changes, re-check it with `niri msg windows`.
+  #
+  # `--user-data-dir` keeps the Apple session in its own profile directory. The
+  # alternative — sharing the main Brave profile — means the app window and the
+  # browser fight over the same cookie jar, and signing out of one signs out of
+  # the other.
+  #
+  # The icon name resolves against Papirus-Dark (see ../gtk.nix), which ships
+  # apple-music.svg; there is no file path to keep in sync.
+  xdg.desktopEntries.apple-music = {
+    name = "Apple Music";
+    genericName = "Music streaming";
+    comment = "Apple Music in a dedicated Brave window";
+    exec = "brave-origin --app=https://music.apple.com --user-data-dir=${config.xdg.dataHome}/apple-music";
+    icon = "apple-music";
+    terminal = false;
+    type = "Application";
+    categories = [ "AudioVideo" "Audio" "Player" ];
+    settings = {
+      StartupWMClass = "brave-music.apple.com__-Default";
+      Keywords = "music;apple;streaming;itunes;";
+    };
   };
 
   # Fixes the associations above. Without this, the defaults stay wherever the

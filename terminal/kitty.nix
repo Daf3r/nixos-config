@@ -37,11 +37,15 @@
       # at scale 1.6, so these are logical pixels and 12 reads as ~19 physical.
       window_padding_width = 12;
       confirm_os_window_close = 0; # no "close with N windows?" prompt
-      hide_window_decorations = "yes"; # Hyprland draws the border
+      hide_window_decorations = "yes"; # niri draws the border
 
       # --- Transparency ---
-      # Hyprland's decoration.blur is already enabled (size 3, passes 2), and it
-      # blurs any window that is translucent, so this picks the blur up for free.
+      # NOTE: this was tuned against Hyprland's decoration.blur (size 3, passes
+      # 2), which blurred any translucent window, so the setting got the blur
+      # for free. niri 25.11 does support blur but config/niri/config.kdl does
+      # not turn it on, so right now the wallpaper shows through sharp rather
+      # than blurred. Add a `blur` block to the window-rule there if the sharp
+      # version reads as noisy.
       #
       # 0.96 rather than 0.92: enough transparency to keep the depth, little
       # enough that a bright wallpaper cannot lift the background off #131313

@@ -43,22 +43,13 @@ in
 {
   imports = [ inputs.noctalia.nixosModules.default ];
 
-  # Hyprland stays the default, known-good session. Mango and Plasma 6 were
-  # dropped along with the nixtalia starter config.
-  programs.hyprland = {
-    enable = true;
-    xwayland.enable = true; # CS2 and Steam's overlay still need it
-  };
-
-  # niri, installed *alongside* Hyprland rather than replacing it — both appear
-  # in SDDM's session list, so trying it costs nothing and Hyprland is always
-  # one logout away. Its config is config/niri/config.kdl, symlinked out of the
-  # store by home.nix and validated with `niri validate`.
+  # niri is the only session. Hyprland was the default until 2026-08-07 and was
+  # removed once niri had been running as the daily driver long enough to trust;
+  # Mango and Plasma 6 went earlier, with the nixtalia starter config.
   #
-  # It is a different paradigm, not an upgrade: scrollable tiling, where windows
-  # sit in one infinite horizontal strip instead of subdividing a fixed screen.
-  # Noctalia supports both compositors natively and ships a `niri` theme
-  # template, so the shell is identical either way.
+  # Its config is config/niri/config.kdl, symlinked out of the store by home.nix
+  # and validated with `niri validate`. Scrollable tiling: windows sit in one
+  # infinite horizontal strip instead of subdividing a fixed screen.
   programs.niri = {
     enable = true;
 
@@ -77,10 +68,12 @@ in
     recommendedServices.enable = true;
   };
 
-  # The Hyprland module registers xdg-desktop-portal-hyprland, which implements
-  # screencast/screenshot but not FileChooser. Without the GTK portal, "open
-  # file" / "save as" dialogs in Brave, Steam and Electron apps fall back or
-  # fail outright.
+  # The niri module registers xdg-desktop-portal-gnome, which implements
+  # screencast/screenshot but is not what should answer FileChooser here — it
+  # would want Nautilus (see useNautilus above). The module already sets
+  # FileChooser=gtk as preferred in its own niri-portals.conf; this supplies the
+  # gtk portal that setting points at. Without it, "open file" / "save as"
+  # dialogs in Brave, Steam and Electron apps fall back or fail outright.
   xdg.portal = {
     enable = true;
     extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
@@ -125,7 +118,7 @@ in
     extraPackages = sddmTheme.propagatedBuildInputs;
   };
 
-  # Keyboard layout for the login screen; Hyprland sets its own in hyprland.conf.
+  # Keyboard layout for the login screen; niri sets its own in config.kdl.
   services.xserver.xkb.layout = "us";
 
   environment.systemPackages = with pkgs; [
@@ -136,10 +129,10 @@ in
 
     sddmTheme # must be here, not in sddm.extraPackages — see the note above
 
-    # X11 support for the niri session. Unlike programs.hyprland, the niri
-    # module sets enableXWayland = false: niri has no built-in XWayland and
-    # instead integrates xwayland-satellite, spawning it on demand when the
-    # first X11 client connects. It only has to be on PATH — config/niri/
+    # X11 support for the niri session. niri has no built-in XWayland — there is
+    # no enable switch on the module to flip — and instead integrates
+    # xwayland-satellite, spawning it on demand when the first X11 client
+    # connects. It only has to be on PATH — config/niri/
     # config.kdl deliberately does not spawn it, and documents the fallback if
     # the on-demand handshake ever fails.
     #

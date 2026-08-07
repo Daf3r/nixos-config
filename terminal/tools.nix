@@ -48,7 +48,7 @@
     enable = true;
     settings = {
       theme = "noctalia";
-      pane_frames = false; # niri and Hyprland already draw window borders
+      pane_frames = false; # niri already draws window borders
       copy_on_select = true;
     };
   };
