@@ -1,104 +1,116 @@
 palette = "noctalia"
-# Don't print a new line at the start of the prompt
+# Prompt.
+#
+# Read through $STARSHIP_CONFIG, which terminal/fish.nix points at this file —
+# it is not in ~/.config.
+#
+# --- Why it looks like this ---
+#
+# The palette is not fixed. Noctalia derives it from the wallpaper, the
+# wallpaper rotates every 900s, and the scheme is m3-monochrome — which means
+# every ANSI colour lands somewhere in greyscale except red, the one slot that
+# keeps a hue. Styling by hue therefore does not work here: "blue" and "purple"
+# both render as the same grey, and a prompt that separated fields by colour
+# would lose its structure entirely.
+#
+# So this leans on what stays legible whatever the wallpaper is:
+#
+#   luminance   bold white for the directory (the anchor), bright-black for
+#               everything secondary. Contrast survives any palette.
+#   symbols     !3 +1 ⇡2 carry their meaning in the glyph, not the colour.
+#   shape       ❯ on success, ✗ on failure — a *different character*, not the
+#               same one recoloured, so it reads even if red collapses to grey.
+#
+# --- What it shows ---
+#
+# Left, on its own line so the cursor always sits at the same column:
+#   directory · branch · git status · nix shell
+#
+# Right, and only when it matters:
+#   command duration (over 2s) · exit code (on failure)
+#
+# git_status is the reason this was worth rewriting. The previous config
+# defined it — with emoji — and then never drew it, because $git_status was
+# absent from the format string. Fourteen modules were configured; four were
+# displayed.
+#
+# `palette = "noctalia"` and the block at the bottom are written by Noctalia's
+# starship template and must not be edited by hand.
 add_newline = false
-# Pipes ╰─ ╭─
-# Powerline symbols                                     
-# Wedges 🭧🭒 🭣🭧🭓
-# Random noise 🬖🬥🬔🬗
-# Cool stuff 󰜥   
 
-# format = """
-# $cmd_duration$username$hostname $directory $git_branch
-# $character
-# """
 format = """
-$cmd_duration 󰜥 $directory $git_branch
+$directory$git_branch$git_status$nix_shell
 $character"""
 
-# Replace the "❯" symbol in the prompt with "➜"
-[character]                            # The name of the module we are configuring is "character"
-success_symbol = "[   ](bold fg:blue)"
-error_symbol = "[   ](bold fg:red)"
-
-# Disable the package module, hiding it from the prompt completely
-[package]
-disabled = true
-
-[git_branch]
-style = "bg: cyan"
-symbol = "󰘬"
-truncation_length = 12
-truncation_symbol = ""
-format = "󰜥 [](bold fg:cyan)[$symbol $branch(:$remote_branch)](fg:black bg:cyan)[ ](bold fg:cyan)"
-
-[git_commit]
-commit_hash_length = 4
-tag_symbol = " "
-
-[git_state]
-format = '[\($state( $progress_current of $progress_total)\)]($style) '
-cherry_pick = "[🍒 PICKING](bold red)"
-
-[git_status]
-conflicted = " 🏳 "
-ahead = " 🏎💨 "
-behind = " 😰 "
-diverged = " 😵 "
-untracked = " 🤷 ‍"
-stashed = " 📦 "
-modified = " 📝 "
-staged = '[++\($count\)](green)'
-renamed = " ✍️ "
-deleted = " 🗑 "
-
-[hostname]
-ssh_only = false
-format =  "[•$hostname](bg:cyan bold fg:black)[](bold fg:cyan)"
-trim_at = ".companyname.com"
-disabled = false
-
-[line_break]
-disabled = false
-
-[memory_usage]
-disabled = true
-threshold = -1
-symbol = " "
-style = "bold dimmed green"
-
-[time]
-disabled = true
-format = '🕙[\[ $time \]]($style) '
-time_format = "%T"
-
-[username]
-style_user = "bold bg:cyan fg:black"
-style_root = "red bold"
-format = "[](bold fg:cyan)[$user]($style)"
-disabled = false
-show_always = true
+# Duration and failure go on the right: relevant after the fact, never in the
+# way while typing.
+right_format = """$cmd_duration$status"""
 
 [directory]
-home_symbol = "  "
-read_only = "  "
-style = "bg:green fg:black"
-truncation_length = 6
-truncation_symbol = " ••/"
-format = '[](bold fg:green)[󰉋 $path]($style)[](bold fg:green)'
+# The brightest thing on the line — it is what the eye looks for first.
+style = "bold white"
+# Truncated to the repository root rather than to a fixed depth, so inside a
+# project you see the project and not the path leading to it.
+truncate_to_repo = true
+truncation_length = 3
+truncation_symbol = "…/"
+home_symbol = "~"
+format = "[$path]($style)[$read_only]($read_only_style) "
+read_only = " "
+read_only_style = "red"
 
+[git_branch]
+symbol = " "
+style = "bright-black"
+format = "[$symbol$branch]($style) "
 
-[directory.substitutions]
-"Desktop" = "  "
-"Documents" = "  "
-"Downloads" = "  "
-"Music" = " 󰎈 "
-"Pictures" = "  "
-"Videos" = "  "
-"GitHub" = " 󰊤 "
+[git_status]
+# The whole point of the rewrite. Reads as e.g. !2+1⇡3 — two files modified,
+# one staged, three commits not pushed. Counts rather than bare symbols:
+# "there are changes" is much less useful than "there are two".
+style = "yellow"
+format = "([$all_status$ahead_behind]($style) )"
+conflicted = "="
+ahead = "⇡${count}"
+behind = "⇣${count}"
+diverged = "⇕⇡${ahead_count}⇣${behind_count}"
+untracked = "?${count}"
+stashed = "\\$${count}"
+modified = "!${count}"
+staged = "+${count}"
+renamed = "»${count}"
+deleted = "✘${count}"
+
+[nix_shell]
+# Which devshell is active. The projects in ~/Projects enter different ones
+# through direnv and one has pnpm where the other has Rust, so this is worth
+# seeing before running a package manager.
+symbol = "❄ "
+style = "bright-black"
+format = "[$symbol$name]($style) "
+heuristic = true
 
 [cmd_duration]
-min_time = 0
-format = '[](bold fg:yellow)[󰪢 $duration](bold bg:yellow fg:black)[](bold fg:yellow)'
+# 2s, not 0. The previous config printed "0s" after every command, which is
+# noise; at this threshold it only appears for things that actually took time —
+# a nixos-rebuild, a pnpm install.
+min_time = 2000
+style = "bright-black"
+format = "[$duration]($style)"
+
+[status]
+disabled = false
+style = "red"
+symbol = "✘"
+format = " [$symbol$status]($style)"
+
+[character]
+# Different glyphs, not one glyph in two colours. Red is the only hue the
+# monochrome scheme preserves, and relying on it alone would break the moment
+# the palette changes.
+success_symbol = "[❯](bold white)"
+error_symbol = "[✗](bold red)"
+vimcmd_symbol = "[❮](bold white)"
 
 # >>> NOCTALIA STARSHIP PALETTE >>>
 # Noctalia Starship Palette
@@ -106,40 +118,40 @@ format = '[](bold fg:yellow)[󰪢 $duration](bold bg:yellow fg:black)[](bo
 
 [palettes.noctalia]
 # Standard colors
-blue      = "#c0c4eb"
+blue      = "#e2e2e2"
 red       = "#ffb4ab"
-green     = "#85d1e8"
-yellow    = "#b2cbd3"
-cyan      = "#b2cbd3"
-magenta   = "#85d1e8"
-white     = "#dee3e6"
-black     = "#40484b"
+green     = "#ffffff"
+yellow    = "#c6c6c6"
+cyan      = "#ababab"
+magenta   = "#7d7d7d"
+white     = "#e2e2e2"
+black     = "#474747"
 
 # Extended palette (Catppuccin-compatible names)
-rosewater = "#b2cbd3"
+rosewater = "#c6c6c6"
 flamingo  = "#ffb4ab"
-pink      = "#85d1e8"
-mauve     = "#85d1e8"
+pink      = "#7d7d7d"
+mauve     = "#7d7d7d"
 maroon    = "#ffb4ab"
-peach     = "#b2cbd3"
-teal      = "#b2cbd3"
-sky       = "#b2cbd3"
-sapphire  = "#c0c4eb"
-lavender  = "#85d1e8"
+peach     = "#c6c6c6"
+teal      = "#ababab"
+sky       = "#ababab"
+sapphire  = "#e2e2e2"
+lavender  = "#7d7d7d"
 
 # Text shades
-text      = "#dee3e6"
-subtext1  = "#dee3e6"
-subtext0  = "#899295"
+text      = "#e2e2e2"
+subtext1  = "#e2e2e2"
+subtext0  = "#919191"
 
 # Surface shades
-overlay2  = "#899295"
-overlay1  = "#899295"
-overlay0  = "#40484b"
-surface2  = "#40484b"
-surface1  = "#40484b"
-surface0  = "#0f1416"
-base      = "#0f1416"
-mantle    = "#0f1416"
-crust     = "#0f1416"
+overlay2  = "#919191"
+overlay1  = "#919191"
+overlay0  = "#474747"
+surface2  = "#474747"
+surface1  = "#474747"
+surface0  = "#131313"
+base      = "#131313"
+mantle    = "#131313"
+crust     = "#131313"
 # <<< NOCTALIA STARSHIP PALETTE <<<

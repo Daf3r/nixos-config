@@ -37,7 +37,22 @@
       home-manager,
       ...
     }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in
     {
+      # Per-project development environments, entered automatically by direnv:
+      # each project holds a one-line .envrc pointing here.
+      #
+      # They live in this flake rather than in the projects themselves for two
+      # reasons. Nix requires flake files to be git-tracked, and gymnova belongs
+      # to an organisation — putting a flake.nix there would either impose Nix on
+      # the whole team or be impossible to use once excluded. And sharing this
+      # flake's nixpkgs means one download and one set of versions instead of a
+      # separate nixpkgs per project.
+      devShells.${system} = import ./devshells { inherit pkgs; };
+
       # Named after networking.hostName so `nixos-rebuild switch --flake .`
       # resolves it without spelling out the attribute.
       nixosConfigurations.daf3r-starter = nixpkgs.lib.nixosSystem {

@@ -74,6 +74,23 @@
     platformTheme = "qt5ct";
   };
 
+  # Docker. RemesaFam ships docker-compose.dev.yml and a Dockerfile, and unlike
+  # the rest of the development toolchain this cannot live in a per-project
+  # devShell: it needs a daemon and a socket, which are system state.
+  #
+  # Everything else — node, pnpm, Rust, the Tauri libraries — is declared in
+  # each project's own flake.nix and enters the shell through direnv, so the
+  # two projects do not have to agree on versions. See ./nix-tools.nix.
+  virtualisation.docker = {
+    enable = true;
+    # Reclaims dangling images and stopped containers weekly. Docker otherwise
+    # accumulates them indefinitely, and this is a laptop.
+    autoPrune = {
+      enable = true;
+      dates = "weekly";
+    };
+  };
+
   programs.fish.enable = true;
   programs.nix-ld.enable = true;
 
@@ -105,7 +122,10 @@
     # i2c: required for ddcutil to talk DDC/CI to the external MSI over HDMI.
     # Without it the brightness keys only ever move the laptop panel, because
     # the internal panel has a sysfs backlight and an external monitor does not.
-    extraGroups = [ "networkmanager" "wheel" "video" "i2c" ];
+    # docker: without it every docker command needs sudo, because the daemon
+    # socket is root-owned. Note this is effectively root access to the host —
+    # standard for a single-user development machine, worth knowing anyway.
+    extraGroups = [ "networkmanager" "wheel" "video" "i2c" "docker" ];
     shell = pkgs.fish;
   };
 
