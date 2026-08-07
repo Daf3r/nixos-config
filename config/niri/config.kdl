@@ -39,15 +39,25 @@ input {
 // eDP-1 at scale 1.6 gives a 1600x900 logical size — 2560/1.6 and 1440/1.6 are
 // both integers, so no fractional-scaling blur. That is also why HDMI-A-1 starts
 // at x=1600 and not x=2560: niri positions outputs in logical, scaled pixels.
+// The refresh rate must match a mode niri actually reports, to three decimals.
+// "2560x1440@240" and "1920x1080@100" both looked right and were both silently
+// rejected — niri logged
+//   configured mode 2560x1440@240 could not be found, falling back to preferred
+// and ran the 240 Hz panel at 60. Worse than cosmetic: it then throttled vblanks
+// to match the 60 Hz it believed in, while the panel was scanning out at ~129 Hz.
+//
+// Get the exact strings from `niri msg outputs` inside a niri session. Hyprland
+// is more forgiving here and takes the rounded numbers in hyprland.conf, which
+// is why they differ between the two files for the same hardware.
 output "eDP-1" {
-    mode "2560x1440@240"
+    mode "2560x1440@240.002"
     scale 1.6
     position x=0 y=0
     variable-refresh-rate on-demand=true
 }
 
 output "HDMI-A-1" {
-    mode "1920x1080@100"
+    mode "1920x1080@99.999"
     scale 1
     position x=1600 y=0
 }
@@ -66,7 +76,12 @@ layout {
         proportion 1.0
     }
 
-    default-column-width { proportion 0.5; }
+    // Full width. 0.5 was the first choice and it was wrong for this desk: a
+    // new terminal opened at half the screen with nothing beside it, which
+    // reads as broken rather than as tiling. Hyprland gives a lone window the
+    // whole screen, so this matches it. Mod+R still cycles the presets above
+    // when a second window needs the space.
+    default-column-width { proportion 1.0; }
 
     focus-ring {
         width 2

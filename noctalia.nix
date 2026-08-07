@@ -316,13 +316,16 @@ in
         border = true;
       };
 
-      # Dims and blurs whatever is behind an open panel, which separates the
-      # panel from a busy window underneath. Off by default.
-      backdrop = {
-        enabled = true;
-        blur_intensity = 0.5;
-        tint_intensity = 0.3;
-      };
+      # Off, after trying it. It is meant to dim and blur behind an *open panel*
+      # and does that under Hyprland, but under niri it registers a permanent
+      # layer-shell surface on the background layer of every output — visible in
+      # `niri msg layers` as "noctalia-backdrop" sitting alongside "swww-daemon"
+      # — and washes the wallpaper in the palette's primary colour whether a
+      # panel is open or not. With Ayu blue that is a blue screen.
+      #
+      # Re-enable only if you stay on Hyprland; it is a per-compositor bug, not
+      # a setting that needs tuning.
+      backdrop.enabled = false;
 
       # Rounds the physical screen corners to match decoration:rounding = 12 in
       # config/hypr/hyprland.conf, so maximised windows stop looking square

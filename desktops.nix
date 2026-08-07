@@ -1,4 +1,4 @@
-{ config, pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, ... }:
 
 let
   # embeddedTheme rewrites ConfigFile= in the theme's metadata.desktop, so the
@@ -6,6 +6,34 @@ let
   sddmTheme = pkgs.sddm-astronaut.override {
     embeddedTheme = "hyprland_kath";
   };
+
+  # SDDM's Wayland greeter is weston in kiosk mode, and NixOS generates its
+  # weston.ini from a fixed set of options with no way to configure outputs. The
+  # greeter was therefore landing on HDMI-A-1 — weston picks the first connected
+  # output, and the MSI enumerates ahead of the panel.
+  #
+  # Overriding the config file is the whole fix: `mode=off` disables an output in
+  # weston, so the greeter has only eDP-1 to draw on. This affects the login
+  # screen alone; both monitors come up normally once a session starts.
+  #
+  # The keyboard and libinput blocks are copied from what the module generates so
+  # nothing is lost by replacing the file — keep them in step with
+  # services.xserver.xkb below if that ever changes.
+  sddmWestonIni = pkgs.writeText "weston.ini" ''
+    [keyboard]
+    keymap_layout=us
+    keymap_model=pc104
+    keymap_options=terminate:ctrl_alt_bksp
+    keymap_variant=
+
+    [libinput]
+    enable-tap=true
+    left-handed=false
+
+    [output]
+    name=HDMI-A-1
+    mode=off
+  '';
 in
 {
   imports = [ inputs.noctalia.nixosModules.default ];
@@ -64,6 +92,12 @@ in
   services.displayManager.sddm = {
     enable = true;
     wayland.enable = true;
+
+    # Same command the module builds by default, with our weston.ini in place of
+    # the generated one so the greeter stays on the laptop panel. See the note
+    # on sddmWestonIni above.
+    wayland.compositorCommand =
+      "${lib.getExe pkgs.weston} --shell=kiosk -c ${sddmWestonIni}";
 
     # The stock SDDM greeter is the Qt default. sddm-astronaut bundles ten
     # variants and `embeddedTheme` picks which one is compiled in — swap the
