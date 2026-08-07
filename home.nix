@@ -25,6 +25,7 @@ in
     ./gtk.nix
     ./qt.nix
     ./nix-tools.nix
+    ./gamemode.nix
   ];
 
   home.username = "daf3r";

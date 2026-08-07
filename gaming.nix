@@ -32,5 +32,11 @@
     protonup-qt
     lutris
     mangohud # also configured per-user in apps.nix
+
+    # `sensors`. Missing when it was first needed: nvidia-smi reports the GPU,
+    # but nothing on the system could read CPU package temperature, which is
+    # exactly the number wanted while diagnosing whether a game is thermally
+    # limited. Run `sudo sensors-detect --auto` once if a sensor is missing.
+    lm_sensors
   ];
 }
