@@ -14,6 +14,16 @@
     zen-browser.url = "github:youwen5/zen-browser-flake";
     zen-browser.inputs.nixpkgs.follows = "nixpkgs";
 
+    # Claude Desktop. Not in nixpkgs. This flake repackages Anthropic's own
+    # Linux beta from their Debian repository and refreshes the hash hourly via
+    # CI — the alternatives extract and patch the macOS DMG instead, which is a
+    # good deal more fragile.
+    #
+    # Its nixpkgs is deliberately not made to follow ours, same reasoning as
+    # noctalia above: it is a repackaged binary, and pinning it to a different
+    # nixpkgs than the one it was tested against buys nothing.
+    claude-desktop.url = "github:poeck/claude-desktop-nix-flake";
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
