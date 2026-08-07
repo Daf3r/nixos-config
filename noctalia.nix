@@ -403,9 +403,19 @@ in
       # settings panel and swww starts having something to rotate through.
       plugins.enabled = [ "noctalia/wallhaven" ];
 
-      # Resolve coordinates from IP instead of hardcoding a city — the starter
-      # config had the original author's "Seffner, FL" baked in here.
-      location.auto_locate = true;
+      # The starter had the original author's "Seffner, FL" baked in, which was
+      # replaced by auto_locate. That turned out to be worse, not better: IP
+      # geolocation was placing this machine somewhere cold enough for the
+      # weather widget to report 6 °C in August, which is not San Salvador
+      # under any reading. An explicit address is both correct and stable.
+      #
+      # This also feeds the sunrise/sunset schedule that [nightlight] would use
+      # if it were re-enabled, so it is worth having right even with the
+      # nightlight off.
+      location = {
+        auto_locate = false;
+        address = "San Salvador, El Salvador";
+      };
 
       weather = {
         enabled = true;

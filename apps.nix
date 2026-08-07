@@ -5,7 +5,15 @@
     enable = true;
     settings = {
       full = true;
-      limit_fps = 144;
+
+      # The starter capped this at 144, which predates knowing what panel this
+      # is: eDP-1 runs at 240 Hz, so that threw away 96 Hz of headroom in a game
+      # where latency is the whole point. Uncapped now.
+      #
+      # Worth revisiting if the laptop runs hot — it already idles around 75 °C,
+      # and an uncapped competitive shooter is the workload most likely to push
+      # it. `limit_fps = 240` (match the panel, render nothing it cannot show)
+      # is the middle setting if that happens.
     };
   };
 

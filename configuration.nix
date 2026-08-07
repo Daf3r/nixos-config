@@ -47,7 +47,10 @@
     pulse.enable = true;
   };
 
-  time.timeZone = "America/New_York";
+  # America/New_York came from the nixtalia starter and was two hours fast:
+  # El Salvador is CST -0600 and, unlike the US, does not observe DST, so the
+  # offset is the same year round.
+  time.timeZone = "America/El_Salvador";
   i18n.defaultLocale = "en_US.UTF-8";
 
   programs.fish.enable = true;
