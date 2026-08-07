@@ -74,6 +74,19 @@ repo are long on purpose.
 | `config/starship.toml` | Prompt; holds a generated palette block |
 | `config/noctalia/palettes/` | Local colour palette, copied into the store |
 
+### What applies live, and what needs a rebuild
+
+`config/niri` and `config/nvim` are symlinked **out of** the Nix store, so edits there take
+effect immediately — `~/.config/niri/config.kdl` resolves back to this repo.
+
+Everything else needs `nh os switch`. `starship.toml` is read through `$STARSHIP_CONFIG`
+and the palette JSON is copied into the store, so neither is live despite living under
+`config/`.
+
+Two files here are written *by* Noctalia's theme templates rather than by hand:
+`config/starship.toml` gets a palette block between `NOCTALIA` markers, and
+`config/niri/noctalia.kdl` is generated wholesale and gitignored.
+
 ### What is not mine
 
 `config/nvim/` is the [LazyVim starter](https://github.com/LazyVim/starter), vendored
@@ -88,19 +101,6 @@ the changes made to it are listed at the top of `terminal/fastfetch.nix`.
 `~/Pictures/Wallpapers` and `~/Pictures/Fastfetch` because they are other people's work
 and this repo is public — clone it and you get an empty rotation, not a copyright problem.
 `wallpaper.nix` creates the first directory so nothing breaks on a fresh checkout.
-
-### What applies live, and what needs a rebuild
-
-`config/niri` and `config/nvim` are symlinked **out of** the Nix store, so edits there take
-effect immediately — `~/.config/niri/config.kdl` resolves back to this repo.
-
-Everything else needs `nh os switch`. `starship.toml` is read through `$STARSHIP_CONFIG`
-and the palette JSON is copied into the store, so neither is live despite living under
-`config/`.
-
-Two files here are written *by* Noctalia's theme templates rather than by hand:
-`config/starship.toml` gets a palette block between `NOCTALIA` markers, and
-`config/niri/noctalia.kdl` is generated wholesale and gitignored.
 
 ---
 
