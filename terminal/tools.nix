@@ -10,10 +10,21 @@
     # is the one that gets used without leaving the terminal.
     yazi
 
-    # Persistent terminal sessions, panes and layouts that survive the terminal
-    # closing or crashing. This is the one thing wezterm had over kitty when the
-    # terminal question came up; kitty plus zellij covers it without switching.
-    zellij
+    # Media and image work from the command line. imagemagick was already
+    # present as a dependency of something else; ffmpeg was not, and mpv's
+    # bundled copy is not on PATH.
+    ffmpeg
+    imagemagick
+
+    # `tldr tar` prints the five invocations anyone actually uses instead of a
+    # man page. tealdeer is the fast Rust client.
+    tealdeer
+
+    # Disk usage that is readable: dust ranks directories by size as a tree,
+    # duf shows mounted filesystems as a table. `du -sh *` sorted by hand is the
+    # thing these replace.
+    dust
+    duf
   ];
 
   # cat with syntax highlighting and git gutters. Also worth having for what it
@@ -22,6 +33,43 @@
   programs.bat = {
     enable = true;
     config.theme = "noctalia"; # written by Noctalia's bat template
+  };
+
+  # Persistent terminal sessions, panes and layouts that survive the terminal
+  # closing or crashing — the one thing wezterm had over kitty when the terminal
+  # question came up. kitty plus zellij covers it without switching.
+  #
+  # Declared through programs.zellij rather than as a bare package because the
+  # theme has to be *selected*: Noctalia's template writes a `themes { noctalia
+  # { ... } }` block to zellij/themes/noctalia.kdl and, unlike most of the other
+  # templates, ships no apply.sh to wire it up. Without the line below the file
+  # is generated and ignored.
+  programs.zellij = {
+    enable = true;
+    settings = {
+      theme = "noctalia";
+      pane_frames = false; # niri and Hyprland already draw window borders
+      copy_on_select = true;
+    };
+  };
+
+  # btop was a bare package and had never been run, so ~/.config/btop/btop.conf
+  # did not exist — and Noctalia's btop template refuses to do anything without
+  # it ("Warning: btop config file not found"). Same failure as fastfetch had.
+  #
+  # Setting color_theme here fixes both halves at once: the file now exists, and
+  # apply.sh's guard is `grep -qE '^color_theme\s*=\s*"noctalia"'`, which this
+  # satisfies — so it returns without writing, and the read-only store symlink
+  # home-manager creates is never a problem. Same pre-empted-value trick as
+  # ./kitty.nix and ../gtk.nix.
+  programs.btop = {
+    enable = true;
+    settings = {
+      color_theme = "noctalia";
+      theme_background = false; # let kitty's transparency through
+      vim_keys = true;
+      update_ms = 1000;
+    };
   };
 
   # Full-screen git. The reason it earns a place over the `gs`/`ga`/`gc`

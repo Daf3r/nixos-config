@@ -53,6 +53,26 @@
   time.timeZone = "America/El_Salvador";
   i18n.defaultLocale = "en_US.UTF-8";
 
+  # Qt application theming has to be wired at the system level, not in
+  # home-manager. The module's own description is the reason: "Enabling this
+  # option is necessary for Qt plugins to work in the installed profiles."
+  #
+  # nixpkgs wraps every Qt application with a QT_PLUGIN_PATH pointing at its own
+  # closure, so a platform-theme plugin living in the *user* profile is simply
+  # invisible to it — checking Dolphin's /proc/<pid>/environ showed exactly that,
+  # with no qt6ct anywhere in its plugin path. This option puts the plugins in
+  # environment.systemPackages and QT_QPA_PLATFORMTHEME in environment.variables,
+  # which is what the wrappers actually see.
+  #
+  # "qt5ct" installs qt5ct *and* qt6ct, and the qt6ct plugin registers itself
+  # under both the qt5ct and qt6ct keys — so this one value covers Qt5 and Qt6.
+  # The per-application settings (icon theme, the palette Noctalia generates)
+  # live in ./qt.nix.
+  qt = {
+    enable = true;
+    platformTheme = "qt5ct";
+  };
+
   programs.fish.enable = true;
   programs.nix-ld.enable = true;
 

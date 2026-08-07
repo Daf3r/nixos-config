@@ -1,5 +1,66 @@
-{ config, pkgs, ... }:
+{ config, pkgs, inputs, ... }:
 
+let
+  noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
+  screenshots = "${config.home.homeDirectory}/Pictures/Screenshots";
+
+  # Capture a region, annotate it, and put the result back on the clipboard.
+  #
+  # Noctalia's capture and satty each do half of this and neither can do the
+  # other's half: Noctalia has the region selector and the clipboard handling,
+  # satty has the arrows, boxes and blur. Noctalia's own pipe_to_command would
+  # route *every* screenshot through satty, which is the wrong default when most
+  # captures need no annotation — so this is a separate command on its own key.
+  screenshot-annotate = pkgs.writeShellApplication {
+    name = "screenshot-annotate";
+    runtimeInputs = [
+      pkgs.satty
+      pkgs.wl-clipboard
+      pkgs.coreutils
+      pkgs.findutils
+      noctaliaPkg
+    ];
+    text = ''
+      dir="${screenshots}"
+      mkdir -p "$dir"
+
+      # find rather than `ls -t`: writeShellApplication runs shellcheck, and
+      # SC2012 fails the build over parsing ls output.
+      newest() {
+        find "$dir" -maxdepth 1 -type f -name '*.png' -printf '%T@ %p\n' 2>/dev/null \
+          | sort -rn | head -1 | cut -d' ' -f2-
+      }
+
+      # Watch for a *new* file rather than for the clipboard to hold an image:
+      # the clipboard usually already holds the previous screenshot, so waiting
+      # on its type would return instantly with the wrong picture.
+      before="$(newest)"
+
+      noctalia msg screenshot-region >/dev/null 2>&1 || true
+
+      # 30s of headroom — the region selector is interactive, so this is however
+      # long it takes to drag a box. Gives up quietly if the capture is aborted.
+      shot=""
+      for _ in $(seq 1 300); do
+        latest="$(newest)"
+        if [ -n "$latest" ] && [ "$latest" != "$before" ]; then
+          shot="$latest"
+          break
+        fi
+        sleep 0.1
+      done
+      [ -n "$shot" ] || exit 0
+
+      # Enter copies the annotated image and quits, which is the whole point —
+      # the next thing that happens is a paste into Discord or Brave.
+      satty --filename "$shot" \
+        --output-filename "$dir/annotated-%Y%m%d_%H%M%S.png" \
+        --copy-command wl-copy \
+        --actions-on-enter save-to-clipboard,exit \
+        --early-exit
+    '';
+  };
+in
 {
   # Video and audio. Everything below is mpv doing the work; nothing else on
   # this machine could open a video file at all before it.
@@ -39,6 +100,27 @@
       alang = "es,spa,en,eng";
 
       screenshot-directory = "${config.home.homeDirectory}/Pictures/Screenshots";
+    };
+  };
+
+  # PDF reader. Keyboard-driven, which suits a tiling session, and it starts
+  # instantly where a browser tab does not.
+  #
+  # Declared here rather than as a bare package for the same reason as btop in
+  # ./terminal/tools.nix: Noctalia's zathura template writes the palette to
+  # zathura/noctaliarc, but its apply.sh only reloads running instances over
+  # D-Bus — it never adds the include. Without the line below the colours are
+  # generated and never read.
+  programs.zathura = {
+    enable = true;
+    extraConfig = ''
+      include noctaliarc
+    '';
+    options = {
+      selection-clipboard = "clipboard"; # yank goes to the real clipboard
+      adjust-open = "width";
+      guioptions = ""; # no toolbar or statusbar chrome
+      font = "JetBrainsMono Nerd Font 10";
     };
   };
 
@@ -89,8 +171,35 @@
     # shipped a shell without the applications a desktop needs to open files.
 
     imv # image viewer: Wayland-native, keyboard-driven, opens instantly
-    zathura # PDF: keyboard-driven and has a Noctalia theme template
-    kdePackages.ark # archives; adds itself to Dolphin's context menu
+    kdePackages.ark # archive GUI
+
+    # Ark is a front end — it shells out to these, and none of them were
+    # installed, so it could open a .zip and almost nothing else. Setting ark as
+    # the handler for application/zip above without these was half a fix.
+    unzip
+    p7zip
+    unrar
+
+    # --- Wayland desktop utilities ---
+
+    # wl-copy / wl-paste. Noctalia has its own clipboard for the GUI, but
+    # nothing could reach the clipboard from a script or a pipe without this.
+    wl-clipboard
+
+    # Annotate a screenshot before sending it — arrows, boxes, blur over
+    # anything private. Noctalia's capture already lands on the clipboard, and
+    # this is the step between that and pasting it into Discord.
+    satty
+    screenshot-annotate # the two wired together; bound to SUPER+Print
+
+    # Pick a colour from anywhere on screen. Works under both compositors
+    # despite the name.
+    hyprpicker
+
+    # Prints the Wayland events a key produces. The tool to reach for when a
+    # keybind does not fire and it is unclear whether the compositor is even
+    # seeing the key — which came up more than once configuring niri.
+    wev
   ];
 
   # Fixes the associations above. Without this, the defaults stay wherever the

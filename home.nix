@@ -23,6 +23,7 @@ in
     ./noctalia.nix
     ./wallpaper.nix
     ./gtk.nix
+    ./qt.nix
     ./nix-tools.nix
   ];
 
