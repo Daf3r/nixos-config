@@ -98,25 +98,27 @@ in
         # background (see ./wallpaper.nix) — so nothing would ever re-trigger
         # the regeneration even if this key had taken effect.
         #
-        # A fixed palette is the honest answer while swww does the rotation:
-        # the templates below then render one stable set of colours instead of
-        # drifting every 900s.
+        # Derived from the wallpaper again, which is now possible because the
+        # wallpaper_changed hook below closes the loop: a change made in
+        # Noctalia is a change Noctalia observes, so it can regenerate the
+        # palette from the new image. The original objection — that swww drew
+        # the wallpaper behind Noctalia's back and it could never notice — no
+        # longer holds now that wallpaper-rotate goes *through* Noctalia rather
+        # than around it.
         #
-        # It is "custom" rather than the community "Ayu Blue" it is copied from
-        # because that palette ships its ANSI yellow and blue slots swapped in
-        # all four groups, inverting every program that colours by ANSI name —
-        # ls directories, warnings, and config/starship.toml's bg:yellow and
-        # fg:blue among them. ./config/noctalia/palettes/AyuBlueFixed.json is
-        # the same palette with those two keys put back, and its header records
-        # the evidence. Once upstream fixes it, this can go back to
-        # source = "community" / community_palette = "Ayu Blue" and the local
-        # copy can be deleted.
+        # If the colours shifting every 900s becomes tiring, the alternative is
+        # still in the repo and is one line:
+        #   source = "custom"; custom_palette = "AyuBlueFixed";
+        # That is ./config/noctalia/palettes/AyuBlueFixed.json — a corrected
+        # copy of the community "Ayu Blue", which ships its ANSI yellow and blue
+        # slots swapped in all four groups and inverts anything colouring by
+        # ANSI name. Its header records the evidence. Worth keeping around.
         #
         # To change palette: `noctalia msg color-scheme-set <source> <name>`
         # writes the state file, then mirror the choice back here so the two
         # agree. `noctalia msg color-scheme-get` prints what is actually live.
-        source = "custom";
-        custom_palette = "AyuBlueFixed";
+        source = "wallpaper";
+        wallpaper_scheme = "m3-tonal-spot";
 
         # App theming. These render the palette into each app's own config;
         # `noctalia msg templates-apply` re-runs them on demand.
@@ -410,6 +412,17 @@ in
       # earns its keep: music kept playing to an empty room when the idle timer
       # locked the session. playerctl is already installed for the media keys.
       hooks.session_locked = [ "playerctl pause" ];
+
+      # The bridge back to swww. Noctalia's own wallpaper *drawing* is disabled
+      # (see ./wallpaper.nix for the fractional-scale bug that forced it), but
+      # everything else about its wallpaper handling still works: the Settings
+      # picker, the recorded path, and re-deriving the palette from the image.
+      #
+      # Without this hook the picker looked broken in a very specific way —
+      # choosing a new wallpaper changed the colours and left the image on
+      # screen untouched, because nothing told swww. wallpaper-apply reads
+      # NOCTALIA_WALLPAPER_PATH and NOCTALIA_WALLPAPER_CONNECTOR and paints it.
+      hooks.wallpaper_changed = [ "wallpaper-apply" ];
 
       # Plugins are fetched into ~/.local/state/noctalia/plugins/sources/ from
       # the two git remotes already listed in [[plugins.source]]; only the ids

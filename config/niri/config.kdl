@@ -218,11 +218,26 @@ window-rule {
     variable-refresh-rate true
 }
 
+// Steam. Note the matching semantics: properties inside ONE `match` are ANDed,
+// separate `match` directives are ORed. An earlier version of this had two bare
+// `match` lines and therefore floated *every* Steam window, main client
+// included, which was not the intent.
+
+// The sign-in dialog. It comes up too short for its own content — the QR code
+// below the password field gets cut off — so a minimum size is forced. This is
+// an X11 window under xwayland-satellite, which reports a single scale (1x)
+// when the outputs disagree, and Steam sizes itself from that.
 window-rule {
-    match app-id=r#"^steam$"#
-    // Steam's tooltips and popups are separate X11 windows; floating them keeps
-    // them out of the scrolling strip.
-    match title=r#"^notificationtoasts_"#
+    match app-id=r#"^steam$"# title=r#"^Sign in to Steam$"#
+    open-floating true
+    min-width 440
+    min-height 470
+}
+
+// Tooltips and notification popups are separate X11 windows; floating them
+// keeps them out of the scrolling strip. The main client is left to tile.
+window-rule {
+    match app-id=r#"^steam$"# title=r#"^notificationtoasts_"#
     open-floating true
 }
 

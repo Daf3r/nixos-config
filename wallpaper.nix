@@ -25,11 +25,51 @@ let
   wallpapers = "${config.home.homeDirectory}/nixos-config/Pictures/Wallpapers";
   noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
+  # The other half of the bridge: what actually paints the image.
+  #
+  # Bound to Noctalia's `wallpaper_changed` hook in ./noctalia.nix, so it runs
+  # whenever the recorded wallpaper changes — from the Settings picker, from
+  # `noctalia msg wallpaper-set`, from anywhere. Noctalia hands it two
+  # variables:
+  #
+  #   NOCTALIA_WALLPAPER_PATH       the image
+  #   NOCTALIA_WALLPAPER_CONNECTOR  the output, empty when not output-specific;
+  #                                 the hook fires once per changed connector
+  #
+  # This is what was missing. Picking a wallpaper in Noctalia updated its record
+  # and re-derived the palette — so the colours changed — while the image on
+  # screen stayed put, because Noctalia's own drawing module is disabled and
+  # nothing told swww.
+  wallpaper-apply = pkgs.writeShellApplication {
+    name = "wallpaper-apply";
+    runtimeInputs = [ pkgs.swww pkgs.coreutils ];
+    text = ''
+      img="''${NOCTALIA_WALLPAPER_PATH:-''${1:-}}"
+      [ -n "$img" ] || exit 0
+      [ -e "$img" ] || exit 0
+
+      # swww img fails until the daemon is accepting connections. Matters at
+      # login, where the hook can fire before swww-daemon is up.
+      for _ in $(seq 1 50); do
+        swww query >/dev/null 2>&1 && break
+        sleep 0.2
+      done
+
+      connector="''${NOCTALIA_WALLPAPER_CONNECTOR:-}"
+      if [ -n "$connector" ]; then
+        swww img --outputs "$connector" "$img" \
+          --transition-type fade --transition-duration 1.5
+      else
+        swww img "$img" --transition-type fade --transition-duration 1.5
+      fi
+    '';
+  };
+
   # Replaces Noctalia's [wallpaper.automation]: same 900s interval, same random
   # order, same 1.5s fade.
   wallpaper-rotate = pkgs.writeShellApplication {
     name = "wallpaper-rotate";
-    runtimeInputs = [ pkgs.swww pkgs.coreutils pkgs.findutils noctaliaPkg ];
+    runtimeInputs = [ pkgs.coreutils pkgs.findutils noctaliaPkg ];
     text = ''
       dir="${wallpapers}"
       interval=900
@@ -44,22 +84,13 @@ let
         local img
         img="$(pick)"
         [ -n "$img" ] || return 0
-        swww img "$img" --transition-type fade --transition-duration 1.5
 
-        # Keeps Noctalia's record of the current wallpaper in step with what
-        # swww is actually showing, so `noctalia msg wallpaper-get` and any
-        # surface that reports the path stay truthful. This used to also drive
-        # the palette via theme.source = "wallpaper"; that is no longer the
-        # case — noctalia.nix now pins a fixed palette, precisely because the
-        # disabled wallpaper module means Noctalia never observes a change.
+        # Deliberately does NOT call swww here. Telling Noctalia is enough: it
+        # records the path, re-derives the palette, and fires wallpaper_changed,
+        # which runs wallpaper-apply above. Calling swww directly as well would
+        # paint the same image twice and show two fades.
         noctalia msg wallpaper-set "$img" >/dev/null 2>&1 || true
       }
-
-      # swww img fails until the daemon is accepting connections.
-      for _ in $(seq 1 50); do
-        swww query >/dev/null 2>&1 && break
-        sleep 0.2
-      done
 
       apply
       if [ "''${1-}" = "--watch" ]; then
@@ -72,5 +103,5 @@ let
   };
 in
 {
-  home.packages = [ pkgs.swww wallpaper-rotate ];
+  home.packages = [ pkgs.swww wallpaper-rotate wallpaper-apply ];
 }
