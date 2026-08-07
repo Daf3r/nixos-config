@@ -202,6 +202,41 @@ in
     wev
   ];
 
+  # imv ships its desktop entry with NoDisplay=true, which hides it from every
+  # application chooser. Setting it as the default for image/* is then not
+  # enough on its own: `xdg-mime query default` answers imv.desktop, but
+  # Dolphin refuses to offer a hidden application and puts up an empty "select
+  # the program you want to use" dialog instead.
+  #
+  # Upstream marks it hidden because imv is meant to be launched from an
+  # association rather than a menu, which is precisely the case that breaks.
+  # This copy lands in ~/.local/share/applications and takes precedence.
+  xdg.desktopEntries.imv = {
+    name = "imv";
+    genericName = "Image viewer";
+    comment = "Fast Image Viewer";
+    exec = "imv %F";
+    icon = "multimedia-photo-viewer";
+    terminal = false;
+    type = "Application";
+    categories = [ "Graphics" "2DGraphics" "Viewer" ];
+    mimeType = [
+      "image/png"
+      "image/jpeg"
+      "image/gif"
+      "image/webp"
+      "image/bmp"
+      "image/tiff"
+      "image/svg+xml"
+      "image/avif"
+      "image/heif"
+      "image/jxl"
+      "image/qoi"
+      "image/x-farbfeld"
+    ];
+    settings.Keywords = "photo;picture;";
+  };
+
   # Fixes the associations above. Without this, the defaults stay wherever the
   # starter left them — `xdg-mime query default inode/directory` really did
   # answer kitty-open.desktop.

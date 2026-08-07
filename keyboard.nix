@@ -9,14 +9,23 @@
 # was pressed in between, so SUPER+E would open Dolphin *and* the launcher.
 #
 # keyd solves it a layer lower, at evdev, before either compositor sees the key.
-# `overload(meta, f13)` means: hold it and it is the Meta modifier exactly as
+# `overload(meta, ...)` means: hold it and it is the Meta modifier exactly as
 # before, so every SUPER+<key> binding keeps working; tap and release it alone
-# and it emits F13 instead. Both configs then bind F13 to the launcher, and the
-# behaviour is identical in either session — which the compositor-specific
+# and it emits the chord instead. Both configs bind that chord to the launcher,
+# and the behaviour is identical in either session — which the compositor-side
 # approaches could not manage.
 #
-# F13 because it is a real key in the Linux keycode table that no physical
-# keyboard here has, so nothing else will ever send it.
+# The chord is Ctrl+Alt+Shift+P, and the reason it is not simply F13 matters.
+# F13 was the obvious choice — a real Linux keycode (183) no physical keyboard
+# here can send — and it silently did nothing. The keycode exists in XKB's
+# evdev map (`<FK13> = 191`), but no symbols file loaded by the `us` layout
+# assigns it a keysym: FK13 only appears in `symbols/fkeys` and some vendor
+# files, neither of which `pc`+`us` pulls in. So the key arrived as NoSymbol and
+# no compositor binding could ever match it.
+#
+# Ctrl+Alt+Shift+P is made of keys that certainly have keysyms, and nothing
+# else uses that combination. Avoid Ctrl+Alt+F<n> for this: those are VT
+# switches.
 #
 # Safety: keyd grabs the keyboard, so a broken config could in principle lock you
 # out. It has a built-in escape hatch — pressing backspace + escape + enter
@@ -33,7 +42,7 @@
       settings.main = {
         # Left Super only. The right one is left alone as a plain modifier, so
         # there is always an unmodified Meta key available.
-        leftmeta = "overload(meta, f13)";
+        leftmeta = "overload(meta, C-A-S-p)";
       };
     };
   };

@@ -12,9 +12,16 @@
       # QoL: Disable the "Welcome to fish" message
       set -g fish_greeting ""
 
+      # fastfetch-random picks a different image from Pictures/Fastfetch on
+      # every launch and hands it to fastfetch — see ./fastfetch.nix. It falls
+      # back to plain fastfetch when that folder is empty, so an interactive
+      # shell can never fail to start because of this.
+      #
       # The starter passed --logo ~/nixos-config/Pictures/tbearlogo.png, which
-      # is the original author's logo and does not exist here.
-      if type -q fastfetch
+      # was the original author's logo and never existed here.
+      if type -q fastfetch-random
+        fastfetch-random
+      else if type -q fastfetch
         fastfetch
       end
     '';

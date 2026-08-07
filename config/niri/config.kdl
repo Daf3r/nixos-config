@@ -269,11 +269,15 @@ binds {
     //
     // A bare SUPER tap opens the launcher. niri cannot bind a modifier on its
     // own — `Mod { ... }` is rejected outright — so keyd turns a tap-and-release
-    // of left Super into F13 before niri ever sees it, while holding it still
-    // behaves as the Meta modifier for every binding below. See
-    // ../../keyboard.nix. Mod+Space stays as the explicit alternative.
-    F13       { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
-    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
+    // of left Super into this chord before niri ever sees it, while holding it
+    // still behaves as the Meta modifier for every binding below.
+    //
+    // The chord looks arbitrary and is not: F13 was tried first and produces no
+    // keysym under the `us` layout, so the binding could never fire. See
+    // ../../keyboard.nix for the full explanation. Change it in both places or
+    // in neither. Mod+Space stays as the explicit alternative.
+    Ctrl+Alt+Shift+P { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
+    Mod+Space        { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
     Mod+F1    { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
     Mod+F2    { spawn "noctalia" "msg" "settings-toggle"; }
     Mod+F3    { spawn "noctalia" "msg" "panel-toggle" "clipboard"; }
