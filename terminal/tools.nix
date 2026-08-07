@@ -80,10 +80,19 @@
     enable = true;
     settings = {
       gui.theme = { }; # left to Noctalia's lazygit template
-      git.paging = {
-        colorArg = "always";
-        pager = "delta --dark --paging=never";
-      };
+
+      # `pagers`, as a list — not the `paging` object it used to be. lazygit
+      # 0.57 renamed it and migrates old configs automatically, except that
+      # home-manager writes this file as a read-only store symlink, so the
+      # migration fails with "read-only file system" every single launch and
+      # the pager silently never applies. The schema here is what lazygit's own
+      # migration produces.
+      git.pagers = [
+        {
+          colorArg = "always";
+          pager = "delta --dark --paging=never";
+        }
+      ];
     };
   };
 
