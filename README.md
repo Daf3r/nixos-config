@@ -390,6 +390,8 @@ Roughly half of this is this-laptop-specific and will need editing on other hard
 
 | File | Why it is specific |
 |---|---|
+| `terminal/tools.nix` | **Change `programs.git.settings.user` first.** It hardcodes a name and a GitHub noreply address, so every commit you make would be attributed to someone else until you do |
+| `configuration.nix` | `users.users.daf3r`, the hostname, the timezone and the locale |
 | `config/niri/config.kdl` | `output` blocks match by EDID strings from *these* two monitors |
 | `gamemode.nix` | The panel is named by the same EDID string |
 | `gpu.nix` | Assumes an NVIDIA dGPU driving every connector, MUX in discrete mode |
