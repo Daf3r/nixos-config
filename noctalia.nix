@@ -19,20 +19,26 @@ in
   xdg.configFile."noctalia/palettes/AyuBlueFixed.json".source =
     ./config/noctalia/palettes/AyuBlueFixed.json;
 
-  # The discord and heroiclauncher community templates write straight to
-  # $XDG_CONFIG_HOME/<app>/themes/ and do not create the directory first, so on
-  # a machine where neither app has been launched yet templates-apply reports
-  # ok and silently writes nothing. Both apps are installed (vesktop in
-  # ./apps.nix, heroic in ./gaming.nix), so seed the two directories and the
-  # templates land on the first run instead of the first launch.
+  # Community templates write straight to $XDG_CONFIG_HOME/<app>/... and do not
+  # create the directory first, so on a machine where the app has never been
+  # launched templates-apply reports ok and silently writes nothing. Every app
+  # below is installed, so seeding the directories makes the themes land on the
+  # first run instead of the first launch.
   #
-  # A plain mkdir rather than a home.file entry: the .keep marker that would
-  # otherwise be needed to materialise an empty directory would sit in the
-  # themes list of both apps.
+  # Plain mkdir rather than home.file entries: the .keep marker needed to
+  # materialise an empty directory would show up in each app's own theme list.
+  #
+  # Check `ls` on these after adding a template — silent failure is this
+  # subsystem's normal failure mode, not an exception.
   home.activation.seedAppThemeDirs =
     lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       run mkdir -p "${config.xdg.configHome}/vesktop/themes" \
-                   "${config.xdg.configHome}/heroic/themes"
+                   "${config.xdg.configHome}/heroic/themes" \
+                   "${config.xdg.configHome}/bat/themes" \
+                   "${config.xdg.configHome}/lazygit/themes" \
+                   "${config.xdg.configHome}/yazi/flavors" \
+                   "${config.xdg.configHome}/zellij/themes" \
+                   "${config.xdg.configHome}/zathura"
     '';
 
   programs.noctalia = {
@@ -165,9 +171,14 @@ in
 
           enable_community_templates = true;
           community_ids = [
-            "fastfetch" # runs on every fish start, so the most visible of the three
+            "fastfetch" # runs on every fish start, so the most visible one
             "discord" # -> ~/.config/vesktop/themes/, pick it in Vesktop settings
             "heroiclauncher" # -> ~/.config/heroic/themes/, pick it in Heroic
+            "bat" # -> bat/themes/; terminal/tools.nix selects it
+            "lazygit" # -> lazygit/themes/
+            "yazi" # -> yazi/flavors/noctalia.yazi/
+            "zellij" # -> zellij/themes/
+            "zathura" # -> zathura/noctaliarc
           ];
         };
       };

@@ -76,12 +76,19 @@ layout {
         proportion 1.0
     }
 
-    // Full width. 0.5 was the first choice and it was wrong for this desk: a
-    // new terminal opened at half the screen with nothing beside it, which
-    // reads as broken rather than as tiling. Hyprland gives a lone window the
-    // whole screen, so this matches it. Mod+R still cycles the presets above
-    // when a second window needs the space.
-    default-column-width { proportion 1.0; }
+    // Half width, so two terminals sit side by side with no keypresses at all —
+    // which is the arrangement that gets used.
+    //
+    // This went back and forth. It started at 0.5, moved to 1.0 because a lone
+    // window with dead space beside it looks broken rather than tiled, and came
+    // back here once it was clear that side-by-side is the normal case and a
+    // full-screen single window is the exception. niri cannot have both
+    // automatically: unlike Hyprland's dwindle it never subdivides the screen
+    // to fit a new window, so the width a window opens at is the width it keeps.
+    //
+    // The exception is cheap: Mod+R cycles up through the presets above, and
+    // Mod+F fullscreens outright.
+    default-column-width { proportion 0.5; }
 
     focus-ring {
         width 2
@@ -294,11 +301,26 @@ binds {
     XF86AudioNext  allow-when-locked=true { spawn "playerctl" "next"; }
     XF86AudioPrev  allow-when-locked=true { spawn "playerctl" "previous"; }
 
-    // --- Screenshots. Print/Shift+Print keep Hyprland's meaning (region /
-    // fullscreen); niri's own picker is on Alt+Print. ---
-    Print       { screenshot; }
-    Shift+Print { screenshot-screen; }
-    Alt+Print   { screenshot-window; }
+    // --- Screenshots ---
+    //
+    // Print and Shift+Print go through Noctalia, exactly as they do in
+    // hyprland.conf. An earlier revision pointed them at niri's own built-in
+    // screenshot instead, which looks like the key doing nothing if you expect
+    // Noctalia's flow: niri opens an interactive picker that needs Enter to
+    // confirm, whereas Noctalia's region capture is the one muscle memory was
+    // trained on. It also meant the same key did two different things depending
+    // on which session was running.
+    //
+    // Noctalia's capture writes the PNG to ~/Pictures/Screenshots *and* puts it
+    // on the clipboard as image/png (shell.screenshot.copy_to_clipboard in
+    // ../../noctalia.nix), so it can be pasted straight into Discord or Brave.
+    Print       { spawn "noctalia" "msg" "screenshot-region"; }
+    Shift+Print { spawn "noctalia" "msg" "screenshot-fullscreen"; }
+
+    // niri's own screenshot UI is still reachable, just not on the keys Hyprland
+    // uses. Its per-window capture has no Noctalia equivalent.
+    Alt+Print       { screenshot; }
+    Alt+Shift+Print { screenshot-window; }
 
     // --- niri-only. No Hyprland equivalent, which is rather the point. ---
 
@@ -311,10 +333,29 @@ binds {
     Mod+Shift+R { reset-window-height; }
     Mod+C { center-column; }
 
-    // Consume the next window into this column, or expel it back out. This is
-    // how you build a manual side-by-side split in a scrolling layout.
+    // --- Putting several windows in one place ---
+    //
+    // niri has no dwindle/fibonacci layout: the screen is a viewport onto an
+    // infinite strip, and windows never subdivide it. What it has instead is
+    // columns that can hold more than one window.
+    //
+    // Mod+Comma pulls the window next door *into* the focused column, so the
+    // two share one slot stacked vertically. Mod+Period pushes it back out into
+    // its own column. That is the equivalent of a manual split.
     Mod+Comma  { consume-or-expel-window-left; }
     Mod+Period { consume-or-expel-window-right; }
+
+    // ...and this makes a multi-window column render as *tabs* instead: one
+    // window visible, an indicator listing the rest. It is niri's answer to
+    // Hyprland's window groups and their groupbar — the same key does the
+    // equivalent thing in config/hypr/hyprland.conf, so the habit transfers.
+    Mod+G { toggle-column-tabbed-display; }
+
+    // Move between the windows inside a column (or between tabs, when tabbed).
+    // Mod+Up/Down above do this too; these are here because the muscle memory
+    // for cycling a group is usually a Tab key.
+    Mod+Tab       { focus-window-down-or-top; }
+    Mod+Shift+Tab { focus-window-up-or-bottom; }
 
     // Scroll along the strip with the mouse wheel.
     Mod+WheelScrollDown cooldown-ms=150 { focus-column-right; }

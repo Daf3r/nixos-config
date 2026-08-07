@@ -6,6 +6,7 @@
     ./terminal/fish.nix
     ./terminal/kitty.nix
     ./terminal/nvim.nix
+    ./terminal/tools.nix
   ];
 
   home.packages = with pkgs; [

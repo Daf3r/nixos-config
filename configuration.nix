@@ -55,6 +55,29 @@
 
   programs.fish.enable = true;
   programs.nix-ld.enable = true;
+
+  # A friendlier front end for nixos-rebuild. The reason it is worth having:
+  # `nh os switch` prints a *diff of the packages that changed* between the
+  # running generation and the new one, instead of the wall of store paths
+  # nixos-rebuild emits. Rebuilding stops being a blind operation.
+  #
+  #   nh os switch      apply now          (= nixos-rebuild switch)
+  #   nh os boot        apply at next boot
+  #   nh os test        apply without a boot entry
+  #   nh search <pkg>   fast package search
+  #
+  # NH_FLAKE means none of those need --flake ~/nixos-config spelled out.
+  programs.nh = {
+    enable = true;
+    flake = "/home/daf3r/nixos-config";
+
+    # Replaces running `ncg` by hand. Keeps the last 10 generations and anything
+    # newer than a week, weekly.
+    clean = {
+      enable = true;
+      extraArgs = "--keep 10 --keep-since 7d";
+    };
+  };
   users.users.daf3r = {
     isNormalUser = true;
     description = "daf3r";

@@ -23,6 +23,7 @@ in
     ./noctalia.nix
     ./wallpaper.nix
     ./gtk.nix
+    ./nix-tools.nix
   ];
 
   home.username = "daf3r";
