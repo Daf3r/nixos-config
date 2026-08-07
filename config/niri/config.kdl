@@ -183,6 +183,22 @@ window-rule {
 window-rule {
     geometry-corner-radius 12
     clip-to-geometry true
+
+    // Draw the focus ring *around* windows instead of as a solid rectangle
+    // behind them.
+    //
+    // niri's default is behind, because a window using client-side decorations
+    // can be any shape and the ring has to cover the whole area to look right.
+    // The side effect is that the ring shows through anything semitransparent —
+    // and kitty runs at background_opacity 0.92 (see ../../terminal/kitty.nix),
+    // so 8% of a solid Ayu-blue rectangle bled through the entire terminal
+    // whenever it had focus. It read as the window turning blue, not as a
+    // focus indicator.
+    //
+    // prefer-no-csd above is meant to cover this, but only for windows that
+    // actually negotiate server-side decorations; this rule is unconditional.
+    // No visual difference on opaque windows.
+    draw-border-with-background false
 }
 
 binds {
