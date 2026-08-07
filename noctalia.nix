@@ -273,12 +273,21 @@ in
         # locally packaged build (see ./pkgs/brave-origin.nix); it also ships a
         # com.brave.Origin.desktop, but hyprland.conf launches brave-origin, so
         # matching that keeps a running window from docking as a second icon.
+        #
+        # This is also the surface to use for "click the icon, go to the window".
+        # The bar's tray widget cannot do that: a tray icon's click is handled by
+        # the application over StatusNotifierItem, not by Noctalia — there is not
+        # a single tray setting in the whole config schema — and most apps,
+        # Discord included, only toggle their own visibility rather than raising
+        # a window that lives on another workspace. The dock tracks windows, so
+        # clicking there focuses the real one.
         pinned = [
           "brave-origin"
           "kitty"
           "org.kde.dolphin"
           "spotify"
           "vesktop"
+          "discord"
         ];
       };
 
