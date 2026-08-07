@@ -296,16 +296,24 @@ in
         # to be in the same place every time; alone and centred, its own width
         # barely varies and it never moves.
         #
-        # `media` therefore lives in `start`, and *before* `active_window` on
-        # purpose. The left lane is left-anchored, so whatever comes first has a
-        # fixed left edge and only grows rightwards. Put it after the window
-        # title and the title's length would shove it around instead.
-        # `active_window` goes last because it is the only thing here that can
-        # move without costing anything: it is text you read, not a target you
-        # aim at.
-        start = [ "workspaces" "media" "active_window" ];
+        # `media` sits at the head of `end`, and it got there the hard way. Put
+        # next to `active_window` on the left it printed the same string twice —
+        # "donk 36 Kills In A..." as the track and "(1377) donk 36 Kills In..."
+        # as the window — because the focused window usually *is* whatever is
+        # playing. Both were true, both were useless together.
+        #
+        # First position in `end` is the one spot where a variable-width widget
+        # costs nothing. That lane is right-anchored, so the rightmost pill is
+        # pinned and everything grows leftwards from it: `media` can swell to a
+        # long title without shifting alerts, status or system, which are the
+        # pills actually being clicked. There is room — the gap between the two
+        # lanes measured 776 of the 1600 logical pixels.
+        #
+        # `active_window` stays last on the left because it is the one thing
+        # here that can move for free: text you read, not a target you aim at.
+        start = [ "workspaces" "active_window" ];
         center = [ "clock" ];
-        end = [ "group:alerts" "group:status" "group:system" ];
+        end = [ "media" "group:alerts" "group:status" "group:system" ];
 
         # Seven pills instead of fifteen. The grouping is by what the widgets
         # are *for*, so each pill reads as one thing:
