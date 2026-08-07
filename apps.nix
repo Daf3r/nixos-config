@@ -163,6 +163,11 @@ in
     vesktop
     discord
 
+    # Telegram. Has a Noctalia community template, so it picks up the palette
+    # like vesktop does — pick "noctalia" under Settings > Chat Settings >
+    # Theme once it is installed.
+    telegram-desktop
+
     # --- The gaps ---
     #
     # `xdg-mime query default` found no handler at all for video, audio or

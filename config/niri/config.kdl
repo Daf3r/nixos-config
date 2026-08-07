@@ -262,6 +262,22 @@ window-rule {
     draw-border-with-background false
 }
 
+// Half width suits a terminal and is cramped for a browser. On eDP-1 a 0.5
+// column is 785 logical pixels, and desktop sites start breaking their
+// responsive layouts around there — x.com in particular overlaps its sidebar
+// with the timeline and grows a horizontal scrollbar.
+//
+// These open full width instead. Mod+R still cycles them down when they need to
+// share the screen; this only changes where they start.
+window-rule {
+    match app-id=r#"^brave-origin$"#
+    match app-id=r#"^zen$"#
+    match app-id=r#"^discord$"#
+    match app-id=r#"^vesktop$"#
+    match app-id=r#"^steam$"# title=r#"^Steam$"#
+    default-column-width { proportion 1.0; }
+}
+
 // Floating windows are dialogs, and a dialog's content decides its size —
 // nothing is going to resize it to fit. clip-to-geometry from the rule above
 // cuts whatever does not fit instead of letting the window grow, which is how

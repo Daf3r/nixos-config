@@ -38,7 +38,8 @@ in
                    "${config.xdg.configHome}/lazygit/themes" \
                    "${config.xdg.configHome}/yazi/flavors" \
                    "${config.xdg.configHome}/zellij/themes" \
-                   "${config.xdg.configHome}/zathura"
+                   "${config.xdg.configHome}/zathura" \
+                   "${config.xdg.configHome}/telegram-desktop/themes"
     '';
 
   programs.noctalia = {
@@ -74,9 +75,14 @@ in
         };
 
         panel = {
-          transparency_mode = "glass";
+          # "glass" lets the wallpaper through the panels. With a bright or busy
+          # image behind them that washes the surfaces out, which is the exact
+          # thing to avoid on a desktop meant to stay dark. Panels are now
+          # opaque; the bar keeps its own slight transparency below.
+          transparency_mode = "opaque";
           borders = true;
           shadow = true;
+          list_item_background = true; # separates rows instead of floating text
         };
 
         launcher = {
@@ -118,7 +124,26 @@ in
         # writes the state file, then mirror the choice back here so the two
         # agree. `noctalia msg color-scheme-get` prints what is actually live.
         source = "wallpaper";
-        wallpaper_scheme = "m3-tonal-spot";
+
+        # m3-monochrome rather than the m3-tonal-spot default. The difference is
+        # not subtle, measured against the Spiderman wallpaper:
+        #
+        #   m3-tonal-spot   surface #1a1110  accent #ffb4ac   (red cast)
+        #   m3-monochrome   surface #131313  accent #ffffff   (neutral)
+        #
+        # tonal-spot carries the wallpaper's hue into every surface, so the
+        # whole desktop took on a red tint from that image and would shift again
+        # at the next rotation. monochrome keeps deriving *luminance* from the
+        # wallpaper while dropping the hue, which is what makes it restful for
+        # long sessions.
+        #
+        # pure_black_dark stays off deliberately. It re-anchors the surface ramp
+        # to #000000, which is right on OLED and wrong here: this is an IPS
+        # panel, and pure black under white text produces halation — the glow
+        # that makes text look like it is vibrating. #131313 is dark without
+        # that.
+        wallpaper_scheme = "m3-monochrome";
+        pure_black_dark = false;
 
         # App theming. These render the palette into each app's own config;
         # `noctalia msg templates-apply` re-runs them on demand.
@@ -181,6 +206,7 @@ in
             "yazi" # -> yazi/flavors/noctalia.yazi/
             "zellij" # -> zellij/themes/
             "zathura" # -> zathura/noctaliarc
+            "telegram" # -> telegram-desktop/themes/, pick it in Chat Settings
           ];
         };
       };
@@ -460,13 +486,17 @@ in
         unit = "celsius";
       };
 
-      # Off: the warm shift at night threw the colours off. Re-enable by
-      # flipping this back to true — turning it off in the Settings GUI alone
-      # does not survive a rebuild.
+      # Back on, but gentler. It was turned off because 4000 K threw the colours
+      # too far warm; 4500 K is a noticeably lighter touch and still cuts the
+      # blue that costs you at night.
+      #
+      # The schedule follows real sunrise and sunset for San Salvador, since
+      # location is now set explicitly rather than guessed from IP — see the
+      # [location] block above.
       nightlight = {
-        enabled = false;
+        enabled = true;
         temperature_day = 6500;
-        temperature_night = 4000;
+        temperature_night = 4500;
       };
 
       lockscreen = {

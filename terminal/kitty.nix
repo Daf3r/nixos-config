@@ -42,8 +42,12 @@
       # --- Transparency ---
       # Hyprland's decoration.blur is already enabled (size 3, passes 2), and it
       # blurs any window that is translucent, so this picks the blur up for free.
-      # Drop to 1.0 if the wallpaper ever fights with the text.
-      background_opacity = "0.92";
+      #
+      # 0.96 rather than 0.92: enough transparency to keep the depth, little
+      # enough that a bright wallpaper cannot lift the background off #131313
+      # and wash out the text. The whole point of the monochrome palette is a
+      # terminal that stays dark whatever is behind it.
+      background_opacity = "0.96";
       dynamic_background_opacity = true; # lets kitty adjust opacity at runtime
 
       # --- Cursor ---
