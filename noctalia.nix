@@ -333,7 +333,24 @@ in
           }
           {
             id = "status";
-            members = [ "temp" "network" "volume" "battery" ];
+            members = [
+              "temp"
+              "network"
+              "volume"
+              "battery"
+              # My claude-usage plugin: the 5h/weekly subscription window as a
+              # glyph plus a percentage. In `status` rather than its own pill
+              # for two reasons. It is a resource gauge like the four above, so
+              # it reads as the same kind of thing; and joining an existing
+              # capsule costs only widget_spacing, where a separate pill would
+              # also cost capsule_padding on both sides — which matters against
+              # the 1600 logical pixels eDP-1 has to give.
+              #
+              # Deliberately NOT appended to `end`. That lane is right-anchored,
+              # so the last entry is the pinned one, and putting it there pushes
+              # `group:system` off the edge it is aimed at.
+              "daf3r/claude-usage:meter"
+            ];
           }
           {
             id = "system";
@@ -527,7 +544,43 @@ in
       # Pictures/Wallpapers, which makes wallpaper-rotate's 900s shuffle a
       # no-op. Point its download_dir at that folder in the plugin's own
       # settings panel and swww starts having something to rotate through.
-      plugins.enabled = [ "noctalia/wallhaven" ];
+      #
+      # claude-usage is mine, and it does not come from a git remote: it is the
+      # working tree at ~/Projects/noctalia-plugins, wired in through a `path`
+      # source below. A plugin dropped into plugins/materialized/ by hand is
+      # NOT picked up — the registry is built from the sources, so without that
+      # entry `noctalia msg plugins list` never shows it.
+      plugins.enabled = [
+        "noctalia/wallhaven"
+        "daf3r/claude-usage"
+      ];
+
+      # All three sources have to be listed, including the two that ship with
+      # Noctalia. This key replaces the built-in list rather than adding to it,
+      # so naming only "daf3r" would take the official and community catalogs
+      # away with it — and wallhaven above along with them.
+      #
+      # A `path` source watches the directory live: editing service.luau or
+      # logic.luau hot-reloads the service with no rebuild and no shell
+      # restart, which is the whole point of pointing it at the working tree
+      # instead of installing a copy.
+      plugins.source = [
+        {
+          name = "official";
+          kind = "git";
+          location = "https://github.com/noctalia-dev/official-plugins";
+        }
+        {
+          name = "community";
+          kind = "git";
+          location = "https://github.com/noctalia-dev/community-plugins";
+        }
+        {
+          name = "daf3r";
+          kind = "path";
+          location = "${config.home.homeDirectory}/Projects/noctalia-plugins";
+        }
+      ];
 
       # The starter had the original author's "Seffner, FL" baked in, which was
       # replaced by auto_locate. That turned out to be worse, not better: IP
