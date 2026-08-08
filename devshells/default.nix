@@ -153,6 +153,13 @@ in
       luau-lsp
 
       fish # the test runner is fish, like the rest of the project
+
+      # The suite has to feed real JSON fixtures to logic.luau, and Luau parses
+      # no JSON — the plugin gets that from the host, which is absent here. The
+      # runner converts the fixtures to a Luau module first, and that converter
+      # is python. Declared rather than inherited from the user profile so the
+      # suite does not depend on what happens to be on PATH.
+      python3
     ];
 
     # `luau` the REPL has no --version flag, so the version comes from Nix at
