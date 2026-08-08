@@ -88,4 +88,20 @@ in
       echo "GymNova · node $(node --version) · cargo $(cargo --version | cut -d' ' -f2)"
     '';
   };
+
+  # My own Noctalia plugins. They are written in Luau, which is not a language
+  # whose toolchain deserves a place in the system profile: it is needed only
+  # here, to run the logic.luau suite without bringing up the graphical shell.
+  noctalia-plugins = pkgs.mkShell {
+    packages = with pkgs; [
+      luau # interpreter, plus luau-analyze for type checking
+      fish # the test runner is fish, like the rest of the project
+    ];
+
+    # `luau` the REPL has no --version flag, so the version comes from Nix at
+    # evaluation time rather than from the binary.
+    shellHook = ''
+      echo "noctalia-plugins · luau ${pkgs.luau.version}"
+    '';
+  };
 }
