@@ -79,7 +79,7 @@ finish() { # $1 state, $2 JSON object body
 
 fail() { # $1 state, $2 message
   local body
-  body="$(jq -n --arg m "$2" '{error: $m}')" \
+  body="$(jq -n --arg m "$2" --argjson w "${warnings:-[]}" '{error: $m, warnings: $w}')" \
     || body='{"error":"a failure occurred and its message could not be encoded"}'
   echo "nixos-upd: $2" >&2
   log "$2"
@@ -134,11 +134,16 @@ find "$STATE_DIR" -maxdepth 1 -name "$wt_base.new.*" -exec rm -rf {} + >>"$LOG" 
 
 # The .old.* half is different, and only reapable when $WT is actually there. A
 # run killed between the swap's two renames leaves no $WT and a .old.* holding
-# the only copy of the prepared commit and the GC root; sweeping it here would
-# destroy the very thing the swap was written to protect, one command before the
-# clone check could have adopted it. With $WT present, a .old.* is genuinely
-# superseded. When it is absent the leftover simply survives this run and is
-# collected by the next one, which will have a $WT again.
+# the only copy of the prepared commit; sweeping it here would destroy the very
+# thing the swap was written to protect. Note it does NOT still pin the built
+# closure: an indirect GC root is keyed on the *path* of the result symlink, so
+# renaming the directory aside drops the root even though the symlink survives
+# (measured: one root naming $WT/result before the rename, none naming either
+# path after). What a .old.* preserves is the commit, not the closure.
+#
+# With $WT present, a .old.* is genuinely superseded. When it is absent the
+# leftover simply survives this run and is collected by the next one, which will
+# have a $WT again.
 if [ -e "$WT" ] || [ -L "$WT" ]; then
   find "$STATE_DIR" -maxdepth 1 -name "$wt_base.old.*" -exec rm -rf {} + >>"$LOG" 2>&1 || true
 fi
@@ -168,17 +173,31 @@ fi
 #                       is the only condition that justifies deleting it.
 #   origin is $REPO     it is ours, and ours for this source.
 #
-# Both sides of that comparison must be canonicalized. `--absolute-git-dir`
-# returns a resolved path, so comparing it against the literal "$WT/.git"
-# rejects a perfectly healthy clone whenever $STATE_DIR is reached through a
-# symlink or simply carries a trailing slash -- re-cloning every single day,
-# destroying the prepared commit and the GC root each time, and saying nothing:
-# the mismatch is on this outer `if`, so even the "is not this engine's clone"
-# line below never fires and the run still reports a normal `ready`. That is not
-# hypothetical for long: a systemd unit using DynamicUser=yes with
-# StateDirectory=nixos-upd gets /var/lib/nixos-upd as a symlink into private/,
-# and Task 8 writes that unit next. `readlink -f "$WT"` is safe here because
-# [ ! -L "$WT" ] has already rejected a $WT that is itself a symlink.
+# The asymmetry in that comparison is deliberate and load-bearing: the $WT side
+# is canonicalized, `/.git` is then appended literally, and the result is
+# compared against what git reports. Do not "tidy" this into
+# `readlink -f "$WT/.git"`.
+#
+#   why canonicalize $WT      `--absolute-git-dir` returns a resolved path.
+#                             Comparing it against a literal "$WT/.git" rejects
+#                             a perfectly healthy clone whenever $STATE_DIR is
+#                             reached through a symlink or merely carries a
+#                             trailing slash -- re-cloning every single day and
+#                             destroying the prepared commit each time. Not
+#                             hypothetical for long: a unit using
+#                             DynamicUser=yes with StateDirectory=nixos-upd gets
+#                             /var/lib/nixos-upd as a symlink into private/, and
+#                             Task 8 writes that unit next. Safe because
+#                             [ ! -L "$WT" ] has already rejected a $WT that is
+#                             itself a symlink.
+#   why NOT canonicalize      the whole point is that the git directory must
+#   the ".git" component      *be* at $WT/.git, not merely reachable through a
+#                             path spelled that way. For a $WT/.git symlinked at
+#                             $REPO/.git, both `--absolute-git-dir` and
+#                             `readlink -f` return $REPO/.git, so resolving both
+#                             sides would compare equal, readmit a worktree
+#                             backed by the origin, and put refs/heads/auto/update
+#                             inside the origin again.
 wt_is_ours=0
 if [ ! -L "$WT" ] \
   && [ "$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)" = "$(readlink -f "$WT")/.git" ] \
@@ -190,6 +209,20 @@ if [ ! -L "$WT" ] \
     wt_is_ours=1
   else
     log "$WT is not this engine's clone of $REPO (origin=${wt_origin:-none}); re-cloning"
+  fi
+else
+  # Without this branch the outer probe fails silently, and every cause of that
+  # -- not just the canonicalization bug fixed above -- re-clones daily, throws
+  # away the prepared commit and still reports a plain `ready`, with nothing
+  # anywhere to say why. Live causes remain: git's dubious-ownership refusal if
+  # the unit's uid ever changes (plausible the first time Task 8 turns on
+  # DynamicUser=yes over an existing state directory), an unreadable .git, or
+  # `readlink` missing from a minimal PATH. The two cases are separated because
+  # one of them is completely routine and the other never is.
+  if [ -e "$WT" ] || [ -L "$WT" ]; then
+    log "$WT exists but failed the ownership and integrity probe (symlink, git directory not at $WT/.git, or HEAD unreadable); re-cloning and discarding whatever it held"
+  else
+    log "no clone at $WT yet; cloning"
   fi
 fi
 
@@ -208,8 +241,9 @@ if [ "$wt_is_ours" -ne 1 ]; then
   fi
   # Rename the old one aside instead of deleting it in place. `rm -rf` is not
   # atomic: one undeletable entry leaves $WT half gone -- `.git` and `result`
-  # already unlinked, so the prepared commit and the GC root are destroyed --
-  # and the fresh clone was then discarded too, so the run achieved nothing.
+  # already unlinked, so the prepared commit is destroyed and the built closure
+  # loses its GC root -- and the fresh clone was then discarded too, so the run
+  # achieved nothing.
   # `mv` within a directory is a single rename that either happens or does not.
   # A symlinked $WT is moved as the link, never followed.
   if [ -e "$WT" ] || [ -L "$WT" ]; then
@@ -294,14 +328,22 @@ nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake upd
 # From inside $WT, because `nixos-rebuild build` drops its `result` symlink in
 # the current directory and everything below reads "$WT/result".
 if ! (cd "$WT" && nixos-rebuild build --flake "$WT#$FLAKE_ATTR") >>"$LOG" 2>&1; then
-  bf_body="$(jq -n --arg log "$LOG" '{build: {ok: false, log: $log}}')" \
+  bf_body="$(jq -n --arg log "$LOG" --argjson w "$warnings" \
+    '{build: {ok: false, log: $log}, warnings: $w}')" \
     || fail check_failed "the build failed and its status body could not be rendered"
   finish "build_failed" "$bf_body"
 fi
 
 # --- nothing changed? -------------------------------------------------------
 if [ "$(readlink -f "$WT/result")" = "$(readlink -f /run/current-system)" ]; then
-  finish "current" '{}'
+  # Carrying $warnings here is not decoration. The bumps run before the build,
+  # so "nothing to update" and "a package silently stayed at its old pin"
+  # co-occur precisely when the failed bump is what left the closure unchanged.
+  # Dropping the array would recreate, on this state, the exact silence the
+  # local_bump_failed warning was added to end.
+  cur_body="$(jq -n --argjson w "$warnings" '{warnings: $w}')" \
+    || fail check_failed "the closure is unchanged but the status body could not be rendered"
+  finish "current" "$cur_body"
 fi
 
 # --- verify Brave kept its feature names ------------------------------------
