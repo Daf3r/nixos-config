@@ -62,10 +62,25 @@ input {
 //
 // These strings are what `niri msg outputs` prints in quotes. They come from the
 // EDID and do not change.
+// `y=180` aligns the two panels by their *bottom* edge, and is not cosmetic.
+//
+// "The cursor can only move between directly adjacent outputs" — so wherever one
+// output is taller than its neighbour, the leftover band has nothing to cross
+// into and the pointer hits a wall. This panel is 1600x900 logical at scale 1.6;
+// the MSI is 1920x1080. Aligned at the top, the bottom 180 logical pixels of the
+// MSI — a sixth of its height — had no eDP beside them, and dragging the cursor
+// left along the bottom of the monitor simply stopped.
+//
+// 1080 - 900 = 180 moves that band to the top edge instead, where it also
+// matches the desk: the monitor stands above the laptop's own panel.
+//
+// The band cannot be removed by positioning, only relocated — that would need
+// the two logical heights to match, i.e. scale 1.2 on the MSI (1600x900, giant
+// on a 24") or scale 1.3333 here (1920x1080, everything a fifth smaller).
 output "California Institute of Technology MNH301CA3-1 Unknown" {
     mode "2560x1440@240.002"
     scale 1.6
-    position x=0 y=0
+    position x=0 y=180
     variable-refresh-rate on-demand=true
 }
 
