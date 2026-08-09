@@ -6,12 +6,16 @@
   # the keyboard RGB (this machine exposes asus::kbd_backlight), the
   # Quiet/Balanced/Performance platform profiles behind Fn+F5, custom fan
   # curves, the ROG key, and the battery charge limit.
-  services.asusd = {
-    enable = true;
-    # asusd-user drives per-user Aura/AniMe effects. This model has no AniMe
-    # Matrix and static RGB is handled by the system daemon, so it stays off.
-    enableUserService = false;
-  };
+  # `enableUserService = false` used to sit here, with a note that asusd-user
+  # drives per-user Aura/AniMe effects and that this model has no AniMe Matrix.
+  # Upstream removed the option — "the asusd user service is no longer required"
+  # — and turned it into a hard assertion, so keeping the line stops the whole
+  # configuration evaluating on any newer nixpkgs.
+  #
+  # Dropping it is a no-op on the pinned nixpkgs too: the option's default there
+  # is already `false`, which is what the line set. The prepared-update engine
+  # (../updates.nix) is what surfaced this, before it could break a rebuild.
+  services.asusd.enable = true;
 
   # asusd turns this on by default (lib.mkDefault true). Disabled on purpose.
   #
