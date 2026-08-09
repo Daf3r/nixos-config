@@ -65,6 +65,13 @@ log() { { printf 'nixos-upd: %s\n' "$1" >>"$LOG"; } 2>/dev/null || true; }
 # halfway through the run. Every status write in this file goes through this one
 # guarded call site.
 finish() { # $1 state, $2 JSON object body
+  # Writing the status is the one step that must not be interrupted halfway.
+  # A signal arriving between status_write's temp file and its rename would
+  # otherwise run the handler installed below, which calls fail() -- so the run
+  # would try to write two different statuses at once. Ignoring the three
+  # signals from here on costs nothing: every path through finish() ends in
+  # `exit`, so there is no work left worth interrupting.
+  trap '' TERM INT HUP
   if ! status_write "$STATUS" "$1" "$2"; then
     echo "nixos-upd: could not write $STATUS (state=$1); the exit code is the only channel left" >&2
     log "could not write $STATUS (state=$1)"
@@ -81,7 +88,11 @@ fail() { # $1 state, $2 message
   local body
   body="$(jq -n --arg m "$2" --argjson w "${warnings:-[]}" '{error: $m, warnings: $w}')" \
     || body='{"error":"a failure occurred and its message could not be encoded"}'
-  echo "nixos-upd: $2" >&2
+  # Not bare: fail() is also what the signal handler below calls, and a handler
+  # that dies under errexit -- on a closed or full stderr, say -- would leave the
+  # run with no status written at all, which is the outcome fail() exists to
+  # prevent. The message is a courtesy; $STATUS is the result.
+  echo "nixos-upd: $2" >&2 || true
   log "$2"
   finish "$1" "$body"
 }
@@ -115,6 +126,36 @@ fi
 if ! flock 9; then
   fail check_failed "could not acquire $STATE_DIR/lock (is flock on PATH?)"
 fi
+
+# A run that is killed mid-flight must not leave the previous run's status
+# behind. Reproduced: SIGTERM during the build left yesterday's
+# {"state":"ready","checked_at":<old>} on disk while auto/update had already
+# been force-moved to FETCH_HEAD near the start of the run -- so the prepared
+# commit that `ready` describes no longer existed, and `upd apply` was still
+# being offered for it. That is exactly the stale-and-ready this file's
+# drop_status comment declares impossible, so the declaration has to be
+# enforced rather than asserted. The triggers are routine, not exotic:
+# TimeoutStartSec=3h against a night that builds Electron from source, a
+# reboot, a shutdown -- systemd signals the whole cgroup in all three.
+#
+# Installed only now, and deliberately not earlier: before the lock this run
+# owns nothing, and must not write into a file another run may be mid-write on.
+# It cannot fire on the normal exit path either -- these are signals, and
+# `exit` is not one; finish() disables all three before it writes, so the
+# handler cannot interleave with a status write already under way.
+#
+# The handler must be unable to abort under errexit before it has written
+# something: fail() -> finish() -> status_write is guarded end to end, every
+# call in fail() either has an `|| ...` or is finish() itself, and finish()
+# always ends in `exit`.
+# shellcheck disable=SC2329  # invoked by the trap on the next line, not by name
+on_signal() {
+  # A second signal must not re-enter this handler and start a second status
+  # write on top of the first.
+  trap '' TERM INT HUP
+  fail check_failed "the run was interrupted by a signal (systemd timeout, reboot or shutdown); nothing was applied and no prepared update should be trusted from this run"
+}
+trap on_signal TERM INT HUP
 
 # Truncating belongs *after* the lock, and only after. Before it, a run that
 # arrives while another is mid-build wipes the running run's log while that
@@ -334,6 +375,66 @@ if ! (cd "$WT" && nixos-rebuild build --flake "$WT#$FLAKE_ATTR") >>"$LOG" 2>&1; 
   finish "build_failed" "$bf_body"
 fi
 
+# --- claude-code is reported, never touched ---------------------------------
+# Above the `current` check on purpose, and this placement is the whole point.
+# claude-code updates on npm's clock, not on nixpkgs', so on the overwhelmingly
+# common morning -- the one after the user applied yesterday's update, when the
+# system closure has not moved -- this run ends at `current`. With the block
+# below the `current` check, that morning reported nothing about claude-code at
+# all, and kept reporting nothing until some unrelated system change happened to
+# land. The design promises the report mentions a new version and the command;
+# a promise that only holds on the rarer branch is not kept.
+#
+# It sits after the build rather than before it because a build_failed run has
+# nothing to offer the user anyway, and this reaches the network.
+#
+# Read the installed version from its package.json rather than by running the
+# binary: under systemd the PATH is minimal and ~/.npm-global/bin is not on it,
+# so `claude --version` would silently find nothing and this would never report.
+# $HOME gets the same treatment -- a unit without it would abort the whole run
+# under `set -u`.
+#
+# Every way this check can fail to run is now a warning. It used to fall through
+# in silence whenever $HOME was unset or the package.json was simply not there,
+# which is the same "an unrun check looks exactly like a passed one" shape closed
+# at the VA-API check and at the package bumps.
+unmanaged='[]'
+cc_have=""
+cc_want=""
+if [ -z "${HOME:-}" ]; then
+  warn unmanaged_check_skipped \
+    "\$HOME is not set in this unit's environment, so claude-code's installed version could not be located and it was NOT checked"
+else
+  cc_pkg="$HOME/.npm-global/lib/node_modules/@anthropic-ai/claude-code/package.json"
+  if [ ! -f "$cc_pkg" ]; then
+    warn unmanaged_check_skipped \
+      "there is no $cc_pkg, so claude-code was NOT checked; either it is not installed globally under ~/.npm-global or npm's prefix moved, and this engine only knows how to look there"
+  elif ! cc_have="$(jq -r '.version // empty' "$cc_pkg" 2>>"$LOG")" || [ -z "$cc_have" ]; then
+    # `jq -r '.version'` on a package.json with no version prints the string
+    # "null" and exits 0, which would then be compared against npm's answer and
+    # reported as an update from a version that does not exist. `// empty`
+    # collapses that into the same empty-and-warned path as a parse failure.
+    cc_have=""
+    warn unmanaged_check_failed \
+      "$cc_pkg exists but no version could be read out of it, so claude-code was NOT checked; see $LOG"
+  fi
+fi
+if [ -n "$cc_have" ]; then
+  # `npm view` reaches the network; a daily timer must not hang on it. And if it
+  # cannot answer, say so rather than silently reporting "nothing to update" --
+  # same reasoning as the Brave check above.
+  cc_want="$(timeout 60 npm view @anthropic-ai/claude-code version 2>>"$LOG")" || cc_want=""
+  if [ -z "$cc_want" ]; then
+    warn unmanaged_check_failed \
+      "claude-code is installed ($cc_have) but \`npm view\` could not report the latest version, so it was NOT checked; npm needs to be on this unit's PATH and the network reachable"
+  elif [ "$cc_have" != "$cc_want" ]; then
+    unmanaged="$(jq -c -n --arg f "$cc_have" --arg t "$cc_want" \
+      '[{name: "claude-code", from: $f, to: $t,
+         command: "npm update -g @anthropic-ai/claude-code"}]')" \
+      || unmanaged='[]'
+  fi
+fi
+
 # --- nothing changed? -------------------------------------------------------
 if [ "$(readlink -f "$WT/result")" = "$(readlink -f /run/current-system)" ]; then
   # Carrying $warnings here is not decoration. The bumps run before the build,
@@ -341,7 +442,12 @@ if [ "$(readlink -f "$WT/result")" = "$(readlink -f /run/current-system)" ]; the
   # co-occur precisely when the failed bump is what left the closure unchanged.
   # Dropping the array would recreate, on this state, the exact silence the
   # local_bump_failed warning was added to end.
-  cur_body="$(jq -n --argjson w "$warnings" '{warnings: $w}')" \
+  #
+  # $unmanaged rides along for the same reason it is computed above the check:
+  # `current` is the state this report spends most of its mornings in, and a
+  # `current` that omits the one thing that did move says nothing true.
+  cur_body="$(jq -n --argjson w "$warnings" --argjson u "$unmanaged" \
+    '{warnings: $w, unmanaged: $u}')" \
     || fail check_failed "the closure is unchanged but the status body could not be rendered"
   finish "current" "$cur_body"
 fi
@@ -403,35 +509,6 @@ if ! printf '%s\n' "$diff_txt" > "$STATE_DIR/diff.txt" 2>/dev/null; then
   warn diff_write_failed "could not write $STATE_DIR/diff.txt; the closure diff is unavailable to the reader"
 fi
 
-# --- claude-code is reported, never touched ---------------------------------
-# Read the installed version from its package.json rather than by running the
-# binary: under systemd the PATH is minimal and ~/.npm-global/bin is not on it,
-# so `claude --version` would silently find nothing and this would never report.
-# $HOME gets the same treatment -- a unit without it would abort the whole run
-# under `set -u`.
-unmanaged='[]'
-cc_have=""
-cc_want=""
-if [ -n "${HOME:-}" ]; then
-  cc_pkg="$HOME/.npm-global/lib/node_modules/@anthropic-ai/claude-code/package.json"
-  cc_have="$(jq -r '.version' "$cc_pkg" 2>>"$LOG")" || cc_have=""
-fi
-if [ -n "$cc_have" ]; then
-  # `npm view` reaches the network; a daily timer must not hang on it. And if it
-  # cannot answer, say so rather than silently reporting "nothing to update" --
-  # same reasoning as the Brave check above.
-  cc_want="$(timeout 60 npm view @anthropic-ai/claude-code version 2>>"$LOG")" || cc_want=""
-  if [ -z "$cc_want" ]; then
-    warn unmanaged_check_failed \
-      "claude-code is installed ($cc_have) but \`npm view\` could not report the latest version, so it was NOT checked; npm needs to be on this unit's PATH and the network reachable"
-  elif [ "$cc_have" != "$cc_want" ]; then
-    unmanaged="$(jq -c -n --arg f "$cc_have" --arg t "$cc_want" \
-      '[{name: "claude-code", from: $f, to: $t,
-         command: "npm update -g @anthropic-ai/claude-code"}]')" \
-      || unmanaged='[]'
-  fi
-fi
-
 # --- record it --------------------------------------------------------------
 # nixpin_set writes `pkgs/<name>.nix.XXXXXX` and renames it into place; if it
 # dies between the two (a bare `exit`, a signal -- bash runs no RETURN trap for
@@ -445,7 +522,15 @@ git -C "$WT" add -A -- . ':(exclude,glob)pkgs/*.nix.??????' >>"$LOG" 2>&1 \
   || fail check_failed "could not stage the prepared update"
 
 if git -C "$WT" diff --cached --quiet; then
-  log "nothing staged: the inputs did not move, keeping the existing commit"
+  # Not "keeping the existing commit": there is no existing commit left to keep.
+  # `checkout -B auto/update FETCH_HEAD` near the top of this run already threw
+  # any previous run's prepared commit away, so what auto/update names here is
+  # the freshly fetched tip of $BRANCH and nothing else. That is a real and
+  # legitimate `ready` -- the user committed something to $BRANCH that the
+  # running system has not been switched to, so the closure differs while the
+  # inputs did not move -- and `upd apply` on it fast-forwards to a commit the
+  # user wrote themselves.
+  log "nothing staged: the inputs did not move, so auto/update is the fetched $BRANCH tip and no new commit is made"
 else
   git -C "$WT" -c user.name=nixos-upd -c user.email=nixos-upd@localhost \
     commit -q -m "auto: actualizacion preparada" >>"$LOG" 2>&1 \

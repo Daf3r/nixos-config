@@ -3,9 +3,28 @@ set -euo pipefail
 
 # Point pkgs/t3code-app.nix at the newest t3code release.
 #
-# GitHub publishes no checksum for release assets, so unlike brave-origin this
-# has to prefetch the AppImage to learn its hash. That only happens when the
-# version actually moved.
+# This prefetches the AppImage to learn its hash, which costs ~160 MB on every
+# bump. That is NOT because no checksum is published -- an earlier version of
+# this comment claimed GitHub publishes none, and acting on that belief is what
+# the download costs. electron-builder attaches `latest-linux.yml` to every
+# release alongside the AppImage, and it carries the asset's sha512 in base64:
+#
+#   version: 0.0.32
+#   files:
+#     - url: T3-Code-0.0.32-x86_64.AppImage
+#       sha512: Fw0jT37GHjlS1UVI1VVgP06WLGCvy9TJh4VyQPME2TLO0rV9gkqLC/Gw3suiiPRjLNeBgnPR3tt+vGZKvwRj2Q==
+#
+# `sha512-` + that base64 is already a valid Nix SRI string, so no conversion is
+# needed either -- the yml is a few hundred bytes and would replace the whole
+# download, exactly as brave-origin uses the apt index's published SHA256.
+#
+# It is not used yet because the pin writer cannot accept it: nixpin_set rejects
+# any hash that does not start with `sha256-`, and its sed only rewrites lines
+# matching `hash = "sha256-…";`, so handing it a sha512 SRI fails the guard and,
+# if the guard were removed, would substitute nothing. Teaching nixpin_set the
+# other algorithms is the change this wants, and it is not a comment fix.
+#
+# The prefetch only happens when the version actually moved.
 
 LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)}"
 # shellcheck source=lib/nixpin.sh

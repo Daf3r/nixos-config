@@ -20,8 +20,26 @@
 # exactly that save/restore-via-`eval` dance and it silently corrupted bats'
 # own internal teardown trap, producing duplicate test results with no
 # explanation. RETURN fires on every normal return from this function, which
-# is every path below, without ever taking over a slot the caller owns.
-# It does NOT cover an untrapped fatal signal or a bare `exit` call between
+# is every path below.
+#
+# One caveat, and it is a real one rather than a hedge: "never takes over a
+# slot the caller owns" holds only while `set -T` (functrace) is off. With -T
+# on, RETURN traps are inherited by shell functions, so a caller that had its
+# own RETURN trap installed has it replaced by the `trap` below and then
+# *deleted* by the self-clearing `trap - RETURN`. Measured: a caller function
+# with `trap 'echo fired' RETURN` under `set -T` never fires it after calling
+# nixpin_set, and `trap -p RETURN` comes back empty.
+#
+# And -T is not a hypothetical here. bats runs test bodies with it on --
+# `$-` is `ehBET` inside a test under bats 1.12 -- so this function is already
+# executing in the regime where the property does not hold. What keeps that
+# harmless today is only that bats owns a DEBUG trap and no RETURN trap at the
+# point a test body runs (`trap -p RETURN` is empty on entry, checked). So the
+# EXIT-trap argument above stands unchanged, but the RETURN slot is borrowed on
+# a courtesy rather than by right: if bats ever grows a RETURN trap, or a
+# caller in this repository installs one, this function will silently eat it.
+#
+# It also does NOT cover an untrapped fatal signal or a bare `exit` call between
 # mktemp and mv: bash does not run RETURN traps in either case, so a temp
 # file can still be left behind if the process dies there. That gap is left
 # undefended rather than "fixed" by grabbing the EXIT trap, which caused

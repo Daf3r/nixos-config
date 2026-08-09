@@ -36,8 +36,17 @@ trap 'rm -f "$extracted"' EXIT
 # silent and reporting all three names "missing" would misrepresent a read
 # failure as a real regression, and a loud stop is easier to notice and fix
 # than a false alarm that looks identical to the real thing this script
-# exists to catch. If a caller needs a strict never-nonzero-except-missing-path
-# contract, wrap the call in `|| true`.
+# exists to catch.
+#
+# Do NOT reach for `|| true` to get a strict never-nonzero-except-missing-path
+# contract out of this: it does not give you one. `|| true` flattens *every*
+# non-zero exit to 0, the missing-path exit 1 above included, so the one failure
+# the contract says it preserves is the first thing it throws away -- and it
+# throws it away into the same empty output a clean pass produces. The real
+# caller does the opposite on purpose: nixos-upd.sh captures the exit status
+# (`vaapi_out="$(... )" || vaapi_rc=$?`) and turns any non-zero into a
+# brave_vaapi_check_failed warning, so an unrunnable check reads as unrun rather
+# than as passed. A caller that genuinely must not abort should do the same.
 strings "$binary" > "$extracted"
 
 for name in "${names[@]}"; do

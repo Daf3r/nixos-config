@@ -12,9 +12,13 @@ set -euo pipefail
 # A reader that renders an incomplete check exactly like a passed one recreates,
 # at the last step, the failure mode the whole engine exists to remove.
 #
-# Applying goes through git -- fast-forward the checked-out branch, then switch
-# -- so every automated change stays reviewable and revertible rather than
-# appearing in the system out of nowhere.
+# Applying goes through git -- fast-forward $BRANCH, then switch -- so every
+# automated change stays reviewable and revertible rather than appearing in the
+# system out of nowhere. Not "the checked-out branch", which is what this said
+# before the branch gate landed and is now precisely what apply refuses to do:
+# if $REPO has some other branch checked out, apply stops and says to switch
+# rather than dragging that branch onto the prepared commit and leaving $BRANCH
+# behind.
 #
 # Exit codes:
 #   0  the status was read and reported (including build_failed/check_failed:
@@ -69,6 +73,14 @@ warn_count() {
   jq -r '(.warnings // []) | if type == "array" then length else 1 end' "$STATUS"
 }
 
+# Things the engine reports but never touches -- today only claude-code, which
+# npm owns. Shared by `ready` and `current` because the engine now fills the
+# field on both: a reader that printed it on one state only would put the field
+# back out of reach on the state the user sees most mornings.
+print_unmanaged() {
+  jq -r '.unmanaged[]? | "  fuera de nix: " + .name + " " + .from + " -> " + .to + "\n    " + .command' "$STATUS"
+}
+
 warn_lines() {
   jq -r '
     (.warnings // []) as $w
@@ -106,6 +118,12 @@ case "$cmd" in
     case "$state" in
       current)
         echo "todo al dia"
+        # `unmanaged` is not a ready-only field. claude-code moves on npm's
+        # clock, so the morning after an update is applied -- the state this
+        # report spends most of its life in -- is exactly when the engine has a
+        # new claude-code to mention and nothing else to say. Printing it only
+        # under `ready` meant "todo al dia" while something was in fact not.
+        print_unmanaged
         ;;
       build_failed)
         echo "la actualizacion preparada NO compila"
@@ -117,7 +135,7 @@ case "$cmd" in
       ready)
         echo "hay una actualizacion preparada en la rama $(jq -r '.branch // "auto/update"' "$STATUS")"
         jq -r '.local_pkgs[]?' "$STATUS" | sed 's/^/  /'
-        jq -r '.unmanaged[]? | "  fuera de nix: " + .name + " " + .from + " -> " + .to + "\n    " + .command' "$STATUS"
+        print_unmanaged
         ;;
       *)
         # A state this reader does not recognise is the exact shape of failure
