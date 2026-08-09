@@ -10,6 +10,7 @@
     ./fontsAndNeeds.nix
     ./keyboard.nix
     ./wireguard.nix
+    ./tailscale.nix
     ./updates.nix
   ];
 
