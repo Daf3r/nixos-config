@@ -9,6 +9,7 @@
     ./gaming.nix
     ./fontsAndNeeds.nix
     ./keyboard.nix
+    ./wireguard.nix
   ];
 
   # No swap device exists on this machine and btrfs makes swapfiles awkward.
