@@ -239,13 +239,17 @@ in
 
   # imv ships its desktop entry with NoDisplay=true, which hides it from every
   # application chooser. Setting it as the default for image/* is then not
-  # enough on its own: `xdg-mime query default` answers imv.desktop, but
-  # Dolphin refuses to offer a hidden application and puts up an empty "select
-  # the program you want to use" dialog instead.
+  # enough on its own: `xdg-mime query default` answers imv.desktop, but a
+  # NoDisplay entry is not offered in an "Open With" list, so there is no way
+  # to pick it by hand when the default does not take.
   #
   # Upstream marks it hidden because imv is meant to be launched from an
   # association rather than a menu, which is precisely the case that breaks.
   # This copy lands in ~/.local/share/applications and takes precedence.
+  #
+  # (The *empty* chooser dialog Dolphin used to put up was a different fault
+  # entirely — see the applications.menu block below. NoDisplay hides one
+  # entry; that one hid all of them.)
   xdg.desktopEntries.imv = {
     name = "imv";
     genericName = "Image viewer";
@@ -356,6 +360,50 @@ in
         "x-scheme-handler/https" = browser;
       };
   };
+
+  # **Everything above is invisible to Dolphin without this file.**
+  #
+  # The symptom: double-clicking a video in Dolphin put up "Select the program
+  # you want to use to open the file" with an *empty* list — no mpv, no
+  # applications at all, and nothing to pick. Meanwhile `xdg-mime query default
+  # video/mp4` answered `mpv.desktop`, mimeapps.list was correct, and
+  # `mpv.desktop` really was in XDG_DATA_DIRS. Every layer checked out.
+  #
+  # The cause is one directory below all of that. KDE applications do not read
+  # the .desktop files off disk at open time; they read KService's cache
+  # (~/.cache/ksycoca6_*), and kbuildsycoca6 does not scan share/applications
+  # directly either — it walks the freedesktop *menu* at
+  # $XDG_CONFIG_DIRS/menus/applications.menu and indexes what that menu
+  # includes. With no such file it indexes nothing, and KService's answer to
+  # "what can open video/mp4" is a truthful, empty list.
+  #
+  # Nothing here ships one. On a normal KDE install it comes from
+  # plasma-workspace; this is Dolphin and Ark on niri, without Plasma. Counting
+  # `.desktop` strings in the cache before and after: 0, then 213. (Those
+  # strings are UTF-16BE — `strings -eb`, or a plain grep finds nothing and the
+  # measurement looks like a dead end.)
+  #
+  # <All/> is deliberate — the menu exists only to hand kbuildsycoca6 the full
+  # set of applications, not to build a categorised launcher (Noctalia's
+  # launcher reads the .desktop files itself and never needed this). The name
+  # must match $XDG_MENU_PREFIX + "applications.menu"; the prefix is unset
+  # under niri, so plain `applications.menu` is what gets looked up.
+  #
+  # Costs nothing to carry: `nix store diff-closures` across this change is
+  # empty. No package, no daemon, no autostart — one inert XML file.
+  #
+  # After a rebuild, KDE apps that are already running keep the stale cache —
+  # close them and reopen, or run `kbuildsycoca6 --noincremental`.
+  xdg.configFile."menus/applications.menu".text = ''
+    <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN" "http://www.freedesktop.org/standards/menu-spec/menu-1.0.dtd">
+    <Menu>
+      <Name>Applications</Name>
+      <DefaultAppDirs/>
+      <DefaultDirectoryDirs/>
+      <DefaultMergeDirs/>
+      <Include><All/></Include>
+    </Menu>
+  '';
 
   # Removed from the starter: pcmanfm (second file manager nothing launches),
   # spicetify-cli (only useful with the Spotify theming template enabled, and
