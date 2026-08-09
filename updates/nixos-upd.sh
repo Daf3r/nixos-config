@@ -36,10 +36,20 @@ WT="$STATE_DIR/wt"
 LOG="$STATE_DIR/last.log"
 STATUS="$STATE_DIR/status.json"
 
+# Every path that gives up without writing a fresh status must first remove the
+# old one. Leaving yesterday's file behind is worse than leaving none: a reader
+# has no way to tell a current `ready` from one describing a build that no
+# longer exists, so it would offer the user an `upd apply` for a commit this run
+# never made. Absent is honest, and a reader that finds no status.json knows it
+# has nothing to say. This is best-effort by design -- if $STATUS cannot even be
+# unlinked it is not a file a reader could parse anyway.
+drop_status() { rm -f "$STATUS" 2>/dev/null || true; }
+
 # Before this point there is nowhere to write a status to, so a failure here can
 # only be reported by exiting non-zero.
 if ! mkdir -p "$STATE_DIR"; then
   echo "nixos-upd: cannot create $STATE_DIR; nothing can be reported" >&2
+  drop_status
   exit 1
 fi
 
@@ -58,6 +68,10 @@ finish() { # $1 state, $2 JSON object body
   if ! status_write "$STATUS" "$1" "$2"; then
     echo "nixos-upd: could not write $STATUS (state=$1); the exit code is the only channel left" >&2
     log "could not write $STATUS (state=$1)"
+    # This is the jq-missing case among others: status_write validates the body
+    # with jq, so without it every path lands here and the previous run's file
+    # would otherwise survive intact.
+    drop_status
     exit 1
   fi
   exit 0
@@ -89,6 +103,10 @@ warn() { # $1 code, $2 detail
 # to skip a whole day.
 if ! exec 9>"$STATE_DIR/lock"; then
   echo "nixos-upd: cannot open $STATE_DIR/lock" >&2
+  # $STATUS may well be perfectly writable here, but this run holds no lock, so
+  # it must not write into a file another run could be mid-write on. Removing it
+  # is the one honest move available.
+  drop_status
   exit 1
 fi
 # Not bare: `flock` missing from a minimal systemd PATH exits 127 and would kill
@@ -108,14 +126,27 @@ if ! : > "$LOG"; then
 fi
 
 # --- private clone, reset to the committed branch ---------------------------
-# Re-clone unless $WT is demonstrably this engine's own clone of $REPO. Testing
-# for `.git` alone has two failure modes: a clone whose refs or packs are
-# damaged wedges the engine on `check_failed` forever with no way back, and a
-# $WT that is a symlink to some other repository is accepted and then handed to
-# `reset --hard` and `checkout -B`, which destroys uncommitted work there and
-# leaves an auto/update branch behind. Comparing origin closes both.
+# $WT is used only when it is demonstrably this engine's own, structurally
+# intact clone of $REPO. Four conditions, each closing a hole that was
+# reproduced rather than imagined:
+#
+#   not a symlink       a $WT symlinked at another repository used to be
+#                       accepted and then handed to `reset --hard`, which
+#                       deleted uncommitted work there and left an auto/update
+#                       branch behind.
+#   .git is a DIRECTORY a linked worktree's `.git` is a regular file, and a
+#                       linked worktree of $REPO passes the origin test below
+#                       whenever $REPO's own origin resolves back to $REPO. Its
+#                       commits and its auto/update ref then land inside the
+#                       origin's `.git` -- the single thing this whole file
+#                       exists to prevent.
+#   HEAD's commit reads refs or objects that cannot be read mean the clone is
+#                       broken, which is a different thing from out of date and
+#                       is the only condition that justifies deleting it.
+#   origin is $REPO     it is ours, and ours for this source.
 wt_is_ours=0
-if [ ! -L "$WT" ] && [ -e "$WT/.git" ]; then
+if [ ! -L "$WT" ] && [ -d "$WT/.git" ] \
+  && git -C "$WT" cat-file -e 'HEAD^{commit}' 2>/dev/null; then
   wt_origin="$(git -C "$WT" remote get-url origin 2>/dev/null)" || wt_origin=""
   if [ -n "$wt_origin" ] \
     && [ "$(readlink -f "$wt_origin" 2>/dev/null || printf '%s' "$wt_origin")" \
@@ -127,23 +158,33 @@ if [ ! -L "$WT" ] && [ -e "$WT/.git" ]; then
 fi
 
 if [ "$wt_is_ours" -ne 1 ]; then
+  # Clone beside $WT and swap, rather than deleting first and cloning into the
+  # gap. Deleting first means a clone that then fails -- $REPO unreadable, disk
+  # full -- has destroyed whatever was there for nothing, including a prepared
+  # auto/update commit and the result GC root, and left no clone at all for the
+  # next run to fall back on. This way a failed clone changes nothing.
+  wt_new="$WT.new.$$"
+  rm -rf "$wt_new" || fail check_failed "could not clear $wt_new"
+  if ! git clone --no-hardlinks --quiet "$REPO" "$wt_new" >>"$LOG" 2>&1; then
+    rm -rf "$wt_new" || true
+    fail check_failed "could not clone $REPO into $WT; the existing $WT was left untouched"
+  fi
   # rm -rf on a symlink removes the link, never the directory it points at.
-  rm -rf "$WT" || fail check_failed "could not remove $WT"
-  git clone --no-hardlinks --quiet "$REPO" "$WT" >>"$LOG" 2>&1 \
-    || fail check_failed "could not clone $REPO into $WT"
+  rm -rf "$WT" || { rm -rf "$wt_new" || true; fail check_failed "could not remove $WT"; }
+  mv "$wt_new" "$WT" || fail check_failed "could not move the fresh clone into $WT"
 fi
 
-# A fetch failure against a clone we do own means the clone is damaged. Throw it
-# away and rebuild it rather than returning check_failed every day forever; a
-# clone that cannot be read holds nothing worth preserving.
-if ! git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1; then
-  log "fetch failed; discarding $WT and cloning again"
-  rm -rf "$WT" || fail check_failed "could not remove $WT after a failed fetch"
-  git clone --no-hardlinks --quiet "$REPO" "$WT" >>"$LOG" 2>&1 \
-    || fail check_failed "could not re-clone $REPO into $WT"
-  git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1 \
-    || fail check_failed "could not fetch $BRANCH from $REPO"
-fi
+# A failed fetch is NOT evidence that the clone is damaged, and must never
+# delete anything. A wrong $BRANCH, an unreachable $REPO and a permissions blip
+# all land here. An earlier version re-cloned on any of them, which threw away a
+# healthy clone together with the prepared auto/update commit and the
+# $WT/result symlink -- the GC root pinning the built closure that Task 8's
+# `upd apply` is about to switch to. A network hiccup between the nightly run
+# and the user typing `upd apply` would have silently discarded the update they
+# were about to install. Structural damage is caught above, where it can be told
+# apart from this; here, report and keep everything.
+git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1 \
+  || fail check_failed "could not fetch $BRANCH from $REPO; the prepared clone at $WT was left untouched"
 # reset first: `checkout -B` refuses to move over conflicting local edits, and
 # whatever is in this clone's working tree is by definition disposable.
 git -C "$WT" reset --hard --quiet FETCH_HEAD >>"$LOG" 2>&1 \
