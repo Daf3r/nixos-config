@@ -216,6 +216,21 @@ in
     # Theme once it is installed.
     telegram-desktop
 
+    # Office suite. Chosen over LibreOffice because OOXML is what it edits
+    # natively — a .docx someone sends comes back out of it still laid out the
+    # way they wrote it, which is the whole reason it is here. LibreOffice
+    # converts to ODF on open and back on save, and complex documents do not
+    # survive the round trip intact.
+    #
+    # The trade is macros and the rarer Excel functions, which LibreOffice
+    # handles better. If that ever comes up, libreoffice-qt6-fresh installs
+    # alongside this without conflict — the mimeApps block below decides which
+    # one actually opens a file, not which ones are installed.
+    #
+    # Its .desktop also claims application/pdf. zathura keeps it: the default
+    # set below wins over anything a MimeType= line declares.
+    onlyoffice-desktopeditors
+
     # --- The gaps ---
     #
     # `xdg-mime query default` found no handler at all for video, audio or
@@ -342,6 +357,7 @@ in
         pdf = [ "org.pwmt.zathura.desktop" ];
         archive = [ "org.kde.ark.desktop" ];
         browser = [ "brave-origin.desktop" ];
+        office = [ "onlyoffice-desktopeditors.desktop" ];
       in
       {
         "inode/directory" = [ "org.kde.dolphin.desktop" ];
@@ -373,6 +389,28 @@ in
         "application/x-7z-compressed" = archive;
         "application/vnd.rar" = archive;
         "application/x-xz" = archive;
+
+        # Office documents. Spelled out rather than left to the MimeType= line
+        # in OnlyOffice's own .desktop, for the reason the t3code note below
+        # gives: declaring a type is not the same as being its default. The
+        # legacy .doc/.xls/.ppt types are separate from the OOXML ones and both
+        # sets are needed — a 2003-era attachment does not match the openxml
+        # media type.
+        "application/msword" = office;
+        "application/vnd.ms-excel" = office;
+        "application/vnd.ms-powerpoint" = office;
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" = office;
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.template" = office;
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" = office;
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.template" = office;
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation" = office;
+        "application/vnd.openxmlformats-officedocument.presentationml.slideshow" = office;
+        "application/vnd.openxmlformats-officedocument.presentationml.template" = office;
+        "application/vnd.oasis.opendocument.text" = office;
+        "application/vnd.oasis.opendocument.spreadsheet" = office;
+        "application/vnd.oasis.opendocument.presentation" = office;
+        "application/rtf" = office;
+        "text/csv" = office;
 
         "text/html" = browser;
         "x-scheme-handler/http" = browser;
