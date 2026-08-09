@@ -8,7 +8,10 @@ set -euo pipefail
 # the acceleration simply never happens. That is how this machine ended up
 # running video decode on the CPU at 92 °C with the config looking correct.
 #
-# Exits 0 regardless. This reports; it does not veto.
+# Exits 0 for missing feature names: this reports, it does not veto. It only
+# exits non-zero for a path that is not a file at all — with one deliberate
+# exception, noted below at the `strings` call: an existing-but-unreadable
+# file (permission denied, I/O error) also exits non-zero, on purpose.
 
 binary="${1:-}"
 [ -n "$binary" ] || { echo "check-brave-vaapi: usage: check-brave-vaapi <binary>" >&2; exit 1; }
@@ -26,6 +29,15 @@ names=(AcceleratedVideoDecodeLinuxGL VaapiOnNvidiaGPUs VaapiIgnoreDriverChecks)
 # just relocated into the checker. Going through a file sidesteps it.
 extracted="$(mktemp)"
 trap 'rm -f "$extracted"' EXIT
+# If `strings` cannot actually read $binary (permission denied, truncated or
+# corrupt file, I/O error) it exits non-zero and `set -e` stops the script
+# here, non-zero, even though the path passed the `-f` check above. That is a
+# deliberate exception to "only a missing path exits non-zero": staying
+# silent and reporting all three names "missing" would misrepresent a read
+# failure as a real regression, and a loud stop is easier to notice and fix
+# than a false alarm that looks identical to the real thing this script
+# exists to catch. If a caller needs a strict never-nonzero-except-missing-path
+# contract, wrap the call in `|| true`.
 strings "$binary" > "$extracted"
 
 for name in "${names[@]}"; do

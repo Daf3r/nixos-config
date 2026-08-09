@@ -43,6 +43,6 @@ teardown() {
   # And the reverse: no feature was added to the derivation without being added
   # here, which would leave it unverified.
   count="$(sed -n '/enableFeatures =/,/++ lib.optional enableVulkan/p' "$nixfile" \
-    | grep -cE '^\s+"[A-Za-z]+"')"
+    | grep -cE '^\s+"[A-Za-z0-9]+"')"
   [ "$count" -eq 3 ]
 }
