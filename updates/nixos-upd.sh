@@ -43,19 +43,12 @@ if ! mkdir -p "$STATE_DIR"; then
   exit 1
 fi
 
-# Truncate the log *first*. The obvious placement -- after the worktree setup --
-# throws away the log of exactly the step most likely to have just failed.
-: > "$LOG"
-
-# Wait rather than fail: a manual rebuild in progress is a reason to queue, not
-# to skip a whole day.
-if ! exec 9>"$STATE_DIR/lock"; then
-  echo "nixos-upd: cannot open $STATE_DIR/lock" >&2
-  exit 1
-fi
-flock 9
-
-log() { printf 'nixos-upd: %s\n' "$1" >>"$LOG"; }
+# Logging must never be able to abort the run: $LOG is a diagnostic, not a
+# result, and an unwritable one is not a reason to leave the reader with no
+# status at all. Every writer of $LOG below is non-fatal for the same reason.
+# The braces matter: with the redirection on the inner command only, bash still
+# reports its own "Is a directory" to the real stderr on every single call.
+log() { { printf 'nixos-upd: %s\n' "$1" >>"$LOG"; } 2>/dev/null || true; }
 
 # status_write returns 1 instead of aborting when it cannot write, precisely so
 # that `set -e` here does not turn a reporting failure into a silent death
@@ -91,14 +84,66 @@ warn() { # $1 code, $2 detail
   log "warning: $1: $2"
 }
 
+# --- serialise, then take over the log --------------------------------------
+# Wait rather than fail: a manual rebuild in progress is a reason to queue, not
+# to skip a whole day.
+if ! exec 9>"$STATE_DIR/lock"; then
+  echo "nixos-upd: cannot open $STATE_DIR/lock" >&2
+  exit 1
+fi
+# Not bare: `flock` missing from a minimal systemd PATH exits 127 and would kill
+# the run under errexit with no status file written at all -- the likeliest
+# first-boot failure and the one that leaves nothing behind to explain itself.
+if ! flock 9; then
+  fail check_failed "could not acquire $STATE_DIR/lock (is flock on PATH?)"
+fi
+
+# Truncating belongs *after* the lock, and only after. Before it, a run that
+# arrives while another is mid-build wipes the running run's log while that
+# run's status.json still points a reader at it. After it, the log still gets
+# truncated before anything appends, so the record of the worktree setup -- the
+# step most likely to have just failed -- survives.
+if ! : > "$LOG"; then
+  fail check_failed "could not truncate $LOG"
+fi
+
 # --- private clone, reset to the committed branch ---------------------------
-if [ ! -e "$WT/.git" ]; then
-  rm -rf "$WT"
+# Re-clone unless $WT is demonstrably this engine's own clone of $REPO. Testing
+# for `.git` alone has two failure modes: a clone whose refs or packs are
+# damaged wedges the engine on `check_failed` forever with no way back, and a
+# $WT that is a symlink to some other repository is accepted and then handed to
+# `reset --hard` and `checkout -B`, which destroys uncommitted work there and
+# leaves an auto/update branch behind. Comparing origin closes both.
+wt_is_ours=0
+if [ ! -L "$WT" ] && [ -e "$WT/.git" ]; then
+  wt_origin="$(git -C "$WT" remote get-url origin 2>/dev/null)" || wt_origin=""
+  if [ -n "$wt_origin" ] \
+    && [ "$(readlink -f "$wt_origin" 2>/dev/null || printf '%s' "$wt_origin")" \
+       = "$(readlink -f "$REPO" 2>/dev/null || printf '%s' "$REPO")" ]; then
+    wt_is_ours=1
+  else
+    log "$WT is not this engine's clone of $REPO (origin=${wt_origin:-none}); re-cloning"
+  fi
+fi
+
+if [ "$wt_is_ours" -ne 1 ]; then
+  # rm -rf on a symlink removes the link, never the directory it points at.
+  rm -rf "$WT" || fail check_failed "could not remove $WT"
   git clone --no-hardlinks --quiet "$REPO" "$WT" >>"$LOG" 2>&1 \
     || fail check_failed "could not clone $REPO into $WT"
 fi
-git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1 \
-  || fail check_failed "could not fetch $BRANCH from $REPO"
+
+# A fetch failure against a clone we do own means the clone is damaged. Throw it
+# away and rebuild it rather than returning check_failed every day forever; a
+# clone that cannot be read holds nothing worth preserving.
+if ! git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1; then
+  log "fetch failed; discarding $WT and cloning again"
+  rm -rf "$WT" || fail check_failed "could not remove $WT after a failed fetch"
+  git clone --no-hardlinks --quiet "$REPO" "$WT" >>"$LOG" 2>&1 \
+    || fail check_failed "could not re-clone $REPO into $WT"
+  git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1 \
+    || fail check_failed "could not fetch $BRANCH from $REPO"
+fi
 # reset first: `checkout -B` refuses to move over conflicting local edits, and
 # whatever is in this clone's working tree is by definition disposable.
 git -C "$WT" reset --hard --quiet FETCH_HEAD >>"$LOG" 2>&1 \
@@ -123,7 +168,9 @@ nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake upd
 # From inside $WT, because `nixos-rebuild build` drops its `result` symlink in
 # the current directory and everything below reads "$WT/result".
 if ! (cd "$WT" && nixos-rebuild build --flake "$WT#$FLAKE_ATTR") >>"$LOG" 2>&1; then
-  finish "build_failed" "$(jq -n --arg log "$LOG" '{build: {ok: false, log: $log}}')"
+  bf_body="$(jq -n --arg log "$LOG" '{build: {ok: false, log: $log}}')" \
+    || fail check_failed "the build failed and its status body could not be rendered"
+  finish "build_failed" "$bf_body"
 fi
 
 # --- nothing changed? -------------------------------------------------------
@@ -178,7 +225,15 @@ fi
 # --- what changed -----------------------------------------------------------
 diff_txt="$(nix store diff-closures /run/current-system "$WT/result" 2>>"$LOG")" \
   || diff_txt="(nix store diff-closures failed; see $LOG)"
-printf '%s\n' "$diff_txt" > "$STATE_DIR/diff.txt"
+# Not bare. diff.txt is a convenience for the reader; the build succeeded and
+# the commit below is real. Aborting here under errexit would leave the previous
+# run's status.json in place -- a stale `ready`, with an old checked_at, naming
+# an auto/update commit this run never made. A status that is not the true one
+# is the single outcome this file exists to make impossible, so this degrades to
+# a warning and the run reports what actually happened.
+if ! printf '%s\n' "$diff_txt" > "$STATE_DIR/diff.txt" 2>/dev/null; then
+  warn diff_write_failed "could not write $STATE_DIR/diff.txt; the closure diff is unavailable to the reader"
+fi
 
 # --- claude-code is reported, never touched ---------------------------------
 # Read the installed version from its package.json rather than by running the
@@ -229,7 +284,7 @@ else
     || fail check_failed "could not commit the prepared update"
 fi
 
-finish "ready" "$(jq -n \
+ready_body="$(jq -n \
   --arg brave "$brave_line" \
   --arg t3 "$t3code_line" \
   --arg log "$LOG" \
@@ -239,4 +294,6 @@ finish "ready" "$(jq -n \
     branch: "auto/update",
     local_pkgs: [$brave, $t3],
     warnings: $warnings,
-    unmanaged: $unmanaged}')"
+    unmanaged: $unmanaged}')" \
+  || fail check_failed "the update is prepared but its status body could not be rendered"
+finish "ready" "$ready_body"
