@@ -1,0 +1,19 @@
+Package: brave-browser
+Version: 1.93.140
+Filename: pool/main/b/brave-browser/brave-browser_1.93.140_amd64.deb
+SHA256: 1111111111111111111111111111111111111111111111111111111111111111
+
+Package: brave-origin
+Version: 1.93.132
+Filename: pool/main/b/brave-origin/brave-origin_1.93.132_amd64.deb
+SHA256: e77a5cef4f7801acbd88087119d85c5d4f0f96d4402f4d699a66f681ad01e828
+
+Package: brave-origin
+Version: 1.93.134
+Filename: pool/main/b/brave-origin/brave-origin_1.93.134_amd64.deb
+SHA256: 288b8f3c875bcd855dfd1127fd8559d7e09522277cfd569e3fb2d44e106ec532
+
+Package: brave-origin
+Version: 1.92.144
+Filename: pool/main/b/brave-origin/brave-origin_1.92.144_amd64.deb
+SHA256: 2222222222222222222222222222222222222222222222222222222222222222
