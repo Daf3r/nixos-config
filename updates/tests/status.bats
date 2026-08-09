@@ -94,3 +94,78 @@ teardown() {
   leftovers="$(find "$WORK" -maxdepth 1 -name '.status.??????')"
   [ -z "$leftovers" ]
 }
+
+@test "status_write replaces the target by rename, not by overwriting its content" {
+  # The temp-file-location test above only proves *where* the temp file was
+  # created; it says nothing about the final step actually being a rename.
+  # `cp "$tmp" "$path"` (instead of `mv`) keeps the temp file in the same
+  # directory and still gets cleaned up by the RETURN trap, so it would
+  # pass every test above — but a reader polling `$path` with a plain
+  # `read()` can observe it mid-copy, exactly the half-written window this
+  # whole file exists to prevent. A rename swaps the directory entry to a
+  # new inode atomically; an in-place overwrite (copy, or truncate-and-
+  # write) reuses the old inode. Comparing inodes across two writes catches
+  # the difference deterministically, no race needed.
+  status_write "$WORK/s.json" "ready" '{"a":1}'
+  local inode_before inode_after
+  inode_before="$(stat -c %i "$WORK/s.json")"
+  status_write "$WORK/s.json" "ready" '{"a":2}'
+  inode_after="$(stat -c %i "$WORK/s.json")"
+  [ "$inode_before" != "$inode_after" ]
+}
+
+@test "status_write fails cleanly instead of aborting a set -e caller when mktemp cannot create a temp file" {
+  # Task 7 runs under `set -euo pipefail`. A bare `tmp="$(mktemp ...)"`
+  # (no `if !` around it) is a plain command: if mktemp fails, errexit
+  # trips right there, and — when status_write is invoked unconditionally,
+  # not as the condition of an `if`/`||` — that takes the whole calling
+  # script down with only mktemp's raw stderr line, before status_write's
+  # own error handling ever runs (confirmed separately: the unguarded
+  # version prints just "mktemp: failed to create file..." and nothing
+  # else; the guarded version below also prints status_write's own
+  # diagnostic first). Point the target at a directory that does not
+  # exist so mktemp has nowhere to create the temp file, and require the
+  # controlled diagnostic to appear before the process exits.
+  run bash -c '
+    source "'"${BATS_TEST_DIRNAME}"'/../lib/status.sh"
+    status_write "'"$WORK"'/missing-dir/s.json" "ready" "{}"
+  '
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"status_write: could not create a temp file"* ]]
+  [ ! -e "$WORK/missing-dir" ]
+}
+
+@test "status_write does not let the body override schema, state, or checked_at" {
+  # jq's `+` gives the right-hand operand precedence. If the body were on
+  # the right (`{schema:...} + $body`), a body carrying its own `schema`,
+  # `state`, or `checked_at` key would silently win over the envelope —
+  # and the envelope is the only thing a future reader (Task 8's `[ "$schema"
+  # = "1" ]` gate, `upd apply`'s `.state == "ready"` gate) can trust. A body
+  # is caller-supplied data; it must never be able to forge the contract.
+  status_write "$WORK/s.json" "ready" '{"schema":99,"state":"pwned","checked_at":"nope","x":1}'
+  jq -e '.schema == 1' "$WORK/s.json"
+  jq -e '.state == "ready"' "$WORK/s.json"
+  jq -e '.checked_at != "nope"' "$WORK/s.json"
+  jq -e '.x == 1' "$WORK/s.json"
+}
+
+@test "status_write writes the requested state, not just whatever the caller happened to pass in the other tests" {
+  # Every other test in this file passes "ready", so a `status_write` that
+  # ignored $state entirely and hardcoded "ready" into the envelope would
+  # pass all of them. Use a different state and check it lands verbatim.
+  status_write "$WORK/s.json" "build_failed" '{}'
+  jq -e '.state == "build_failed"' "$WORK/s.json"
+}
+
+@test "status_write refuses to write when the target path already exists as a directory" {
+  # mktemp's template only needs $path's *parent* to exist, so mktemp
+  # itself would succeed. But `mv "$tmp" "$path"` on a directory target
+  # moves the temp file *into* that directory instead of replacing it —
+  # silent "success" with nothing at the path a reader is polling, the
+  # worst failure mode for the engine's only output surface.
+  mkdir -p "$WORK/s.json"
+  run status_write "$WORK/s.json" "ready" '{}'
+  [ "$status" -eq 1 ]
+  [ -d "$WORK/s.json" ]
+  [ -z "$(find "$WORK/s.json" -mindepth 1)" ]
+}
