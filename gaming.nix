@@ -42,12 +42,38 @@
   # so even at 30% total utilisation, which is why "the CPU is not busy" was
   # misleading.
   #
-  # The ASUS platform profile is deliberately NOT touched here. Switching it to
-  # `performance` is what unlocks the GPU's remaining clock headroom, but it
-  # also drives the fan curve hard, and this laptop is used quietly most of the
-  # time. Uncomment the custom hooks below to trade that noise for the frames;
-  # they revert on exit, so it only applies while a game is running.
-  # Without this, gamemode activates and then silently changes nothing.
+  # The ASUS platform profile is deliberately NOT touched here, and the reason
+  # is no longer "noise" — it is that it does not work. Tested live on
+  # 2026-08-07 with CS2 running, switching to `performance` and back:
+  #
+  #   balanced     2490 MHz   78-86 W   GPU 85 C   Tctl 93.9 C   fans 4000/4400
+  #   performance  2490 MHz   76-87 W   GPU 87 C   Tctl 95.8 C   fans 6000/6300
+  #
+  # The clock did not move by a single MHz. The fans went up 50% and the CPU
+  # got 2 C hotter. The earlier claim that `performance` "unlocks the GPU's
+  # remaining clock headroom" was never measured — it was inferred from the
+  # clock sitting still, and it is wrong. Leave the hooks below commented.
+  #
+  # What the clock is actually doing: the 3105 MHz that nvidia-smi reports as
+  # "Max Clocks" is a silicon spec number this part will not sustain, and the
+  # 140 W in "Max Power Limit" is likewise not the configured limit — the real
+  # one is `Current Power Limit: 100.00 W`. Against that, 78-86 W at 85-87 C
+  # is not a machine being held back. 2490 MHz is simply the boost bin for
+  # this thermal state, and NVIDIA's soft thermal binning does not raise any
+  # flag in clocks_throttle_reasons, which is why that field reads 0x0 while
+  # the clock is visibly capped. A fixed clock is NOT by itself evidence of an
+  # artificial cap — check the power limit and temperature before concluding.
+  #
+  # The real ceiling is thermal and it is shared: Tctl runs 93-96 C against a
+  # ~95 C Tjmax while the GPU sits at 85-87 C, on a chassis whose fans are
+  # already loud in `balanced`. CPU and GPU are drawing from one budget, so
+  # anything that heats the CPU costs the GPU clocks. That makes gamemode's
+  # `desiredgov = "performance"` below a genuine open question rather than a
+  # settled win: it boosts all 24 cores for a game that loads about five, and
+  # the heat comes out of the same budget. Untested as of 2026-08-07.
+  #
+  # Without the polkit rule below, gamemode activates and then silently
+  # changes nothing.
   #
   # Its own polkit policy ships every action denied — allow_any, allow_inactive
   # and allow_active are all "no" — because upstream expects the administrator
