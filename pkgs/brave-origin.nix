@@ -62,7 +62,7 @@
 # does. Bump `version` + `hash` together; both come from
 # https://brave-browser-apt-release.s3.brave.com/dists/stable/main/binary-amd64/Packages
 let
-  version = "1.93.132";
+  version = "1.93.134";
 
   deps = [
     alsa-lib
@@ -161,7 +161,7 @@ stdenv.mkDerivation {
 
   src = fetchurl {
     url = "https://brave-browser-apt-release.s3.brave.com/pool/main/b/brave-origin/brave-origin_${version}_amd64.deb";
-    hash = "sha256-53pc7094Aay9iAhxGdhcXU8PltRAL01pmmb2ga0B6Cg=";
+    hash = "sha256-KIuPPIdbzYVd/REn/YVZ1+CVIid8/VaeP7LUThBuxTI=";
   };
 
   dontConfigure = true;
