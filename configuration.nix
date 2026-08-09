@@ -11,6 +11,7 @@
     ./keyboard.nix
     ./wireguard.nix
     ./tailscale.nix
+    ./storage.nix
     ./updates.nix
   ];
 
