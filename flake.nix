@@ -24,6 +24,22 @@
     # nixpkgs than the one it was tested against buys nothing.
     claude-desktop.url = "github:poeck/claude-desktop-nix-flake";
 
+    # ChatGPT Desktop — the unified app, with Chat, Work and Codex in one window.
+    # OpenAI ships it only for macOS and Windows; Linux is "planned" and does not
+    # exist. This flake downloads OpenAI's own macOS DMG with a pinned hash (a CI
+    # bot refreshes it after each upstream release), extracts the Electron bundle
+    # and converts it for Linux. Nothing of OpenAI's is redistributed.
+    #
+    # This is the fragile DMG-patching approach that ./flake.nix rejects for
+    # Claude Desktop above — accepted here only because there is no Debian build
+    # or any other Linux artifact to prefer over it.
+    #
+    # Its nixpkgs deliberately does not follow ours, same reasoning as the two
+    # inputs above. Note that the project's Cachix cache serves nothing in
+    # practice: expect ~190 derivations to build locally, Electron included, on
+    # the first rebuild after the bot bumps the DMG hash.
+    codex-desktop-linux.url = "github:ilysenko/codex-desktop-linux";
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";

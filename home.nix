@@ -32,10 +32,16 @@ in
   home.stateVersion = "25.05";
   programs.home-manager.enable = true;
 
-  # home.sessionPath used to carry $HOME/.npm-global/bin, for packages installed
-  # with `npm i -g`. The directory is empty and the approach is superseded:
-  # per-project toolchains now come from ./devshells through direnv, so a global
-  # npm prefix has nothing left to hold. One line to restore if that changes.
+  # Restored 2026-08-08. Per-project toolchains still come from ./devshells
+  # through direnv, so this is not for project dependencies — it is for the one
+  # global npm install that is genuinely global: the `codex` CLI, which ChatGPT
+  # Desktop shells out to at runtime.
+  #
+  # It was reachable before this line existed, but only through fish_user_paths,
+  # a universal variable sitting in ~/.config/fish/fish_variables — imperative
+  # state outside this repo, which a fresh install would not reproduce. Declaring
+  # it here does not remove that variable; it just stops being the only source.
+  home.sessionPath = [ "$HOME/.npm-global/bin" ];
 
   home.packages = with pkgs; [
     # nodejs is deliberately absent here: ./terminal/nvim.nix already installs
@@ -68,7 +74,19 @@ in
     })
 
     inputs.zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
-    inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.default
+
+    # Not the flake's package directly: it needs a flag before it can reach the
+    # keyring under niri, or every sign-in is lost on exit. See the file.
+    (pkgs.callPackage ./pkgs/claude-desktop-keyring.nix {
+      claude-desktop = inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    })
+
+    # ChatGPT Desktop, wrapped for the same keyring reason as Claude above.
+    # It shells out to the `codex` CLI at runtime and finds it on PATH — see the
+    # home.sessionPath note near the top of this file, which exists for this.
+    (pkgs.callPackage ./pkgs/codex-desktop-keyring.nix {
+      codex-desktop = inputs.codex-desktop-linux.packages.${pkgs.stdenv.hostPlatform.system}.codex-desktop;
+    })
   ];
 
   xdg.configFile = builtins.mapAttrs
