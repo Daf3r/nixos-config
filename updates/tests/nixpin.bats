@@ -47,3 +47,33 @@ teardown() {
   nixpin_set "$WORK/pkg.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
   [ "$(stat -c '%a' "$WORK/pkg.nix")" = "644" ]
 }
+
+@test "nixpin_set creates its temp file beside the target, not in \$TMPDIR" {
+  # Spy on mktemp: log the template it was called with, then delegate to the
+  # real command. A shell function shadows the external command for any
+  # unqualified call made in this shell, including from inside nixpin_set.
+  # nixpin_set invokes it inside a `$(...)` command substitution, which runs
+  # in a subshell — a variable assignment here would not survive back to
+  # this test, so the call is logged to a file instead.
+  local calls="$WORK/.mktemp-calls"
+  mktemp() {
+    echo "$1" >> "$calls"
+    command mktemp "$@"
+  }
+
+  nixpin_set "$WORK/pkg.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+
+  [ -s "$calls" ]
+  local captured_template
+  captured_template="$(cat "$calls")"
+  [ "$(dirname "$captured_template")" = "$(dirname "$WORK/pkg.nix")" ]
+}
+
+@test "nixpin_set leaves no temp file behind when the substitution fails" {
+  cp "${BATS_TEST_DIRNAME}/fixtures/sample-pkg-nohash.nix" "$WORK/nohash.nix"
+  run nixpin_set "$WORK/nohash.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+  [ "$status" -eq 1 ]
+  local leftovers
+  leftovers="$(find "$WORK" -maxdepth 1 -name 'nohash.nix.??????')"
+  [ -z "$leftovers" ]
+}
