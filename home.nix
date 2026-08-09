@@ -66,9 +66,18 @@ in
     python3
     (pkgs.writeShellApplication {
       name = "ns";
+      # This used to carry `nix-search-tv.overrideAttrs { env.GOEXPERIMENT =
+      # "jsonv2"; }`, inherited from the nixtalia starter. nixpkgs now sets that
+      # exact value itself, and adds `ldflags = [ "-s" ]` — which is what strips
+      # the symbol table where a Go binary records the toolchain path.
+      #
+      # Keeping the override forced a local rebuild that lost that protection,
+      # and `buildGoModule` refuses the result: "output nix-search-tv-2.2.8 is
+      # not allowed to refer to /nix/store/…-go-1.26.5". Without it the package
+      # comes straight from the binary cache. Found by ../updates.nix.
       runtimeInputs = with pkgs; [
         fzf
-        (nix-search-tv.overrideAttrs { env.GOEXPERIMENT = "jsonv2"; })
+        nix-search-tv
       ];
       text = ''exec "${pkgs.nix-search-tv.src}/nixpkgs.sh" "$@"'';
     })
