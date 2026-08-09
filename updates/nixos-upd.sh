@@ -129,8 +129,19 @@ fi
 # the swap below. Nothing traps those, and a whole clone left behind every time
 # would grow $STATE_DIR without bound. Safe here and only here: the lock is
 # held, so no other run owns one, and this run has not created its own yet.
-find "$STATE_DIR" -maxdepth 1 \( -name "$(basename "$WT").new.*" \
-  -o -name "$(basename "$WT").old.*" \) -exec rm -rf {} + >>"$LOG" 2>&1 || true
+wt_base="$(basename "$WT")"
+find "$STATE_DIR" -maxdepth 1 -name "$wt_base.new.*" -exec rm -rf {} + >>"$LOG" 2>&1 || true
+
+# The .old.* half is different, and only reapable when $WT is actually there. A
+# run killed between the swap's two renames leaves no $WT and a .old.* holding
+# the only copy of the prepared commit and the GC root; sweeping it here would
+# destroy the very thing the swap was written to protect, one command before the
+# clone check could have adopted it. With $WT present, a .old.* is genuinely
+# superseded. When it is absent the leftover simply survives this run and is
+# collected by the next one, which will have a $WT again.
+if [ -e "$WT" ] || [ -L "$WT" ]; then
+  find "$STATE_DIR" -maxdepth 1 -name "$wt_base.old.*" -exec rm -rf {} + >>"$LOG" 2>&1 || true
+fi
 
 # --- private clone, reset to the committed branch ---------------------------
 # $WT is used only when it is demonstrably this engine's own, structurally
@@ -156,9 +167,21 @@ find "$STATE_DIR" -maxdepth 1 \( -name "$(basename "$WT").new.*" \
 #                       broken, which is a different thing from out of date and
 #                       is the only condition that justifies deleting it.
 #   origin is $REPO     it is ours, and ours for this source.
+#
+# Both sides of that comparison must be canonicalized. `--absolute-git-dir`
+# returns a resolved path, so comparing it against the literal "$WT/.git"
+# rejects a perfectly healthy clone whenever $STATE_DIR is reached through a
+# symlink or simply carries a trailing slash -- re-cloning every single day,
+# destroying the prepared commit and the GC root each time, and saying nothing:
+# the mismatch is on this outer `if`, so even the "is not this engine's clone"
+# line below never fires and the run still reports a normal `ready`. That is not
+# hypothetical for long: a systemd unit using DynamicUser=yes with
+# StateDirectory=nixos-upd gets /var/lib/nixos-upd as a symlink into private/,
+# and Task 8 writes that unit next. `readlink -f "$WT"` is safe here because
+# [ ! -L "$WT" ] has already rejected a $WT that is itself a symlink.
 wt_is_ours=0
 if [ ! -L "$WT" ] \
-  && [ "$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)" = "$WT/.git" ] \
+  && [ "$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)" = "$(readlink -f "$WT")/.git" ] \
   && git -C "$WT" cat-file -e 'HEAD^{commit}' 2>/dev/null; then
   wt_origin="$(git -C "$WT" remote get-url origin 2>/dev/null)" || wt_origin=""
   if [ -n "$wt_origin" ] \
@@ -206,14 +229,24 @@ if [ "$wt_is_ours" -ne 1 ]; then
   rm -rf "$wt_old" || true
 fi
 
-# A truncated or corrupt index makes `git fetch` exit 128 while passing every
-# structural probe above -- it reads a ref and an object, not the index. That
-# wedged the engine on check_failed forever, and this engine writes that very
-# artefact: `git add -A` below leaves an index that a systemd timeout, a reboot
-# or a full disk can truncate mid-write. Removing it is completely
-# non-destructive, because `reset --hard FETCH_HEAD` rewrites it wholesale a few
-# lines down.
-rm -f "$WT/.git/index" || true
+# Clear the two kinds of debris a half-finished git command leaves behind, both
+# of which pass every structural probe above -- those read a ref and an object,
+# neither the index nor any lock -- and both of which wedge the engine on
+# check_failed forever with no way back.
+#
+#   a corrupt index      makes `git fetch` exit 128.
+#   a stale *.lock       makes `reset --hard` fail. index.lock, HEAD.lock and
+#                        refs/heads/auto/update.lock were each confirmed to
+#                        wedge runs 2 and 3 and every run after.
+#
+# This engine authors both: `git add -A` below writes the index under
+# index.lock, so a systemd timeout or a reboot mid-command leaves one or the
+# other. Removing them is non-destructive -- `reset --hard FETCH_HEAD` rewrites
+# the index wholesale two commands later, and a lock whose owning process is
+# gone protects nothing. Safe to clear unconditionally because $WT is private to
+# this engine and the flock above means no other run holds them.
+rm -f "$WT/.git/index" "$WT/.git/index.lock" "$WT/.git/HEAD.lock" || true
+find "$WT/.git/refs" -name '*.lock' -delete 2>/dev/null || true
 
 # A failed fetch is NOT evidence that the clone is damaged, and must never
 # delete anything. A wrong $BRANCH, an unreachable $REPO and a permissions blip
@@ -237,11 +270,22 @@ git -C "$WT" checkout -q -B auto/update FETCH_HEAD >>"$LOG" 2>&1 \
   || fail check_failed "could not put the worktree on auto/update"
 
 # --- bump the two locally-packaged apps ------------------------------------
-# A failing bump leaves that package where it is and does not stop the run.
-brave_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")" \
-  || brave_line="brave-origin (bump failed)"
-t3code_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-t3code-app.sh" --repo "$WT" 2>>"$LOG")" \
-  || t3code_line="t3code-app (bump failed)"
+# A failing bump leaves that package where it is and does not stop the run --
+# but it must not be silent either. local_pkgs is free-form prose meant for a
+# human, so the only machine-detectable signal a failure used to leave was a
+# substring match on "(bump failed)", which is no contract for a reader to gate
+# on. A reader watching `warnings` -- which is what Task 8's `upd` does -- saw a
+# clean `ready` while a package quietly stayed behind at its old version. Same
+# class as the VA-API check above: the check not running has to look different
+# from the check passing.
+if ! brave_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
+  brave_line="brave-origin (bump failed)"
+  warn local_bump_failed "brave-origin could not be bumped; it stays at the version pinned in pkgs/brave-origin.nix (see $LOG)"
+fi
+if ! t3code_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-t3code-app.sh" --repo "$WT" 2>>"$LOG")"; then
+  t3code_line="t3code-app (bump failed)"
+  warn local_bump_failed "t3code-app could not be bumped; it stays at the version pinned in pkgs/t3code-app.nix (see $LOG)"
+fi
 
 # --- flake inputs -----------------------------------------------------------
 nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake update failed"
