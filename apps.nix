@@ -171,6 +171,11 @@ in
     # own .deb — see ./pkgs/brave-origin.nix for how to bump it.
     (pkgs.callPackage ./pkgs/brave-origin.nix { })
 
+    # T3 Code. Upstream ships Linux only as an AppImage, so it is wrapped
+    # locally — see ./pkgs/t3code-app.nix, which also explains the
+    # --password-store flag it has to be launched with.
+    (pkgs.callPackage ./pkgs/t3code-app.nix { })
+
     kdePackages.dolphin # SUPER+E in config/niri/config.kdl
     kdePackages.kate # SUPER+K
     filezilla
@@ -358,6 +363,14 @@ in
         "text/html" = browser;
         "x-scheme-handler/http" = browser;
         "x-scheme-handler/https" = browser;
+
+        # T3 Code drives its own UI through deep links — opening its settings
+        # asks the portal to handle a t3code:// URL, and with nothing claiming
+        # the scheme the portal answers with "No Apps available" instead. The
+        # app's own .desktop declares the MimeType, but declaring is not the
+        # same as being the registered default.
+        "x-scheme-handler/t3code" = [ "t3code.desktop" ];
+        "x-scheme-handler/t3code-dev" = [ "t3code.desktop" ];
       };
   };
 
