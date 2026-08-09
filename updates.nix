@@ -97,7 +97,68 @@ let
     pname = "nixos-upd";
     version = "1";
     src = ./updates;
-    nativeBuildInputs = [ pkgs.makeWrapper ];
+    nativeBuildInputs = [
+      pkgs.makeWrapper
+      # For checkPhase below. bats and shellcheck are the check itself; the
+      # rest is what the suites shell out to and what stdenv does not already
+      # provide. Each one was a real failure in the sandbox before it was added:
+      # without binutils the three check-vaapi tests exit 127 on `strings`, and
+      # without util-linux upd.sh's apply preflight refuses on a missing
+      # `flock`. That is the same class of gap the installCheck below exists to
+      # catch at runtime, arriving here at test time instead.
+      pkgs.bats
+      pkgs.shellcheck
+      pkgs.git
+      pkgs.jq
+      pkgs.binutils
+      pkgs.util-linux
+    ];
+
+    # The suite was written alongside these scripts and then never run by
+    # anything but a human typing `bats updates/tests/`. A test suite that only
+    # runs when someone remembers is not a guarantee, it is a habit -- and the
+    # habit is what fails on the day the change is small enough to feel safe.
+    # Wiring it in here means the module cannot be built, let alone switched to,
+    # with a red suite.
+    #
+    # Hermetic on purpose: nothing below reaches the network or the running
+    # system. The suites use fixtures for the two upstream feeds, stub `nh`, and
+    # build their git repositories from scratch under $TMPDIR.
+    doCheck = true;
+    checkPhase = ''
+      runHook preCheck
+
+      # git refuses to do anything useful without somewhere to look for a
+      # config, and stdenv's /homeless-shelter is not writable.
+      export HOME=$TMPDIR/home
+      mkdir -p "$HOME"
+
+      # check-vaapi.bats deliberately reaches out of this src to
+      # ../../pkgs/brave-origin.nix: its job is to prove that the feature-name
+      # list hardcoded in check-brave-vaapi.sh still matches the derivation,
+      # which is a cross-file invariant and is worthless if the test is allowed
+      # to check the list against itself. src is ./updates, so the file has to
+      # be placed where the test looks for it. This also makes the derivation
+      # depend on brave-origin.nix, which is correct: editing the feature list
+      # there must rebuild and re-check this.
+      mkdir -p ../pkgs
+      cp ${./pkgs/brave-origin.nix} ../pkgs/brave-origin.nix
+
+      # --print-output-on-failure because the only person who will ever read
+      # this is someone staring at a nix build log with no way to re-run the
+      # test interactively; bare bats prints the failing assertion and not the
+      # output that explains it.
+      bats --print-output-on-failure tests/
+
+      # shellcheck from inside this directory, not from the flake root: the
+      # `# shellcheck source=lib/....sh` directives in the entry points are
+      # resolved relative to the working directory, and from anywhere else they
+      # silently degrade to SC1091 "not following" -- so -x would look like it
+      # was following the libraries while checking nothing.
+      shellcheck -x -- *.sh lib/*.sh
+
+      runHook postCheck
+    '';
 
     installPhase = ''
       runHook preInstall
@@ -105,8 +166,10 @@ let
       mkdir -p $out/libexec/nixos-upd $out/bin
       cp -r ./lib $out/libexec/nixos-upd/lib
       cp ./*.sh $out/libexec/nixos-upd/
-      # The bats suites are development-time only; they are not part of what
-      # gets installed on the system.
+      # The bats suites already ran, in checkPhase above; they are a build-time
+      # gate, not something the system needs at runtime. `cp ./*.sh` does not
+      # pick the directory up in the first place, so this is a guard against a
+      # future `cp -r .` rather than a removal of anything currently copied.
       rm -rf $out/libexec/nixos-upd/tests
 
       # `#!/usr/bin/env bash` resolves through PATH at exec time. The wrapper

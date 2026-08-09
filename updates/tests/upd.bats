@@ -15,11 +15,18 @@ setup() {
   mkdir -p "$STATE"
   # A stub `nh`, so the apply tests can prove activation was NOT reached --
   # and, on the happy path, that it was reached with the right argument.
+  #
+  # The shebang is written as $BASH rather than `/usr/bin/env bash`: these
+  # stubs are reached through execve (PATH lookup for `nh`, a bare `exec` for
+  # the engine), so the interpreter path has to exist. Now that the suite runs
+  # inside the nix build sandbox there is no /usr/bin/env there, and four tests
+  # failed with "bad interpreter" -- the stub never ran and the assertion about
+  # upd.sh's behaviour was really an assertion about the sandbox's /usr/bin.
   mkdir -p "$WORK/bin"
-  cat > "$WORK/bin/nh" <<'EOF'
-#!/usr/bin/env bash
+  { printf '#!%s\n' "$BASH"; cat <<'EOF'
 printf '%s\n' "$*" >> "$NH_MARKER"
 EOF
+  } > "$WORK/bin/nh"
   chmod +x "$WORK/bin/nh"
   export NH_MARKER="$WORK/nh-called"
   : > "$NH_MARKER"
@@ -344,10 +351,12 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 # --- check ------------------------------------------------------------------
 
 @test "check runs the engine directly, not through systemctl" {
-  cat > "$WORK/bin/motor" <<'EOF'
-#!/usr/bin/env bash
+  # $BASH, not `/usr/bin/env bash`: upd.sh reaches this with a bare `exec`, and
+  # /usr/bin/env does not exist inside the nix build sandbox.
+  { printf '#!%s\n' "$BASH"; cat <<'EOF'
 echo "motor ejecutado"
 EOF
+  } > "$WORK/bin/motor"
   chmod +x "$WORK/bin/motor"
   run env NIXOS_UPD="$WORK/bin/motor" STATE_DIR="$STATE" bash "$UPD" check
   [ "$status" -eq 0 ]
