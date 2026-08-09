@@ -425,11 +425,15 @@ Expected: `brave-origin 1.93.134 (current)` — and `git diff` shows no new chan
 
 - [ ] **Step 5: Revert the working tree**
 
-The engine must own this bump, not a manual run:
+The engine must own this bump, not a manual run. `git reset` first: step 3 used
+`git add -N`, which leaves an intent-to-add entry in the index that `git
+checkout` alone does not clear.
 
 ```bash
-cd ~/nixos-config && git checkout pkgs/brave-origin.nix
+cd ~/nixos-config && git reset -q pkgs/brave-origin.nix && git checkout pkgs/brave-origin.nix && git status --short
 ```
+
+Expected: `git status --short` prints nothing for that file.
 
 - [ ] **Step 6: Commit**
 
