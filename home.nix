@@ -82,8 +82,6 @@ in
       text = ''exec "${pkgs.nix-search-tv.src}/nixpkgs.sh" "$@"'';
     })
 
-    inputs.zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
-
     # Not the flake's package directly: it needs a flag before it can reach the
     # keyring under niri, or every sign-in is lost on exit. See the file.
     (pkgs.callPackage ./pkgs/claude-desktop-keyring.nix {

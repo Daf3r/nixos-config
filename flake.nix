@@ -11,9 +11,6 @@
     # downloads instead of compiling.
     noctalia.url = "github:noctalia-dev/noctalia/cachix";
 
-    zen-browser.url = "github:youwen5/zen-browser-flake";
-    zen-browser.inputs.nixpkgs.follows = "nixpkgs";
-
     # Claude Desktop. Not in nixpkgs. This flake repackages Anthropic's own
     # Linux beta from their Debian repository and refreshes the hash hourly via
     # CI — the alternatives extract and patch the macOS DMG instead, which is a
