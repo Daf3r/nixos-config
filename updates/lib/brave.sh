@@ -25,7 +25,7 @@ brave_latest_version() {
 
 # stdin: a Debian Packages index. $1: version. stdout: that version's hex SHA256.
 brave_sha256_for() {
-  local want=$1 h
+  local want=${1-} h
   h="$(awk -v want="$want" '
     /^Package: brave-origin$/ { in_pkg = 1; match_v = 0; next }
     /^$/                      { in_pkg = 0; match_v = 0 }
