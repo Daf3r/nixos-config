@@ -248,6 +248,22 @@ in
     p7zip
     unrar
 
+    # How a Terminal=true .desktop entry gets a terminal at all.
+    #
+    # GLib is what launches those, and gdesktopappinfo.c hunts for a terminal
+    # through a hardcoded list — gnome-terminal, mate-terminal, xfce4-terminal,
+    # tilix, konsole, nxterm, color-xterm, rxvt, dtterm. kitty is not in it and
+    # is not going to be, so any GTK application asked to open such an entry
+    # gives up with "Unable to find terminal required for application". That is
+    # the same fault KIO had with its own hardcoded `konsole` — the fix for
+    # which is TerminalApplication in ../qt.nix — one library over.
+    #
+    # `xdg-terminal-exec` is the first name GLib tries, ahead of the whole list,
+    # and it resolves the terminal from xdg-terminals.list below instead of from
+    # anyone's hardcoded guess. Fixing it here fixes it for every GTK
+    # application at once rather than per file manager.
+    xdg-terminal-exec
+
     # --- Wayland desktop utilities ---
 
     # wl-copy / wl-paste. Noctalia has its own clipboard for the GUI, but
@@ -358,9 +374,26 @@ in
         archive = [ "org.kde.ark.desktop" ];
         browser = [ "brave-origin.desktop" ];
         office = [ "onlyoffice-desktopeditors.desktop" ];
+        text = [ "org.kde.kate.desktop" ];
       in
       {
+        # Dolphin, not yazi: yazi ships a .desktop that also claims
+        # inode/directory, and it is Terminal=true — letting it win here would
+        # make every "open containing folder" from a browser or chat client go
+        # through a terminal launcher. yazi stays a thing you run from a shell.
         "inode/directory" = [ "org.kde.dolphin.desktop" ];
+
+        # text/plain had no entry here at all, so it fell through to
+        # mimeinfo.cache, whose first candidate is nvim.desktop — a Terminal=true
+        # entry. Double-clicking a .txt therefore tried to open a terminal
+        # rather than an editor. nvim is still the right tool from a shell; it
+        # is the wrong answer to a double click.
+        #
+        # text/csv is deliberately absent: it is claimed further down for
+        # OnlyOffice, which is the right home for a spreadsheet.
+        "text/plain" = text;
+        "text/markdown" = text;
+        "text/x-log" = text;
 
         "image/png" = image;
         "image/jpeg" = image;
@@ -425,6 +458,13 @@ in
         "x-scheme-handler/t3code-dev" = [ "t3code.desktop" ];
       };
   };
+
+  # What xdg-terminal-exec reads. One Desktop File ID per line, most preferred
+  # first; the package above is only the resolver, and with no list it has
+  # nothing to resolve to and GLib is back where it started.
+  xdg.configFile."xdg-terminals.list".text = ''
+    kitty.desktop
+  '';
 
   # **Everything above is invisible to Dolphin without this file.**
   #

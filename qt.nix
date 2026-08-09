@@ -74,7 +74,22 @@
   # the platform theme, and the file left behind by the Plasma removal has only
   # colour-effect blocks. Stating it here means Dolphin picks up the same icons
   # as everything else instead of Breeze.
+  #
+  # [General] TerminalApplication is a second thing this file has to answer for.
+  # KTerminalLauncherJob in libKF6KIOGui resolves the terminal by reading
+  # TerminalService (a .desktop id) and then TerminalApplication (an executable)
+  # from this file's [General] group, with `konsole` hardcoded as the fallback
+  # when neither is set. With no Plasma there is no konsole to fall back to, so
+  # anything routed through that job died with "Terminal konsole not found":
+  # opening a file with a Terminal=true .desktop entry such as nvim's, and
+  # Dolphin's own F4. Naming kitty is enough — TerminalApplication is looked up
+  # on PATH directly, so unlike TerminalService it does not depend on ksycoca
+  # having indexed anything — see the applications.menu note in ./apps.nix for
+  # how little is guaranteed to be in the cache on a session without Plasma.
   xdg.configFile."kdeglobals".text = ''
+    [General]
+    TerminalApplication=kitty
+
     [Icons]
     Theme=Papirus-Dark
 
