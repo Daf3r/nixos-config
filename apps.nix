@@ -91,9 +91,23 @@ in
       interpolation = true;
       tscale = "oversample";
 
-      # Remember volume across runs, and never blow an ear out on start.
+      # This was 70, which is where "the sound is a bit quiet" came from
+      # (2026-08-08). Nothing else in the chain was down: both CS35L41 amps
+      # bind with firmware loaded and calibration applied at gain 17, and the
+      # PipeWire sink sits at 1.00 — mpv was the only stage below maximum, and
+      # it was throwing away 30% before the speakers ever saw the signal.
+      #
+      # 100 is not "loud", it is *unattenuated*: mpv now plays at whatever the
+      # system volume is, which is what every other application on the desktop
+      # already does. The original intent of 70 — not starting at a shout — is
+      # the system volume's job, not a per-player handicap.
+      volume = 100;
+
+      # Software gain above 100 for the quiet ones: films mastered with a wide
+      # dynamic range, and phone video with dialogue recorded far from the mic.
+      # Reachable live with the volume keys; the laptop speakers distort well
+      # before 150, so it is headroom to use deliberately, not to sit at.
       volume-max = 150;
-      volume = 70;
 
       # Subtitles: prefer Spanish, fall back to English.
       slang = "es,spa,en,eng";
