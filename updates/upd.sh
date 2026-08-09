@@ -24,6 +24,11 @@ set -euo pipefail
 #   2  status.json carries a `state` this reader does not know
 
 REPO="${REPO:-/home/daf3r/nixos-config}"
+# The branch the engine prepares *from*, and therefore the only branch it makes
+# sense to fast-forward. Same name and same default as in nixos-upd.sh: the two
+# must agree, and a divergence between them is exactly what the check further
+# down refuses to paper over.
+BRANCH="${BRANCH:-main}"
 STATE_DIR="${STATE_DIR:-/var/lib/nixos-upd}"
 STATUS="$STATE_DIR/status.json"
 WT="$STATE_DIR/wt"
@@ -155,6 +160,27 @@ case "$cmd" in
 
   diff)
     [ -f "$STATE_DIR/diff.txt" ] || { echo "no hay diff guardado"; exit 0; }
+    # The engine writes diff.txt only on the `ready` path. After a build_failed
+    # or a check_failed run the file survives untouched, describing the closure
+    # comparison of some earlier day while status.json has long moved on --
+    # printed bare, a days-old diff is indistinguishable from today's. That is
+    # the same "an incomplete run looks exactly like a passed one" shape the
+    # rest of this file exists to remove, so every diff is stamped with the
+    # state and timestamp it actually belongs to, and anything other than
+    # `ready` says out loud that the diff is older than the last check.
+    if [ -f "$STATUS" ] && jq -e 'type == "object"' "$STATUS" >/dev/null 2>&1; then
+      d_state="$(jq -r '.state // "ausente"' "$STATUS")"
+      d_when="$(jq -r '.checked_at // "fecha desconocida"' "$STATUS")"
+      if [ "$d_state" = "ready" ]; then
+        echo "# diff de la actualizacion preparada (comprobado: $d_when)"
+      else
+        echo "# ATENCION: este diff es de una comprobacion ANTERIOR."
+        echo "# la ultima (estado: $d_state, comprobado: $d_when) no dejo ningun diff nuevo."
+      fi
+    else
+      echo "# ATENCION: sin un status.json legible no se de cuando es este diff."
+    fi
+    echo
     cat "$STATE_DIR/diff.txt"
     ;;
 
@@ -233,7 +259,7 @@ case "$cmd" in
     if [ "$wt_head" != "$prepared" ]; then
       die "en $WT el HEAD ($wt_head) no es auto/update ($prepared); el clon quedo a medias, no me fio de lo que se construyo"
     fi
-    if [ -n "$(git -C "$WT" status --porcelain)" ]; then
+    if [ -n "$(git -C "$WT" status --porcelain --untracked-files=normal --ignore-submodules=none)" ]; then
       die "el clon en $WT tiene cambios sin commitear; lo construido no coincide con el commit preparado"
     fi
 
@@ -251,14 +277,39 @@ case "$cmd" in
     # Before any fetch, and before anything at all is written into $REPO.
     # --porcelain covers untracked files too, which is the common case: a
     # scratch file the user has not decided about yet is still their work.
-    if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
+    #
+    # The two flags are not decoration. `status.showUntrackedFiles=no` in the
+    # repository's own config silences the untracked half of this check
+    # completely, and `submodule.<name>.ignore=all` silences the submodule half
+    # -- both reproduced, with apply proceeding past a stray NOTAS.txt. Nothing
+    # was lost in that reproduction (git refuses to clobber untracked files on
+    # merge, and a fast-forward does not touch submodule worktrees), but the one
+    # safety rule this subcommand exists to enforce must not be switchable from
+    # a config file this engine does not control. Asking explicitly for what the
+    # rule means takes the config out of the loop.
+    dirty_flags=(--porcelain --untracked-files=normal --ignore-submodules=none)
+    if [ -n "$(git -C "$REPO" status "${dirty_flags[@]}")" ]; then
       echo "el arbol de trabajo tiene cambios sin commitear; no aplico" >&2
-      git -C "$REPO" status --short >&2
+      git -C "$REPO" status --short --untracked-files=normal --ignore-submodules=none >&2
       exit 1
     fi
 
     cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD)" \
       || die "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
+
+    # Fast-forwarding *whatever* happens to be checked out is not the same thing
+    # as applying the prepared update, and the difference is not recoverable by
+    # the user on their own. Reproduced: with $REPO on a branch `experimento`
+    # that is an ancestor of main and carries no commits of its own, apply moved
+    # `experimento` onto the prepared commit, left `main` where it was, and
+    # switched -- so the running system is a commit that is not on main. The
+    # engine keeps preparing from $BRANCH, so from then on every `upd apply`
+    # refuses with "experimento no es antecesor del commit preparado ... lanza
+    # `upd check`", advice that cannot fix the situation it describes. Refusing
+    # up front costs one `git switch`; not refusing costs an afternoon.
+    if [ "$cur_branch" != "$BRANCH" ]; then
+      die "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'; haz \`git -C $REPO switch $BRANCH\` y vuelve a lanzar \`upd apply\`"
+    fi
 
     git -C "$REPO" fetch --quiet "$WT" auto/update \
       || die "no pude traer auto/update desde $WT"

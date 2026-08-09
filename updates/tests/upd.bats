@@ -157,9 +157,33 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" == *"no hay diff guardado"* ]]
 
   printf 'brave-origin: 1.85.121 -> 1.86.2\n' > "$STATE/diff.txt"
+  ready_status
   run upd diff
   [ "$status" -eq 0 ]
   [[ "$output" == *"1.85.121 -> 1.86.2"* ]]
+  [[ "$output" == *"comprobado: 2026-08-09T03:00:11+02:00"* ]]
+  [[ "$output" != *"ANTERIOR"* ]]
+}
+
+@test "diff marks itself stale when the last check left no new diff" {
+  # diff.txt is written only on the ready path, so after a failed run it
+  # survives describing an older comparison while status.json has moved on.
+  printf 'brave-origin: 1.85.121 -> 1.86.2\n' > "$STATE/diff.txt"
+  status_json '{"schema":1,"checked_at":"2026-08-05T03:00:11+02:00",
+    "state":"check_failed","error":"nix flake update failed","warnings":[]}'
+  run upd diff
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"comprobacion ANTERIOR"* ]]
+  [[ "$output" == *"check_failed"* ]]
+  [[ "$output" == *"2026-08-05T03:00:11+02:00"* ]]
+  [[ "$output" == *"1.85.121 -> 1.86.2"* ]]
+}
+
+@test "diff says so when it cannot date itself at all" {
+  printf 'brave-origin: 1.85.121 -> 1.86.2\n' > "$STATE/diff.txt"
+  run upd diff
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no se de cuando es este diff"* ]]
 }
 
 @test "an unknown subcommand prints usage and fails" {
@@ -191,6 +215,55 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [ "$status" -eq 1 ]
   [[ "$output" == *"M flake.lock"* ]]
   [ ! -s "$NH_MARKER" ]
+}
+
+@test "apply refuses a dirty tree even when the repo config hides it" {
+  # status.showUntrackedFiles=no silences the untracked half of the check
+  # entirely; the safety rule must not be switchable from a config file this
+  # engine does not control.
+  make_rig
+  git -C "$REPO" config status.showUntrackedFiles no
+  touch "$REPO/NOTAS.txt"
+  run upd apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cambios sin commitear; no aplico"* ]]
+  [[ "$output" == *"?? NOTAS.txt"* ]]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "apply refuses to fast-forward a branch that is not the engine's" {
+  # Reproduced before the fix: with $REPO on `experimento`, an ancestor of main
+  # with no commits of its own, apply moved *experimento* onto the prepared
+  # commit and switched -- so the system ran a commit that is not on main, and
+  # every later apply refused with advice that could not fix it.
+  make_rig
+  git -C "$REPO" branch experimento HEAD
+  git -C "$REPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m "trabajo en main"
+  git -C "$STATE/wt" fetch -q "$REPO" main
+  git -C "$STATE/wt" checkout -q -B auto/update FETCH_HEAD
+  printf 'v3\n' > "$STATE/wt/flake.lock"
+  git -C "$STATE/wt" add -A
+  git -C "$STATE/wt" -c user.name=nixos-upd -c user.email=nixos-upd@localhost \
+    commit -qm "auto: actualizacion preparada"
+  git -C "$REPO" checkout -q experimento
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"esta en la rama 'experimento'"* ]]
+  [[ "$output" == *"prepara desde 'main'"* ]]
+  [[ "$output" == *"switch main"* ]]
+  # experimento must be exactly where it was, and nothing activated.
+  [ "$(git -C "$REPO" rev-parse experimento)" = "$(git -C "$REPO" rev-parse main~1)" ]
+  [ ! -s "$NH_MARKER" ]
+  [ ! -f "$REPO/.git/FETCH_HEAD" ]
+}
+
+@test "apply honours BRANCH when the engine is pointed at another one" {
+  make_rig
+  git -C "$REPO" branch -m main produccion
+  run env BRANCH=produccion REPO="$REPO" STATE_DIR="$STATE" bash "$UPD" apply
+  [ "$status" -eq 0 ]
+  [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
 }
 
 @test "apply refuses when the state is not ready" {
