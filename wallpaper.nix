@@ -39,28 +39,28 @@ let
   # This is what was missing. Picking a wallpaper in Noctalia updated its record
   # and re-derived the palette — so the colours changed — while the image on
   # screen stayed put, because Noctalia's own drawing module is disabled and
-  # nothing told swww.
+  # nothing told awww.
   wallpaper-apply = pkgs.writeShellApplication {
     name = "wallpaper-apply";
-    runtimeInputs = [ pkgs.swww pkgs.coreutils ];
+    runtimeInputs = [ pkgs.awww pkgs.coreutils ];
     text = ''
       img="''${NOCTALIA_WALLPAPER_PATH:-''${1:-}}"
       [ -n "$img" ] || exit 0
       [ -e "$img" ] || exit 0
 
-      # swww img fails until the daemon is accepting connections. Matters at
-      # login, where the hook can fire before swww-daemon is up.
+      # awww img fails until the daemon is accepting connections. Matters at
+      # login, where the hook can fire before awww-daemon is up.
       for _ in $(seq 1 50); do
-        swww query >/dev/null 2>&1 && break
+        awww query >/dev/null 2>&1 && break
         sleep 0.2
       done
 
       connector="''${NOCTALIA_WALLPAPER_CONNECTOR:-}"
       if [ -n "$connector" ]; then
-        swww img --outputs "$connector" "$img" \
+        awww img --outputs "$connector" "$img" \
           --transition-type fade --transition-duration 1.5
       else
-        swww img "$img" --transition-type fade --transition-duration 1.5
+        awww img "$img" --transition-type fade --transition-duration 1.5
       fi
     '';
   };
@@ -85,9 +85,9 @@ let
         img="$(pick)"
         [ -n "$img" ] || return 0
 
-        # Deliberately does NOT call swww here. Telling Noctalia is enough: it
+        # Deliberately does NOT call awww here. Telling Noctalia is enough: it
         # records the path, re-derives the palette, and fires wallpaper_changed,
-        # which runs wallpaper-apply above. Calling swww directly as well would
+        # which runs wallpaper-apply above. Calling awww directly as well would
         # paint the same image twice and show two fades.
         noctalia msg wallpaper-set "$img" >/dev/null 2>&1 || true
       }
@@ -103,7 +103,7 @@ let
   };
 in
 {
-  home.packages = [ pkgs.swww wallpaper-rotate wallpaper-apply ];
+  home.packages = [ pkgs.awww wallpaper-rotate wallpaper-apply ];
 
   # Creates ~/Pictures/Wallpapers, which is NOT in this repo — the images there
   # are other people's work and this repo is public.

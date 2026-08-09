@@ -45,7 +45,8 @@
   snappy,
   udev,
   wayland,
-  xorg,
+  libxcb,
+  xrandr,
   zlib,
   libGL,
   libpulseaudio,
@@ -102,7 +103,7 @@ let
     pipewire
     udev
     wayland
-    xorg.libxcb
+    libxcb
     zlib
     snappy
     libkrb5
@@ -226,7 +227,7 @@ stdenv.mkDerivation {
     gappsWrapperArgs+=(
       --prefix LD_LIBRARY_PATH : ${rpath}
       --prefix PATH            : ${binpath}
-      --suffix PATH            : ${lib.makeBinPath [ xorg.xrandr ]}
+      --suffix PATH            : ${lib.makeBinPath [ xrandr ]}
       --add-flags "--enable-features=${lib.concatStringsSep "," enableFeatures}"
       --add-flags "--disable-features=${lib.concatStringsSep "," disableFeatures}"
       ${lib.optionalString enableVideoAcceleration ''

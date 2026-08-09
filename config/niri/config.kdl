@@ -147,10 +147,11 @@ layout {
 // Configured declaratively in ../../noctalia.nix, not here.
 spawn-at-startup "noctalia"
 
-// swww draws the wallpaper because Noctalia v5.0.0 mis-sizes its own wallpaper
+// awww (called swww until nixpkgs 26.11 renamed it) draws the wallpaper because
+// Noctalia v5.0.0 mis-sizes its own wallpaper
 // surface at fractional scales, and eDP-1 runs at 1.6. See ../../wallpaper.nix
 // for the full write-up.
-spawn-at-startup "swww-daemon"
+spawn-at-startup "awww-daemon"
 spawn-at-startup "wallpaper-rotate" "--watch"
 
 // XWayland is NOT spawned here on purpose. niri 25.11 integrates

@@ -59,7 +59,7 @@ let
     xorg.libXext
     xorg.libXfixes
     xorg.libXrandr
-    xorg.libxcb
+    libxcb
   ];
 in
 {

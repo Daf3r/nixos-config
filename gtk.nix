@@ -42,6 +42,11 @@
   # niri binary finds 34 xcursor references and zero for hyprcursor. Leaving it
   # on would have generated a cursor theme nothing loads.
   home.pointerCursor = {
+    # `enable` used to be implied by the block existing at all. home-manager
+    # deprecated that in 26.11: without this line it now warns and, eventually,
+    # stops generating the cursor configuration.
+    enable = true;
+
     package = pkgs.bibata-cursors;
     name = "Bibata-Modern-Ice";
     size = 24;
@@ -58,6 +63,16 @@
     # which it was, so GTK apps were never actually themed. Declaring the same
     # theme here means settings.ini and gsettings agree instead of racing.
     theme = {
+      package = pkgs.adw-gtk3;
+      name = "adw-gtk3-dark";
+    };
+
+    # home-manager 26.11 changed the default of gtk4.theme from `gtk.theme` to
+    # null, and only keeps the old behaviour while home.stateVersion is below
+    # "26.05". Stating it explicitly means the GTK4 applications keep the same
+    # theme as the GTK3 ones no matter what stateVersion says later — which is
+    # what the block above already intended.
+    gtk4.theme = {
       package = pkgs.adw-gtk3;
       name = "adw-gtk3-dark";
     };

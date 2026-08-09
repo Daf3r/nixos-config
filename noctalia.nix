@@ -104,14 +104,14 @@ in
         # ~/.local/state/noctalia/settings.toml, and the state file wins per
         # setting. Second, and more fundamental: deriving the palette from the
         # wallpaper requires Noctalia to know when the wallpaper changed, and
-        # its wallpaper module is disabled here because swww owns the
+        # its wallpaper module is disabled here because awww owns the
         # background (see ./wallpaper.nix) — so nothing would ever re-trigger
         # the regeneration even if this key had taken effect.
         #
         # Derived from the wallpaper again, which is now possible because the
         # wallpaper_changed hook below closes the loop: a change made in
         # Noctalia is a change Noctalia observes, so it can regenerate the
-        # palette from the new image. The original objection — that swww drew
+        # palette from the new image. The original objection — that awww drew
         # the wallpaper behind Noctalia's back and it could never notice — no
         # longer holds now that wallpaper-rotate goes *through* Noctalia rather
         # than around it.
@@ -215,7 +215,7 @@ in
       };
 
       # Off on purpose — v5.0.0 mis-sizes the wallpaper surface under fractional
-      # monitor scales, and eDP-1 runs at 1.6. swww draws the background
+      # monitor scales, and eDP-1 runs at 1.6. awww draws the background
       # instead; see ./wallpaper.nix for the full write-up and the replacement
       # for [wallpaper.automation]. `directory` stays so that theme.source =
       # "wallpaper" and the wallpaper-set IPC keep resolving the same folder.
@@ -446,7 +446,7 @@ in
       # an *open panel* — which it does under Hyprland — but under niri it
       # registers a permanent layer-shell surface on the background layer of
       # every output, visible in `niri msg layers` as "noctalia-backdrop"
-      # sitting alongside "swww-daemon", and washes the wallpaper in the
+      # sitting alongside "awww-daemon", and washes the wallpaper in the
       # palette's primary colour whether a panel is open or not. With Ayu blue
       # that is a blue screen.
       #
@@ -518,14 +518,14 @@ in
       # locked the session. playerctl is already installed for the media keys.
       hooks.session_locked = [ "playerctl pause" ];
 
-      # The bridge back to swww. Noctalia's own wallpaper *drawing* is disabled
+      # The bridge back to awww. Noctalia's own wallpaper *drawing* is disabled
       # (see ./wallpaper.nix for the fractional-scale bug that forced it), but
       # everything else about its wallpaper handling still works: the Settings
       # picker, the recorded path, and re-deriving the palette from the image.
       #
       # Without this hook the picker looked broken in a very specific way —
       # choosing a new wallpaper changed the colours and left the image on
-      # screen untouched, because nothing told swww. wallpaper-apply reads
+      # screen untouched, because nothing told awww. wallpaper-apply reads
       # NOCTALIA_WALLPAPER_PATH and NOCTALIA_WALLPAPER_CONNECTOR and paints it.
       hooks.wallpaper_changed = [ "wallpaper-apply" ];
 
@@ -543,7 +543,7 @@ in
       # wallhaven earns the first slot because only one image lives in
       # Pictures/Wallpapers, which makes wallpaper-rotate's 900s shuffle a
       # no-op. Point its download_dir at that folder in the plugin's own
-      # settings panel and swww starts having something to rotate through.
+      # settings panel and awww starts having something to rotate through.
       #
       # claude-usage is mine, and it does not come from a git remote: it is the
       # working tree at ~/Projects/noctalia-plugins, wired in through a `path`
