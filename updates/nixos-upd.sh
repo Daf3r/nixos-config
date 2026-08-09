@@ -125,6 +125,13 @@ if ! : > "$LOG"; then
   fail check_failed "could not truncate $LOG"
 fi
 
+# Collect scaffolding orphaned by an earlier run that died between cloning and
+# the swap below. Nothing traps those, and a whole clone left behind every time
+# would grow $STATE_DIR without bound. Safe here and only here: the lock is
+# held, so no other run owns one, and this run has not created its own yet.
+find "$STATE_DIR" -maxdepth 1 \( -name "$(basename "$WT").new.*" \
+  -o -name "$(basename "$WT").old.*" \) -exec rm -rf {} + >>"$LOG" 2>&1 || true
+
 # --- private clone, reset to the committed branch ---------------------------
 # $WT is used only when it is demonstrably this engine's own, structurally
 # intact clone of $REPO. Four conditions, each closing a hole that was
@@ -134,18 +141,24 @@ fi
 #                       accepted and then handed to `reset --hard`, which
 #                       deleted uncommitted work there and left an auto/update
 #                       branch behind.
-#   .git is a DIRECTORY a linked worktree's `.git` is a regular file, and a
-#                       linked worktree of $REPO passes the origin test below
-#                       whenever $REPO's own origin resolves back to $REPO. Its
-#                       commits and its auto/update ref then land inside the
-#                       origin's `.git` -- the single thing this whole file
-#                       exists to prevent.
+#   git dir IS $WT/.git the git directory git would actually use has to be the
+#                       one inside $WT, not merely something reachable through
+#                       a path called `$WT/.git`. Asking git where it resolved
+#                       to covers every way that indirection happens at once:
+#                       `-d` follows symlinks, so a `$WT/.git` symlinked at
+#                       `$REPO/.git` passed it and put refs/heads/auto/update
+#                       in the origin and moved the origin's HEAD onto it; a
+#                       linked worktree resolves to $REPO/.git/worktrees/<name>;
+#                       and --separate-git-dir resolves somewhere else entirely.
+#                       Writing into the origin's `.git` is the single thing
+#                       this whole file exists to prevent.
 #   HEAD's commit reads refs or objects that cannot be read mean the clone is
 #                       broken, which is a different thing from out of date and
 #                       is the only condition that justifies deleting it.
 #   origin is $REPO     it is ours, and ours for this source.
 wt_is_ours=0
-if [ ! -L "$WT" ] && [ -d "$WT/.git" ] \
+if [ ! -L "$WT" ] \
+  && [ "$(git -C "$WT" rev-parse --absolute-git-dir 2>/dev/null)" = "$WT/.git" ] \
   && git -C "$WT" cat-file -e 'HEAD^{commit}' 2>/dev/null; then
   wt_origin="$(git -C "$WT" remote get-url origin 2>/dev/null)" || wt_origin=""
   if [ -n "$wt_origin" ] \
@@ -164,15 +177,43 @@ if [ "$wt_is_ours" -ne 1 ]; then
   # auto/update commit and the result GC root, and left no clone at all for the
   # next run to fall back on. This way a failed clone changes nothing.
   wt_new="$WT.new.$$"
+  wt_old="$WT.old.$$"
   rm -rf "$wt_new" || fail check_failed "could not clear $wt_new"
   if ! git clone --no-hardlinks --quiet "$REPO" "$wt_new" >>"$LOG" 2>&1; then
     rm -rf "$wt_new" || true
     fail check_failed "could not clone $REPO into $WT; the existing $WT was left untouched"
   fi
-  # rm -rf on a symlink removes the link, never the directory it points at.
-  rm -rf "$WT" || { rm -rf "$wt_new" || true; fail check_failed "could not remove $WT"; }
-  mv "$wt_new" "$WT" || fail check_failed "could not move the fresh clone into $WT"
+  # Rename the old one aside instead of deleting it in place. `rm -rf` is not
+  # atomic: one undeletable entry leaves $WT half gone -- `.git` and `result`
+  # already unlinked, so the prepared commit and the GC root are destroyed --
+  # and the fresh clone was then discarded too, so the run achieved nothing.
+  # `mv` within a directory is a single rename that either happens or does not.
+  # A symlinked $WT is moved as the link, never followed.
+  if [ -e "$WT" ] || [ -L "$WT" ]; then
+    if ! mv "$WT" "$wt_old"; then
+      rm -rf "$wt_new" || true
+      fail check_failed "could not move $WT aside; it was left untouched"
+    fi
+  fi
+  if ! mv "$wt_new" "$WT"; then
+    # Put the old one back rather than leaving nothing at $WT.
+    mv "$wt_old" "$WT" 2>/dev/null || true
+    rm -rf "$wt_new" || true
+    fail check_failed "could not move the fresh clone into $WT"
+  fi
+  # Only now is the old one genuinely superseded, and only now may it go. A
+  # failure here is untidy, not dangerous: the sweep above collects it next run.
+  rm -rf "$wt_old" || true
 fi
+
+# A truncated or corrupt index makes `git fetch` exit 128 while passing every
+# structural probe above -- it reads a ref and an object, not the index. That
+# wedged the engine on check_failed forever, and this engine writes that very
+# artefact: `git add -A` below leaves an index that a systemd timeout, a reboot
+# or a full disk can truncate mid-write. Removing it is completely
+# non-destructive, because `reset --hard FETCH_HEAD` rewrites it wholesale a few
+# lines down.
+rm -f "$WT/.git/index" || true
 
 # A failed fetch is NOT evidence that the clone is damaged, and must never
 # delete anything. A wrong $BRANCH, an unreachable $REPO and a permissions blip
