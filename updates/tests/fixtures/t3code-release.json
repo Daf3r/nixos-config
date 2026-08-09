@@ -1,0 +1,10 @@
+{
+  "tag_name": "v0.0.34",
+  "name": "v0.0.34",
+  "assets": [
+    {
+      "name": "T3-Code-0.0.34-x86_64.AppImage",
+      "browser_download_url": "https://github.com/pingdotgg/t3code/releases/download/v0.0.34/T3-Code-0.0.34-x86_64.AppImage"
+    }
+  ]
+}
