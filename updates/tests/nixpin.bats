@@ -33,3 +33,17 @@ teardown() {
   run nixpin_set "$WORK/nope.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
   [ "$status" -eq 1 ]
 }
+
+@test "nixpin_set fails atomically when the hash line is missing" {
+  cp "${BATS_TEST_DIRNAME}/fixtures/sample-pkg-nohash.nix" "$WORK/nohash.nix"
+  before="$(cat "$WORK/nohash.nix")"
+  run nixpin_set "$WORK/nohash.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+  [ "$status" -eq 1 ]
+  [ "$(cat "$WORK/nohash.nix")" = "$before" ]
+}
+
+@test "nixpin_set preserves the file mode on success" {
+  chmod 644 "$WORK/pkg.nix"
+  nixpin_set "$WORK/pkg.nix" "2.0.0" "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+  [ "$(stat -c '%a' "$WORK/pkg.nix")" = "644" ]
+}
