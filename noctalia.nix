@@ -545,25 +545,27 @@ in
       # no-op. Point its download_dir at that folder in the plugin's own
       # settings panel and awww starts having something to rotate through.
       #
-      # claude-usage is mine, and it does not come from a git remote: it is the
-      # working tree at ~/Projects/noctalia-plugins, wired in through a `path`
-      # source below. A plugin dropped into plugins/materialized/ by hand is
-      # NOT picked up — the registry is built from the sources, so without that
-      # entry `noctalia msg plugins list` never shows it.
+      # claude-usage was going to be mine, listed here and fed by a `path`
+      # source pointing at ~/Projects/noctalia-plugins. Both are gone as of
+      # 2026-08-10: that plugin was never implemented for Noctalia — only its
+      # spec was written — and the repo was renamed to dms-plugins when the
+      # target shell became DMS.
+      #
+      # Leaving either behind would have been worse than useless. The path
+      # source pointed at a directory that no longer exists under that name,
+      # and `plugins.enabled` named a plugin no source can resolve. This module
+      # is the fallback shell now; a fallback with a broken config is not one.
       plugins.enabled = [
         "noctalia/wallhaven"
-        "daf3r/claude-usage"
       ];
 
-      # All three sources have to be listed, including the two that ship with
-      # Noctalia. This key replaces the built-in list rather than adding to it,
-      # so naming only "daf3r" would take the official and community catalogs
-      # away with it — and wallhaven above along with them.
+      # Both sources have to be listed even though they are Noctalia's own:
+      # this key replaces the built-in list rather than adding to it, so an
+      # empty or partial list would take the official and community catalogs
+      # away — and wallhaven above along with them.
       #
-      # A `path` source watches the directory live: editing service.luau or
-      # logic.luau hot-reloads the service with no rebuild and no shell
-      # restart, which is the whole point of pointing it at the working tree
-      # instead of installing a copy.
+      # The third entry, a `path` source at ~/Projects/noctalia-plugins, was
+      # removed on 2026-08-10 with the plugin it fed. See the note above.
       plugins.source = [
         {
           name = "official";
@@ -574,11 +576,6 @@ in
           name = "community";
           kind = "git";
           location = "https://github.com/noctalia-dev/community-plugins";
-        }
-        {
-          name = "daf3r";
-          kind = "path";
-          location = "${config.home.homeDirectory}/Projects/noctalia-plugins";
         }
       ];
 

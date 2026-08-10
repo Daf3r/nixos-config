@@ -138,34 +138,31 @@ in
     '';
   };
 
-  # My own Noctalia plugins. They are written in Luau, which is not a language
-  # whose toolchain deserves a place in the system profile: it is needed only
-  # here, to run the logic.luau suite without bringing up the graphical shell.
-  noctalia-plugins = pkgs.mkShell {
+  # My own DankMaterialShell plugins. Renamed from noctalia-plugins on
+  # 2026-08-10 along with the repo, when the target shell changed for the third
+  # time (Caelestia → Noctalia → DMS).
+  #
+  # The whole Luau toolchain went with that rename. Noctalia's plugins are
+  # written in Luau; DMS's are QML + JavaScript, the same pair Caelestia used —
+  # which is why logic.js and its 69 tests are copied rather than translated.
+  # See docs/superpowers/specs/2026-08-10-claude-usage-dms-design.md in the
+  # plugins repo.
+  #
+  # Gone with it: luau, luau-lsp and python3. python was only there to convert
+  # JSON fixtures into a Luau module, because Luau parses no JSON. node parses
+  # JSON, so the fixtures are read directly and the converter has no reason to
+  # exist.
+  dms-plugins = pkgs.mkShell {
     packages = with pkgs; [
-      luau # interpreter, plus luau-analyze and luau-compile
-
-      # luau-analyze cannot be told about host-injected globals — that is a
-      # luau-lsp feature. Without it, service.luau, widget.luau and panel.luau
-      # are unverifiable outside the running shell, because every noctalia.*
-      # and ui.* call reads as an unknown global. With Noctalia's own
-      # noctalia.d.luau passed as --definitions, they typecheck offline.
-      luau-lsp
+      # The suite is `node --test`, run over logic.js with no shell running.
+      # Pinned to the same major the other two shells here use.
+      nodejs_22
 
       fish # the test runner is fish, like the rest of the project
-
-      # The suite has to feed real JSON fixtures to logic.luau, and Luau parses
-      # no JSON — the plugin gets that from the host, which is absent here. The
-      # runner converts the fixtures to a Luau module first, and that converter
-      # is python. Declared rather than inherited from the user profile so the
-      # suite does not depend on what happens to be on PATH.
-      python3
     ];
 
-    # `luau` the REPL has no --version flag, so the version comes from Nix at
-    # evaluation time rather than from the binary.
     shellHook = ''
-      echo "noctalia-plugins · luau ${pkgs.luau.version}"
+      echo "dms-plugins · node ${pkgs.nodejs_22.version}"
     '';
   };
 }
