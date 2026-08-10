@@ -549,5 +549,26 @@ binds {
 // ../../wallpaper.nix). binds.kdl, cursor.kdl, outputs.kdl and windowrules.kdl
 // are generated empty unless configured in the GUI; outputs.kdl staying empty
 // is what keeps DMS away from the monitor setup above.
+// !! DMS EDITS THIS FILE BY ITSELF. CHECK `git status` AFTER TOUCHING ITS GUI. !!
+//
+// On 2026-08-10 it appended includes for layout.kdl, outputs.kdl and
+// windowrules.kdl here on its own and left config.kdl.backup<timestamp> files
+// beside this one. It was not a silent no-op: it edited the config to make its
+// own fragments take effect.
+//
+// The outputs.kdl it generated would have undone the whole output block above:
+//
+//   output "eDP-1"     keyed on the connector name, which is exactly what the
+//                      note up there says is NOT stable on this machine
+//   scale 1.5          2560/1.5 = 1706.67, non-integer, the fractional-scaling
+//                      blur that scale 1.6 exists to avoid
+//   position y=120     undoes the bottom-edge alignment that keeps the cursor
+//                      able to cross between the two outputs
+//
+// Because these includes come last, they win. There is no DMS setting that
+// turns this off — `settings dump` has no toggle for it. The protection is that
+// config/niri is a git-tracked directory, so the edit shows up as a diff
+// instead of happening invisibly. That is how this one was caught, before a
+// reboot made it real.
 include "dms/colors.kdl"
 include "dms/alttab.kdl"
