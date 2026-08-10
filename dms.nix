@@ -53,12 +53,11 @@
   programs.dank-material-shell = {
     enable = true;
 
-    # Off for the comparison. The NixOS module creates systemd.user.services.dms
-    # from this flag, and with Noctalia still spawned by config.kdl an enabled
-    # unit would mean both shells at every login. Flip this to true — and drop
-    # the `spawn-at-startup "noctalia"` line from config/niri/config.kdl at the
-    # same time, not before — when DMS becomes the daily driver.
-    systemd.enable = false;
+    # DMS is the session shell as of this commit. The unit binds to
+    # graphical-session.target and gets restarted if it dies, which a
+    # spawn-at-startup line cannot do — that is why the Noctalia spawn in
+    # config/niri/config.kdl was removed rather than repointed.
+    systemd.enable = true;
 
     # Left empty ON PURPOSE, and this is the whole config story on NixOS.
     #

@@ -68,6 +68,12 @@ in
     recommendedServices.enable = true;
   };
 
+  # `dms doctor` reports accountsservice as missing without this, and the user
+  # avatar and name in the Settings panel stay blank. DMS's own NixOS module
+  # would enable it, but ./dms.nix imports only the home-manager half — see the
+  # note there. This is the one thing that half does not cover.
+  services.accounts-daemon.enable = true;
+
   # The niri module registers xdg-desktop-portal-gnome, which implements
   # screencast/screenshot but is not what should answer FileChooser here — it
   # would want Nautilus (see useNautilus above). The module already sets

@@ -143,9 +143,13 @@ layout {
     }
 }
 
-// Noctalia is the shell: the bar, the launcher, the OSD and the lock screen.
-// Configured declaratively in ../../noctalia.nix, not here.
-spawn-at-startup "noctalia"
+// DankMaterialShell is the shell: the bar, the launcher, the OSD and the lock
+// screen. Configured in ../../dms.nix.
+//
+// Deliberately NOT spawned here, unlike Noctalia before it: DMS ships a systemd
+// user unit (programs.dank-material-shell.systemd.enable in ../../dms.nix) bound
+// to graphical-session.target, which restarts it if it dies. Adding a
+// spawn-at-startup line as well would launch two shells.
 
 // awww (called swww until nixpkgs 26.11 renamed it) draws the wallpaper because
 // Noctalia v5.0.0 mis-sizes its own wallpaper
@@ -319,14 +323,24 @@ binds {
     // keysym under the `us` layout, so the binding could never fire. See
     // ../../keyboard.nix for the full explanation. Change it in both places or
     // in neither. Mod+Space stays as the explicit alternative.
-    Ctrl+Alt+Shift+P { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
-    Mod+Space        { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
-    Mod+F1    { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
-    Mod+F2    { spawn "noctalia" "msg" "settings-toggle"; }
-    Mod+F3    { spawn "noctalia" "msg" "panel-toggle" "clipboard"; }
-    Mod+F4    { spawn "noctalia" "msg" "panel-toggle" "session"; }
-    Mod+L     { spawn "noctalia" "msg" "session" "lock"; }
-    Alt+Tab   { spawn "noctalia" "msg" "window-switcher"; }
+    Ctrl+Alt+Shift+P { spawn "dms" "ipc" "spotlight" "toggle"; }
+    Mod+Space        { spawn "dms" "ipc" "spotlight" "toggle"; }
+    Mod+F1    { spawn "dms" "ipc" "control-center" "toggle"; }
+    Mod+F2    { spawn "dms" "ipc" "settings" "toggle"; }
+    Mod+F3    { spawn "dms" "ipc" "clipboard" "toggle"; }
+    Mod+F4    { spawn "dms" "ipc" "powermenu" "toggle"; }
+    Mod+L     { spawn "dms" "ipc" "lock" "lock"; }
+
+    // The one downgrade from Noctalia. Its `window-switcher` drew a visual
+    // Alt+Tab overlay; DMS has no IPC verb for one, and the `recent-windows`
+    // switcher that dms/alttab.kdl styles is a niri feature whose bind action
+    // this build does not expose — niri 26.04 rejects every spelling of it and
+    // it is absent from the 133 actions `niri msg action --help` lists.
+    //
+    // focus-window-previous is niri's own and is the honest equivalent: it
+    // toggles between the two most recent windows, which is what Alt+Tab is
+    // used for in practice. Revisit when niri exposes the action.
+    Alt+Tab   { focus-window-previous; }
 
     // --- Apps ---
     Mod+Return { spawn "kitty"; }
@@ -399,14 +413,24 @@ binds {
     // --- Hardware keys. Routed through Noctalia rather than handled by niri,
     // so its OSD shows. allow-when-locked is what keeps them working on the
     // lock screen. ---
-    XF86AudioRaiseVolume  allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }
-    XF86AudioLowerVolume  allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }
-    XF86AudioMute         allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }
-    XF86AudioMicMute      allow-when-locked=true { spawn "noctalia" "msg" "mic-mute"; }
-    XF86MonBrightnessUp   allow-when-locked=true { spawn "noctalia" "msg" "brightness-up"; }
-    XF86MonBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "brightness-down"; }
-    XF86KbdBrightnessUp   allow-when-locked=true { spawn "noctalia" "msg" "keyboard-backlight-up"; }
-    XF86KbdBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "keyboard-backlight-down"; }
+    // The numbers are step sizes in percent and come from upstream's own niri
+    // mapping (distro/nix/niri.nix at v1.5.3): 3 for volume, 5 for brightness.
+    XF86AudioRaiseVolume  allow-when-locked=true { spawn "dms" "ipc" "audio" "increment" "3"; }
+    XF86AudioLowerVolume  allow-when-locked=true { spawn "dms" "ipc" "audio" "decrement" "3"; }
+    XF86AudioMute         allow-when-locked=true { spawn "dms" "ipc" "audio" "mute"; }
+    XF86AudioMicMute      allow-when-locked=true { spawn "dms" "ipc" "audio" "micmute"; }
+
+    // The trailing "" is the device argument, and empty means "the default
+    // one" — that is upstream's own spelling, not a typo. `dms ipc brightness
+    // list` names them: backlight:nvidia_0 is the panel, ddc:i2c-9 the MSI over
+    // DDC, leds:asus::kbd_backlight the keyboard.
+    XF86MonBrightnessUp   allow-when-locked=true { spawn "dms" "ipc" "brightness" "increment" "5" ""; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "brightness" "decrement" "5" ""; }
+
+    // Naming the LED device explicitly: without it these would move the screen
+    // backlight instead, since the default device is the panel.
+    XF86KbdBrightnessUp   allow-when-locked=true { spawn "dms" "ipc" "brightness" "increment" "5" "leds:asus::kbd_backlight"; }
+    XF86KbdBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "brightness" "decrement" "5" "leds:asus::kbd_backlight"; }
 
     // Noctalia has no media-control IPC verb, so these use playerctl.
     XF86AudioPlay  allow-when-locked=true { spawn "playerctl" "play-pause"; }
@@ -424,14 +448,16 @@ binds {
     // trained on. It also meant the same key did two different things depending
     // on which session was running.
     //
-    // Noctalia's capture writes the PNG to ~/Pictures/Screenshots *and* puts it
-    // on the clipboard as image/png (shell.screenshot.copy_to_clipboard in
-    // ../../noctalia.nix), so it can be pasted straight into Discord or Brave.
+    // DMS's capture writes the PNG and puts it on the clipboard as image/png,
+    // so it can be pasted straight into Discord or Brave. Unlike Noctalia's,
+    // the directory and the clipboard behaviour are set in DMS's own Settings
+    // GUI rather than declaratively — ../../dms.nix explains why settings.json
+    // is left mutable.
     // Mod+Shift+S is the Windows / Snipping Tool muscle memory and is the one
     // that will actually get used; Print is kept because it costs nothing.
-    Mod+Shift+S { spawn "noctalia" "msg" "screenshot-region"; }
-    Print       { spawn "noctalia" "msg" "screenshot-region"; }
-    Shift+Print { spawn "noctalia" "msg" "screenshot-fullscreen"; }
+    Mod+Shift+S { spawn "dms" "ipc" "niri" "screenshot"; }
+    Print       { spawn "dms" "ipc" "niri" "screenshot"; }
+    Shift+Print { spawn "dms" "ipc" "niri" "screenshotScreen"; }
 
     // Region capture that opens in satty to annotate — arrows, boxes, blur —
     // and puts the annotated result back on the clipboard on Enter. See the
@@ -488,17 +514,26 @@ binds {
     Mod+Shift+P { power-off-monitors; }
 }
 
-// Noctalia's `niri` theme template renders the active palette into noctalia.kdl
-// next to this file and overrides the focus-ring colours set above — which is
-// why this include has to be last.
+// DMS regenerates dms/colors.kdl from the active palette and it overrides the
+// focus-ring colours set above — which is why these includes have to be last.
+// This replaces Noctalia's noctalia.kdl, which worked the same way.
 //
-// Written by hand rather than left to the template's apply.sh: that script
-// appends the line itself, and config/niri lives in the git repo (home.nix
-// symlinks it out of the store), so letting it edit this file would produce an
-// untracked diff on first run. Its guard looks for exactly this line, so it now
-// finds the include present and leaves the file alone.
+// The whole dms/ directory is written by the shell itself, is gitignored, and
+// every file in it carries a DO-NOT-EDIT banner. DMS creates it on first run,
+// so nothing has to be deployed by hand; `dms setup colors` recreates a missing
+// one.
 //
-// noctalia.kdl itself is generated and gitignored. If it is missing, niri logs
-// a config error and keeps the colours above; `noctalia msg templates-apply`
-// recreates it.
-include "noctalia.kdl"
+// Only two of the eight files it generates are included on purpose:
+//
+//   colors.kdl   the palette — the direct replacement for noctalia.kdl
+//   alttab.kdl   styling for niri's recent-windows switcher
+//
+// layout.kdl is deliberately left out: it sets gaps, border widths and corner
+// radii that this file already defines, and DMS's defaults are not the ones
+// tuned here. wpblur.kdl is left out too — it only matters for DMS's own
+// wallpaper surface, and awww draws the wallpaper on this machine (see
+// ../../wallpaper.nix). binds.kdl, cursor.kdl, outputs.kdl and windowrules.kdl
+// are generated empty unless configured in the GUI; outputs.kdl staying empty
+// is what keeps DMS away from the monitor setup above.
+include "dms/colors.kdl"
+include "dms/alttab.kdl"
