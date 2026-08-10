@@ -20,6 +20,7 @@ in
     ./terminal.nix
     ./apps.nix
     ./noctalia.nix
+    ./dms.nix # coexists with Noctalia and autostarts nothing — see its header
     ./wallpaper.nix
     ./gtk.nix
     ./qt.nix

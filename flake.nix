@@ -37,6 +37,34 @@
     # the first rebuild after the bot bumps the DMG hash.
     codex-desktop-linux.url = "github:ilysenko/codex-desktop-linux";
 
+    # DankMaterialShell, under evaluation as a replacement for Noctalia — see
+    # ./dms.nix for the reasoning and for how the two coexist on this branch.
+    #
+    # This one DOES follow our nixpkgs, unlike the three inputs above, and the
+    # difference is not an oversight: those are pinned loose to keep binary
+    # cache hits (noctalia.cachix.org) or because they are repackaged binaries.
+    # DMS publishes no cache at all — its flake declares no substituters — so
+    # there are no hits to lose, and following means one nixpkgs to download
+    # instead of two. It is a Go binary plus QML, so a local build is cheap;
+    # this is not the Electron situation codex-desktop-linux describes above.
+    # Pinned to a release tag, NOT to a branch, and that is the point. The
+    # default branch builds `1.6-beta`, so tracking it would buy exactly the
+    # pre-release churn this migration was supposed to escape — Noctalia v5 is
+    # beta too. v1.5.3 is the newest tagged release (2026-07-27).
+    #
+    # A tag never moves, so `nix flake update` cannot bump this: upgrading means
+    # editing the version below by hand, on purpose, after reading the release
+    # notes. Check for a newer one with
+    #   gh release list -R AvengeMedia/DankMaterialShell -L 5
+    #
+    # Do not assume a steady release cadence when deciding how often to look:
+    # v1.5.0 through v1.5.3 landed within three weeks, but v1.4.6 to v1.5.0 was
+    # a two-month gap.
+    dms = {
+      url = "github:AvengeMedia/DankMaterialShell/v1.5.3";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
