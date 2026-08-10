@@ -440,24 +440,38 @@ binds {
 
     // --- Screenshots ---
     //
-    // Print and Shift+Print go through Noctalia rather than niri. An earlier
+    // Print and Shift+Print go through the shell rather than niri. An earlier
     // revision pointed them at niri's own built-in screenshot instead, which
-    // looks like the key doing nothing if you expect
-    // Noctalia's flow: niri opens an interactive picker that needs Enter to
-    // confirm, whereas Noctalia's region capture is the one muscle memory was
-    // trained on. It also meant the same key did two different things depending
-    // on which session was running.
+    // looks like the key doing nothing if you expect the shell's flow: niri
+    // opens an interactive picker that needs Enter to confirm, whereas the
+    // region capture is the one muscle memory was trained on.
     //
-    // DMS's capture writes the PNG and puts it on the clipboard as image/png,
-    // so it can be pasted straight into Discord or Brave. Unlike Noctalia's,
-    // the directory and the clipboard behaviour are set in DMS's own Settings
-    // GUI rather than declaratively — ../../dms.nix explains why settings.json
-    // is left mutable.
+    // The DMS migration on 2026-08-10 repeated this exact mistake by binding
+    // `dms ipc niri screenshot`, which is the same niri picker wearing a DMS
+    // name. Read the flags below before changing these lines again.
+    //
+    // These use the `dms screenshot` CLI, NOT `dms ipc niri screenshot`. The
+    // IPC verb delegates to niri's own picker and walks straight back into the
+    // trap described above — it needs Enter to confirm and leaves the clipboard
+    // empty. The CLI is the one that reproduces Noctalia's behaviour:
+    //
+    //   --no-confirm   capture on mouse release, no Enter. This single flag is
+    //                  the difference between "it works" and "the key does
+    //                  nothing", because the confirm step is invisible if you
+    //                  are not expecting it.
+    //   clipboard      on by default (--no-clipboard would turn it off), as
+    //                  image/png, so it pastes into Discord or Brave directly.
+    //   file           on by default too, into --dir below.
+    //
+    // --dir is passed explicitly rather than left to DMS's default so the path
+    // keeps matching screenshot-path at the top of this file, which is what
+    // niri's own captures (Alt+Print) still use. One directory, not two.
+    //
     // Mod+Shift+S is the Windows / Snipping Tool muscle memory and is the one
     // that will actually get used; Print is kept because it costs nothing.
-    Mod+Shift+S { spawn "dms" "ipc" "niri" "screenshot"; }
-    Print       { spawn "dms" "ipc" "niri" "screenshot"; }
-    Shift+Print { spawn "dms" "ipc" "niri" "screenshotScreen"; }
+    Mod+Shift+S { spawn "dms" "screenshot" "region" "--no-confirm" "--dir" "/home/daf3r/Pictures/Screenshots"; }
+    Print       { spawn "dms" "screenshot" "region" "--no-confirm" "--dir" "/home/daf3r/Pictures/Screenshots"; }
+    Shift+Print { spawn "dms" "screenshot" "full" "--dir" "/home/daf3r/Pictures/Screenshots"; }
 
     // Region capture that opens in satty to annotate — arrows, boxes, blur —
     // and puts the annotated result back on the clipboard on Enter. See the
