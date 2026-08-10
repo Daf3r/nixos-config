@@ -48,18 +48,23 @@ let
     expat
     glib
     libgbm
+    # The six X libraries below used to be reached through the `xorg` package
+    # set, which nixpkgs has deprecated in favour of these top-level names —
+    # same derivations, so this rename changes nothing that reaches Chromium.
+    # Spelling them the old way still works, but it prints an evaluation warning
+    # on every direnv entry, and the aliases will eventually be dropped.
+    libx11
+    libxcb
+    libxcomposite
+    libxdamage
+    libxext
+    libxfixes
     libxkbcommon
+    libxrandr
     nspr
     nss
     pango
     systemd # libudev.so.1
-    xorg.libX11
-    xorg.libXcomposite
-    xorg.libXdamage
-    xorg.libXext
-    xorg.libXfixes
-    xorg.libXrandr
-    libxcb
   ];
 in
 {
@@ -143,15 +148,22 @@ in
   # time (Caelestia → Noctalia → DMS).
   #
   # The whole Luau toolchain went with that rename. Noctalia's plugins are
-  # written in Luau; DMS's are QML + JavaScript, the same pair Caelestia used —
-  # which is why logic.js and its 69 tests are copied rather than translated.
-  # See docs/superpowers/specs/2026-08-10-claude-usage-dms-design.md in the
-  # plugins repo.
+  # written in Luau; DMS's are QML + JavaScript.
   #
-  # Gone with it: luau, luau-lsp and python3. python was only there to convert
-  # JSON fixtures into a Luau module, because Luau parses no JSON. node parses
-  # JSON, so the fixtures are read directly and the converter has no reason to
-  # exist.
+  # An earlier version of this comment said logic.js was copied from the
+  # Caelestia branch rather than translated. That was written before anyone
+  # looked inside the repo: the Noctalia implementation was finished, not just
+  # specced, and it is the newer of the two designs — it returns descriptors
+  # instead of formatted strings, which is what made the es/en catalogue
+  # possible. So the port translates logic.luau back to JavaScript rather than
+  # reusing its own ancestor. See
+  # docs/superpowers/specs/2026-08-10-claude-usage-dms-design.md §1 in the
+  # plugins repo, which records the same correction.
+  #
+  # Gone with the rename: luau, luau-lsp and python3. python was only there to
+  # convert JSON fixtures into a Luau module, because Luau parses no JSON. node
+  # parses JSON, so the fixtures are read directly and the converter has no
+  # reason to exist.
   dms-plugins = pkgs.mkShell {
     packages = with pkgs; [
       # The suite is `node --test`, run over logic.js with no shell running.
