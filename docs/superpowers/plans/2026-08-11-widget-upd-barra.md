@@ -772,6 +772,67 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 
 ---
 
+### Task 5b: extract the blocker calculation to `updates/lib/` — done
+
+> **Added to this plan in the same commit that did the work** — the one that
+> adds `updates/lib/blockers.sh` — and deliberately not folded into Task 6. daf3r decided the order: extract first, rewrite `apply` second. A task
+> that extracts and rewrites at once leaves nobody able to say which of the two
+> broke something when something breaks — and the two touch the same file.
+>
+> The other half of the reason is that extracting *after* Task 6 would mean
+> touching `apply` twice: once to split it, once again when the neighbouring arm
+> moves out from under it. This way Task 6 opens a file where `status` is nine
+> lines and a function call, and nothing it does to `apply` can disturb the
+> blocker logic by accident.
+
+**Files:**
+- Added: `updates/lib/blockers.sh`
+- Modified: `updates/upd.sh` (the `status)` arm shrinks; `LIB_DIR` and one `source` at the top)
+- Not modified: `updates/tests/upd.bats` — see below
+- Not modified: `updates.nix` — verified against the store, not by reading it
+
+**Interfaces:**
+- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. Always returns 0: an error it cannot resolve is itself a blocker, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them.
+- Consumes: nothing. It reads no globals and no environment; the five things it needs are its five arguments. That is the point of the boundary — the caller owns *this machine's* layout (where the repository is, where the lock lives, which two system paths mean "profile" and "running system"), and the function owns the question "what would stop an apply?".
+- The defaults for the two system paths stay in `upd.sh` (`:305-307`) along with the `_UPD_SYSTEM_PROFILE` / `_UPD_CURRENT_SYSTEM` overrides the tests use. They are facts about NixOS's layout, not about the question.
+
+**Why this piece and not another:** it is the only part of the `status` arm that can be named in a sentence and asked a question. What is left in the arm is the shape of a subcommand — which arguments it accepts, which file it reads, what it prints — and that is inseparable from `upd.sh` by definition.
+
+**It is a refactor: no behaviour changes.** The net is the 135 tests that already existed.
+
+- [ ] **Step 1: Move it**
+
+`updates/upd.sh:292-386` (as it stood at `ee4ebd3`) becomes `blockers_live` in `updates/lib/blockers.sh`, with `$REPO`/`$BRANCH`/`$STATE_DIR/lock` and the two resolved system paths as parameters instead of globals. The `add_blocker` helper does not survive the move: instead of growing a JSON string one `jq` call per blocker, the function accumulates flat `code, detail` pairs in a bash array and makes **one** `jq -n --args` call at the end. Same escaping guarantee — no string splicing, and a detail carries a branch name, which is user input — and one process instead of N.
+
+`updates/upd.sh` gains the `LIB_DIR` resolution and the `source` that the other three entry points already have (`:51-57`), sourced unconditionally like they do: the file only defines functions.
+
+- [ ] **Step 2: Run the suite without touching it**
+
+`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok. `shellcheck -x -- *.sh lib/*.sh` → empty.
+
+**No test was modified.** That is the acceptance criterion for this task and not merely an outcome: the 15 `status --json` tests drive the subcommand, never the internals, so a move that needed a test edited would have been a move that changed behaviour. Nothing in `upd.bats` names `add_blocker` or `blockers_live`.
+
+- [ ] **Step 3: Re-run the mutations on the extracted code**
+
+A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. **20 mutations, 20 killed.**
+
+- [ ] **Step 4: Prove the new file reaches the store**
+
+`updates.nix` copies `./lib` wholesale, so in principle nothing there needs editing — but "in principle" is what this repository has been caught by before, so it was checked against the store and not by reading the `.nix`:
+
+```
+$ ls $out/libexec/nixos-upd/lib/
+blockers.sh  brave.sh  closure.sh  inputs.sh  nixpin.sh  status.sh  t3code.sh
+$ $out/bin/upd status --json | jq -c '{state, blockers: [.blockers[].code]}'
+{"state":"ready","blockers":["dirty_tree","wrong_branch"]}
+```
+
+And `git add` before believing any of it: flake evaluation only sees tracked files, so a new file left untracked is a green build over a file that was never there.
+
+**What Task 6 inherits:** an `apply` arm nothing else in this file reaches into, and a `status` arm that is nine lines and a call. The two can now be worked on at the same time without colliding. If Task 6 needs a blocker of its own — say, `apply --boot` wanting to refuse when a generation is already staged — the place to add it is `blockers_live`, and its `detail` should be written for a human reading it off a panel, because that is where it will end up.
+
+---
+
 ### Task 6: Split `apply` into its two halves
 
 **Files:**

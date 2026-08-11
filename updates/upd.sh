@@ -48,6 +48,14 @@ STATUS="$STATE_DIR/status.json"
 WT="$STATE_DIR/wt"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Same resolution order as nixos-upd.sh and the two bump scripts: $LIB_DIR when
+# the store wrapper sets it, the sibling directory when this runs from a
+# checkout. Sourced unconditionally, like they do -- the file only defines
+# functions, so the cost to `show` is a read.
+LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)}"
+# shellcheck source=lib/blockers.sh
+source "$LIB_DIR/blockers.sh"
+
 # The one schema this reader understands. Kept as a variable so the refusal
 # message below can name both sides of the mismatch. Schema 2 dropped the prose
 # `local_pkgs` array for the structured `changes[]`, `closure_diff`,
@@ -289,101 +297,14 @@ case "$cmd" in
     [ -f "$STATUS" ] || die "no hay ninguna comprobacion todavia"
     require_readable_status
 
-    blockers='[]'
-    # jq rather than splicing the strings together: a detail carries a branch
-    # name, which is user input, and one quote in it would hand the consumer a
-    # document it cannot parse.
-    add_blocker() { # $1 code, $2 detail
-      blockers="$(printf '%s' "$blockers" \
-        | jq -c --arg c "$1" --arg d "$2" '. + [{code: $c, detail: $d}]')"
-    }
-
-    # --- the two live git facts, and the admission when there are none -------
-    # Both git calls fail silently in the same way: `git status` in a directory
-    # that is not a repository prints nothing on stdout, so a reader taking that
-    # at face value reports a clean tree, and `symbolic-ref` failing there is
-    # indistinguishable from a real detached HEAD. That pair is two confident
-    # statements about a repository that was never opened, and the second one
-    # sends the reader off to `git switch` something that does not exist. So the
-    # opening is checked first and, when it fails, that is what gets reported.
-    if ! command -v git >/dev/null 2>&1; then
-      add_blocker repo_uncheckable "git no esta en el PATH: no puedo mirar ni el arbol ni la rama de $REPO, y \`upd apply\` se negara por lo mismo"
-    elif ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      add_blocker repo_uncheckable "no puedo leer $REPO como repositorio git; sin eso no se si el arbol esta limpio ni en que rama esta"
-    else
-      # The same two flags `apply` spells out, for the same reason:
-      # status.showUntrackedFiles=no and submodule.<name>.ignore=all each
-      # silence half of this check from a config file this engine does not own.
-      if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=normal --ignore-submodules=none)" ]; then
-        add_blocker dirty_tree "el arbol de trabajo en $REPO tiene cambios sin commitear; no se aplica encima de ellos"
-      fi
-
-      cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD)" || cur_branch=""
-      if [ -z "$cur_branch" ]; then
-        add_blocker wrong_branch "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
-      elif [ "$cur_branch" != "$BRANCH" ]; then
-        add_blocker wrong_branch "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'; haz \`git -C $REPO switch $BRANCH\`"
-      fi
-    fi
-
-    # --- the engine's own lock ----------------------------------------------
-    # Three outcomes, not two, and the plan's version of this arm had two: a
-    # single `! (exec 9>"$STATE_DIR/lock" && flock -n 9)` cannot tell "the
-    # engine holds it" from "I could not open it at all" and answers the first
-    # for both. Measured on that version with a $STATE_DIR that does not exist,
-    # and again with one that is read-only: `engine_running`, both times. That
-    # state is permanent -- a lock file left owned by root after a change of
-    # User= in the unit is the live way to reach it -- so the panel would keep a
-    # dead button and a message naming a check that is not running, with nothing
-    # ever clearing it. `apply` already separates the two cases; so does this.
-    #
-    # Both probes below open $STATE_DIR/lock for writing, which creates it and
-    # truncates it, and this is the one subcommand a desktop panel is going to
-    # poll on a timer -- so the truncation happens over and over. That is safe
-    # today and stays safe only under one invariant: **the lock file carries no
-    # content**. It is a rendezvous inode for flock(2) and nothing else. The
-    # engine (nixos-upd.sh) and `apply` open it exactly the same way, so a run
-    # that started writing a PID or a timestamp into it would already be racing
-    # them; what this arm adds is a reader that would wipe it every few seconds.
-    # If the lock ever needs to carry something, it needs a second file, not a
-    # read-only probe that opens this one for writing.
-    if ! command -v flock >/dev/null 2>&1; then
-      add_blocker lock_uncheckable "flock no esta en el PATH: no puedo descartar una comprobacion en marcha, y \`upd apply\` se negara por lo mismo"
-    elif ! (exec 9>"$STATE_DIR/lock") 2>/dev/null; then
-      add_blocker lock_uncheckable "no puedo abrir $STATE_DIR/lock: no se si hay una comprobacion en marcha, y \`upd apply\` se negara por lo mismo"
-    elif ! (exec 9>"$STATE_DIR/lock" && flock -n 9) 2>/dev/null; then
-      add_blocker engine_running "hay una comprobacion en marcha ahora mismo; espera a que termine"
-    fi
-
-    # --- the profile and the running system have parted ways -----------------
-    # The case this is for: an apply that only writes the profile leaves
-    # /run/current-system where it was, so the next nightly check measures
-    # against the *old* system, finds the update missing from it and reports
-    # `ready` all over again -- and a panel offering that update a second time
-    # is describing work that is already done.
-    #
-    # The two variables are named after what they point at, which is not a
-    # detail. /nix/var/nix/profiles/system is the *profile*: the generation that
-    # will be activated at boot. It is emphatically not "the booted system" --
-    # NixOS spells that /run/booted-system -- and a reader who took the earlier
-    # name at face value and "fixed" the default to match would compare
-    # /run/booted-system against /run/current-system, which differ after any
-    # plain switch onto a new kernel. That is a permanent blocker for a
-    # condition `reboot_recommended` already reports from the closure diff.
-    #
-    # Read from the environment so this is testable without a second generation
-    # on disk; nothing else sets either variable.
-    profile="$(readlink -f "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" 2>/dev/null)" || profile=""
-    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null)" || current=""
-    if [ -n "$profile" ] && [ -n "$current" ] && [ "$profile" != "$current" ]; then
-      # Deliberately not "there is a generation staged for the next boot":
-      # that is one of the two ways to get here and the wording would be false
-      # in the other. `nixos-rebuild test` and `nh os test` activate without
-      # touching the profile, so they leave it on the *older* generation and
-      # /run/current-system on the newer -- the same inequality pointing the
-      # other way. Blocking is right for both; naming only one of them is not.
-      add_blocker pending_reboot "el perfil del sistema y el sistema en marcha no son la misma generacion (un apply sin reiniciar, o un \`test\` sin fijar); resuelvelo antes de apilar otra actualizacion encima"
-    fi
+    # Everything that could stop an apply right now, from lib/blockers.sh. The
+    # defaults for the two system paths live here rather than there because
+    # they are this machine's layout, not a property of the question being
+    # asked; the variables exist so the comparison is testable without a second
+    # generation on disk, and nothing but the tests sets them.
+    blockers="$(blockers_live "$REPO" "$BRANCH" "$STATE_DIR/lock" \
+      "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" \
+      "${_UPD_CURRENT_SYSTEM:-/run/current-system}")"
 
     # The file exactly as the engine wrote it, with `blockers` beside it, and
     # deliberately not the filtered view `show` builds: there the `from == to`
