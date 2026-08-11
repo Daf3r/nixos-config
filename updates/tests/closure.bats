@@ -37,6 +37,22 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
+@test "closure_parse strips the colour codes nix writes around sizes" {
+  # The fixture is a verbatim copy of a real /var/lib/nixos-upd/diff.txt, and
+  # nix wraps every size in ANSI. Left in, they do two things at once: the
+  # size no longer matches at the end of the line so it is counted as 0, and
+  # the escape bytes ride into `to` and out to the bar. Nothing else in this
+  # file fails when the stripping is removed, which is why this asserts on the
+  # raw JSON rather than on one field.
+  # Grepped for the escaped spelling jq emits, not for a raw ESC byte: jq
+  # escapes control characters on output, so a search for the byte itself
+  # would find nothing even against unstripped input and would prove nothing.
+  run bash -c "closure_parse < '$FIX' | grep -c 'u001b'"
+  [ "$status" -ne 0 ]
+  run bash -c "closure_parse < '$FIX' | jq -e '.changed[] | select(.name==\"codex-desktop\") | .to == \"26.803.81509\"'"
+  [ "$status" -eq 0 ]
+}
+
 @test "closure_parse counts the size of a line that has no versions" {
   # `kitty: 51.2 KiB` -- same version string, different closure -- is a real
   # shape and carries a real size. Identifying the size only by a leading
