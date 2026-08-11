@@ -303,13 +303,22 @@ case "$cmd" in
     # asked; the variables exist so the comparison is testable without a second
     # generation on disk, and nothing but the tests sets them.
     # The `|| die` is the seam between that function's contract and this one's.
-    # It promises 0 on every path it can foresee, which leaves the paths it
-    # cannot -- a broken jq, an unwritable $TMPDIR. Without this, `set -e` would
-    # kill the subcommand with whatever exit code the failure carried, and this
-    # file's own header assigns meanings to 1 and 2 that such a code would not
-    # have. Turning it into the documented refusal keeps the promise the panel
-    # is written against: a non-zero exit always means "no answer", never
-    # "answer with something missing".
+    # It promises 0 on every path it can foresee, and this covers the one it
+    # cannot: a `jq` that fails at the bottom of it, which is the only failure
+    # whose status still reaches here.
+    #
+    # Not "any failure inside it", which is what this comment claimed for one
+    # round: errexit does not act inside a command substitution that is part of
+    # an assignment, so a command failing halfway through `blockers_live` never
+    # aborted it in the first place -- measured, and now stated at the top of
+    # that file, which is why every failure it can foresee has a branch there
+    # instead of being left to `set -e`.
+    #
+    # What this buys is the exit code. Without it a non-zero from that function
+    # would kill the subcommand carrying its own status -- 3, 5, 127 -- and this
+    # file's header assigns meanings to 1 and 2 that such a code does not have.
+    # With it, a non-zero exit always means "no answer", never "an answer with
+    # something missing".
     blockers="$(blockers_live "$REPO" "$BRANCH" "$STATE_DIR/lock" \
       "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" \
       "${_UPD_CURRENT_SYSTEM:-/run/current-system}")" \

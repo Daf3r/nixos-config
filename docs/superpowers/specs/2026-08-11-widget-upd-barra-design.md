@@ -76,7 +76,7 @@ is computed live and never written to disk.
 | `wrong_branch` | `$REPO` is not on `$BRANCH`, or is on a detached HEAD |
 | `engine_running` | the engine holds its lock right now |
 | `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — deliberately **not** the same answer as `engine_running`, which would be a permanent blocker naming a check that is not running |
-| `repo_uncheckable` | `$REPO` could not be opened as a git repository, or git could not read all of its work tree, or `git` is missing. Saying "clean" about a tree git only half read is the same defect as the row above |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, or git could not read all of its work tree, or its warnings could not be captured (an unwritable `$TMPDIR`), or `git` is missing — everything that ends in "I do not know whether the tree is clean". Saying "clean" about a tree git only half read is the same defect as the row above |
 | `pending_reboot` | `/nix/var/nix/profiles/system` and `/run/current-system` resolve to different store paths — the profile and the running system are not the same generation. **In either direction**: an apply that has not been rebooted into leaves the profile ahead, and a `nixos-rebuild test` / `nh os test`, which activates without writing the profile, leaves it behind. Blocking is right for both, so the message names the disagreement and not a direction |
 
 There is deliberately no `clone_unusable`. `apply` checks four things about the

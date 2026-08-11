@@ -708,7 +708,7 @@ git commit -m "updates: status.json pasa a schema 2, con los cambios en estructu
 | `engine_running` | the engine holds `$STATE_DIR/lock` right now |
 | `pending_reboot` | the system profile and `/run/current-system` are different generations, **in either direction** |
 | `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — *not* the same as the engine holding it |
-| `repo_uncheckable` | `$REPO` could not be opened as a git repository, **or git could not read all of its work tree**, or `git` is missing |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, **or git could not read all of its work tree**, **or its warnings could not be captured**, or `git` is missing |
 
 Consumers must treat an **unknown** `code` as a blocker and render its `detail`, never as noise to skip: this vocabulary grew by two during implementation and can grow again. The logic sketched for Task 8 already does the right thing (any blocker disables the button, the reason is the `detail`s joined); what must not appear is a `switch` on `code` whose `default` shows nothing.
 
@@ -793,7 +793,7 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 - Not modified: `updates.nix` — verified against the store, not by reading it
 
 **Interfaces:**
-- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. An error it can *foresee* is itself a blocker rather than a failure, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them. Not an unconditional zero, and the header no longer claims one: a broken environment underneath it (no `jq`, no writable `$TMPDIR`) propagates, and `upd.sh` turns that into its documented "exit 1, empty stdout, no answer" with a `|| die`. Nothing is written to stderr on any path — checked by a test, not intended.
+- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. An error it can *foresee* is itself a blocker rather than a failure, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them. Not an unconditional zero, but for a narrower reason than this said for one round: **errexit does not act inside a command substitution that is part of an assignment**, which is how it is called, so a failure in the middle of it never aborted anything — only the status of the last command, the `jq`, reaches the caller, and `upd.sh` turns that into its documented "exit 1, empty stdout, no answer" with a `|| die`. Every other foreseeable failure, `$TMPDIR` included, has a branch of its own and comes back as a blocker. Nothing is written to stderr on any path — checked by a test, not intended.
 - Consumes: nothing. It reads no globals and no environment; the five things it needs are its five arguments. That is the point of the boundary — the caller owns *this machine's* layout (where the repository is, where the lock lives, which two system paths mean "profile" and "running system"), and the function owns the question "what would stop an apply?".
 - The defaults for the two system paths stay in `upd.sh` (`:305-307`) along with the `_UPD_SYSTEM_PROFILE` / `_UPD_CURRENT_SYSTEM` overrides the tests use. They are facts about NixOS's layout, not about the question.
 
@@ -809,13 +809,13 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 
 - [x] **Step 2: Run the suite without touching it**
 
-`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok at the move itself; 142 after the review round added seven. `shellcheck -x -- *.sh lib/*.sh` → empty.
+`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok at the move itself; 144 after two review rounds added nine. `shellcheck -x -- *.sh lib/*.sh` → empty.
 
 **No existing test was modified, at any point.** That is the acceptance criterion for the move and not merely an outcome: the 15 `status --json` tests drive the subcommand, never the internals, so a move that needed a test edited would have been a move that changed behaviour. Nothing in `upd.bats` names `add_blocker` or `blockers_live`. The tests *added* afterwards are a different matter and are listed in Step 5.
 
 - [x] **Step 3: Re-run the mutations on the extracted code**
 
-A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. 20 mutations, 20 killed — and 24 after Step 5. Intentionally *not* included: swapping the profile and the running system, which is a **equivalent mutant** (the comparison is `!=`, so it is unobservable).
+A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. 20 mutations, 20 killed — and 28 after Steps 5 and 6. Intentionally *not* included: swapping the profile and the running system, which is a **equivalent mutant** (the comparison is `!=`, so it is unobservable).
 
 - [x] **Step 4: Prove the new file reaches the store**
 
@@ -839,6 +839,14 @@ Three findings, all of them the same shape as the ones Task 5 kept closing — a
 3. **`git status` failing read as "clean tree"** — the third copy of the defect the `flock` arm and the repository guard had already closed. In a work tree git cannot fully read (a directory the user cannot open) it warns on stderr, **exits 0, and prints nothing on stdout**, so `[ -n "$(…)" ]` was false and no `dirty_tree` was reported. It now answers `repo_uncheckable`, which is why that row grew in Task 5's table above.
 
 `updates/tests/blockers.bats` (6 tests) exists for the two clauses the end-to-end suite cannot reach: an argument beginning with a dash, and stderr staying empty. Everything else stays in `upd.bats` — duplicating it would mean two places to update and one of them drifting. One test was added to `upd.bats` for the `|| die` seam, injected through `$LIB_DIR` the way `nixos-upd.bats` already stubs `closure_reboot`; without it the guard would be code nobody ever ran, which this repository has a commit about.
+
+- [x] **Step 6: The second review round**
+
+One finding, and it is the same header again: with an unwritable `$TMPDIR` the function broke all three of its own clauses at once — `mktemp` leaked its complaint to stderr plus two more from bash behind it, and the function returned 0 while the header claimed that case propagated. The *verdict* was right (`repo_uncheckable`, because the redirection failed and git never ran) but right by accident. `mktemp` is now silenced and has its own branch, with a test asserting all three promises: empty stderr, exit 0, and a blocker rather than silence.
+
+The cause is worth carrying into Task 6: **errexit does not act inside a command substitution that is part of an assignment**. Measured on bash 5.3.15. Nothing in `blockers_live` was ever being aborted by `set -e`, which is why every failure it can foresee has an explicit branch — and why `apply`, which is written in the same style, should not assume otherwise either.
+
+Two smaller things from the same round: `tr … | head -c 200` was a race under `pipefail`, not a pipeline (`head` exits at its 200th byte and `tr` takes a SIGPIPE — reproduced at 1 failure in 10 identical runs over 64 KB), replaced by expansions that also spawn nothing in the path the panel polls; and `blockers.bats` now sets `set -euo pipefail` in its `setup`, so the library is measured in the shell it actually runs in.
 
 **What Task 6 inherits:** an `apply` arm nothing else in this file reaches into, and a `status` arm that is nine lines and a call. The two can now be worked on at the same time without colliding. If Task 6 needs a blocker of its own — say, `apply --boot` wanting to refuse when a generation is already staged — the place to add it is `blockers_live`, and its `detail` should be written for a human reading it off a panel, because that is where it will end up.
 

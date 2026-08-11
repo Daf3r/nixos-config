@@ -24,24 +24,40 @@
 # check" and "there is nothing to report" are different answers and the panel
 # must not confuse them.
 #
-# The two clauses below are the contract, and they are stated in the form they
+# The three clauses below are the contract, and they are stated in the form they
 # can actually be kept -- an earlier version of this header promised "nothing to
 # stderr" and "never fails" flatly, and both were false:
 #
 #   stdout   one JSON array, and nothing else on any path.
 #   stderr   nothing. Every command run below either has its stderr silenced or
-#            captured -- including `git status`, whose warnings used to leak
-#            straight through and which now become a blocker instead. This is
-#            checked by a test rather than left as an intention.
+#            captured: `git status`, whose warnings used to leak straight
+#            through and now become a blocker instead, and `mktemp`, which used
+#            to leak its own complaint plus two from bash behind it. Checked by
+#            a test rather than left as an intention -- this clause has been
+#            written three times and was false the first two.
 #   exit     0 on every path this function can foresee, including all six
-#            blockers. It is *not* an unconditional 0: if the environment is
-#            broken underneath it -- no `jq`, no writable $TMPDIR -- the failure
-#            propagates, and that is deliberate. The caller runs this inside a
-#            command substitution under `set -e` and turns a non-zero into its
-#            documented "exit 1, empty stdout, no answer", which is the honest
-#            reading. What must never happen is a zero exit over a partial
-#            array, and that cannot happen here: the array is printed by a
-#            single command at the very end.
+#            blockers and every environment failure it can name.
+#
+#            It is not, and cannot be, an unconditional 0, and the reason is
+#            worth knowing before trusting any promise made here: **errexit does
+#            not act inside a command substitution that is part of an
+#            assignment**, which is exactly how this function is called.
+#            Measured on bash 5.3.15 -- `f() { local a; a="$(false)"; echo
+#            SIGUIO; }` invoked as `y="$(f)"` prints SIGUIO and the shell
+#            carries on, with or without a trailing `||`. So a failing command
+#            in the middle of this function does *not* abort it; only the exit
+#            status of the last command, the `jq` at the bottom, ever reaches
+#            the caller.
+#
+#            That is why every foreseeable failure below has a branch of its own
+#            rather than being left to `set -e`: an unhandled one would not
+#            stop anything, it would just silently skip a blocker. The one thing
+#            that still propagates is a broken `jq`, and the caller turns that
+#            into its documented "exit 1, empty stdout, no answer".
+#
+#            What must never happen is a zero exit over a partial array, and
+#            that cannot happen here: the array is printed by a single command
+#            at the very end.
 #
 # The blocker vocabulary, and the contract for whoever renders it:
 #
@@ -52,7 +68,11 @@
 #                     generations, in either direction
 #   lock_uncheckable  the lock could not be opened at all, or flock is missing
 #   repo_uncheckable  $REPO could not be opened as a git repository, or git
-#                     could not read all of its work tree, or git is missing
+#                     could not read all of its work tree, or the warnings it
+#                     would have printed could not be captured, or git is
+#                     missing. Everything that ends in "I do not know whether
+#                     the tree is clean", because the one thing this must not
+#                     do is guess
 #
 # A consumer must treat an unknown `code` as a blocker and show its `detail`
 # rather than skipping it: this list grew from four to six while the subcommand
@@ -62,7 +82,10 @@
 
 # $1 repo, $2 branch the engine prepares from, $3 lock file, $4 system profile,
 # $5 running system. stdout: a JSON array of {code, detail}, `[]` when there is
-# nothing in the way. Always returns 0.
+# nothing in the way. Exit status per the contract above -- 0 on every path this
+# can foresee, and nothing but a broken `jq` reaches the caller. (This line said
+# "Always returns 0" for two rounds, three lines under a paragraph explaining
+# why that is not true. The summary next to a signature is what gets read.)
 blockers_live() {
   local repo=$1 branch=$2 lock=$3 profile_path=$4 current_path=$5
   local cur_branch profile current
@@ -103,20 +126,49 @@ blockers_live() {
     # stated rather than defended against, because the alternative (a trap) is
     # what corrupted bats' own teardown in lib/nixpin.sh.
     #
+    # The other way to split the two streams without a file is the descriptor
+    # swap, `tree_err="$( { tree_out="$(git … 2>&1 1>&3)"; } 3>&1 )"`. It was
+    # considered and dropped: the inner assignment happens in a subshell, so
+    # `tree_out` and the exit status have to be smuggled back out, and the whole
+    # thing is one line that almost nobody reads correctly. A temp file costs
+    # one `mktemp` and can be read at a glance.
+    #
     # The two flags are the ones `apply` spells out, for the same reason:
     # status.showUntrackedFiles=no and submodule.<name>.ignore=all each silence
     # half of this check from a config file this engine does not own.
     local tree_out tree_err tree_rc=0 err_file
-    err_file="$(mktemp)"
-    tree_out="$(git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none 2>"$err_file")" \
-      || tree_rc=$?
-    tree_err="$(tr '\n' ' ' < "$err_file" | head -c 200)"
-    rm -f "$err_file"
+    # `2>/dev/null` on mktemp and a branch for its failure, because without them
+    # an unwritable $TMPDIR broke all three promises at the top of this file at
+    # once. Measured, exercising this function with $TMPDIR at mode 500:
+    # mktemp's own complaint reached stderr, bash added two more of its own
+    # (`line 111: : No such file or directory`, from redirecting into an empty
+    # filename), and the function still returned 0. The verdict it produced was
+    # right -- `repo_uncheckable`, because the redirection failed and git never
+    # ran -- but it was right by accident, and it was noisy about it.
+    err_file="$(mktemp 2>/dev/null)" || err_file=""
+    if [ -z "$err_file" ]; then
+      found+=(repo_uncheckable "no pude crear un fichero temporal para recoger los avisos de git (\$TMPDIR no es escribible); sin eso no distingo un arbol limpio de uno que git no pudo leer, asi que no afirmo ninguna de las dos cosas")
+    else
+      tree_out="$(git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none 2>"$err_file")" \
+        || tree_rc=$?
+      # Read, flatten and cut with expansions only: no `tr | head`, which under
+      # `pipefail` is a race rather than a pipeline -- `head` exits at its 200th
+      # byte and `tr` takes a SIGPIPE. Reproduced at 64 KB of stderr: 1 failure
+      # in 10 identical runs, so it is not even deterministic. Harmless today
+      # only because errexit does not act here (see the header); armed for the
+      # first caller that invokes this some other way. The slice also counts
+      # characters rather than bytes, so it cannot cut a UTF-8 one in half, and
+      # it spawns nothing at all in the path the panel polls on a timer.
+      tree_err="$(< "$err_file")"
+      tree_err="${tree_err//$'\n'/ }"
+      tree_err="${tree_err:0:200}"
+      rm -f "$err_file"
 
-    if [ "$tree_rc" -ne 0 ] || [ -n "$tree_err" ]; then
-      found+=(repo_uncheckable "git no pudo leer entero el arbol de $repo (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no digo que este limpio")
-    elif [ -n "$tree_out" ]; then
-      found+=(dirty_tree "el arbol de trabajo en $repo tiene cambios sin commitear; no se aplica encima de ellos")
+      if [ "$tree_rc" -ne 0 ] || [ -n "$tree_err" ]; then
+        found+=(repo_uncheckable "git no pudo leer entero el arbol de $repo (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no digo que este limpio")
+      elif [ -n "$tree_out" ]; then
+        found+=(dirty_tree "el arbol de trabajo en $repo tiene cambios sin commitear; no se aplica encima de ellos")
+      fi
     fi
 
     # `--quiet` covers the ordinary failure (a detached HEAD is not an error

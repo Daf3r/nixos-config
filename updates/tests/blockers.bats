@@ -20,6 +20,12 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   WORK="$(mktemp -d)"
+  # The shell this library is measured in has to be the shell it runs in.
+  # Production sources it from upd.sh, which is `set -euo pipefail` from its
+  # second line; bats gives a test body errexit but neither nounset nor
+  # pipefail, so without this the two differ in exactly the two options that
+  # turn a sloppy expansion or a broken pipe from invisible into fatal.
+  set -euo pipefail
   # shellcheck source=../lib/blockers.sh
   source "${BATS_TEST_DIRNAME}/../lib/blockers.sh"
 
@@ -103,6 +109,50 @@ teardown() {
   # And it says which directory, or the message is a dead end for whoever reads
   # it off the panel.
   echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | test("secreto")'
+}
+
+@test "git's complaint is flattened and cut, however much of it there is" {
+  # The `detail` goes straight onto a panel, so its length is not cosmetic: git
+  # emits one warning line per unreadable directory, and six of them here are
+  # already 557 bytes. Unbounded, this is whatever the repository happens to
+  # produce -- measured at 38 KB while looking into something else.
+  #
+  # Both halves of the line that produces it are pinned: the cut, and the
+  # flattening of newlines, which is what keeps one blocker on one line.
+  for i in 1 2 3 4 5 6; do
+    mkdir "$REPO/directorio-con-nombre-largo-numero-$i"
+    printf 'x\n' > "$REPO/directorio-con-nombre-largo-numero-$i/f"
+    chmod 000 "$REPO/directorio-con-nombre-largo-numero-$i"
+  done
+  run blockers_live "$REPO" main "$LOCK" "$GEN" "$GEN"
+  chmod -R 755 "$REPO"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | length < 400'
+  echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | contains("\n") | not'
+  # Cut, not emptied: it still has to name what went wrong.
+  echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | test("directorio-con-nombre-largo")'
+}
+
+@test "an unwritable TMPDIR is a blocker, quietly, and not a clean tree" {
+  # Measured on the version before this test existed, with $TMPDIR at mode 500:
+  # mktemp's complaint reached stderr, bash added two more of its own from
+  # redirecting into an empty filename, and the function returned 0 anyway. The
+  # verdict was right by accident -- the redirection failed, so git never ran
+  # and the tree was never called clean -- but the header promised silence and
+  # promised that this case propagated, and neither was true.
+  #
+  # The three assertions are the three promises: nothing on stderr, exit 0, and
+  # a blocker rather than silence.
+  mkdir "$WORK/ro"
+  chmod 500 "$WORK/ro"
+  TMPDIR="$WORK/ro" run --separate-stderr blockers_live "$REPO" main "$LOCK" "$GEN" "$GEN"
+  chmod 700 "$WORK/ro"
+  [ "$status" -eq 0 ]
+  [ -z "$stderr" ]
+  echo "$output" | jq -e 'map(.code) | index("repo_uncheckable")'
+  # And it says which of the three things `repo_uncheckable` now covers this is,
+  # or whoever reads it off the panel goes looking at the wrong one.
+  echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | test("temporal")'
 }
 
 @test "a readable dirty tree is still reported as dirty" {
