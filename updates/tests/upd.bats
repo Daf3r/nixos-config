@@ -1063,6 +1063,16 @@ EOF
 # not reproduce, and that asymmetry is a decision (a person may stack a
 # generation knowingly; the panel's drive-by user should not). It is written up
 # in the task report rather than encoded here.
+#
+# Each of these also pins *which* refusal `apply` gives, and not merely that it
+# gave one. Four of the five refuse for the reason their name says, so the
+# sentence is anchored here; measured, without it a guard can be deleted and
+# the test stays green because a later guard stops the run for an unrelated
+# reason -- "it refused" is satisfied by any of six exits. The fifth, the
+# unreadable repository, is the exception and stays unanchored on purpose: it
+# reaches the detached-HEAD guard and blames that, so anchoring the wording
+# would mean fixing `apply`, which is Task 7's. The rule this leaves behind:
+# anchor the message where it is right today, and write down where it is not.
 
 @test "contrato: un arbol sucio bloquea el panel y frena el terminal" {
   make_rig
@@ -1074,6 +1084,10 @@ EOF
 
   run upd apply
   [ "$status" -eq 1 ]
+  # The whole sentence, tail included: the clone guard further up says "el clon
+  # en ... tiene cambios sin commitear" about a different tree entirely, so
+  # matching only "cambios sin commitear" would accept the wrong refusal.
+  [[ "$output" == *"el arbol de trabajo tiene cambios sin commitear; no aplico"* ]]
   [ ! -s "$NH_MARKER" ]
 }
 
@@ -1087,6 +1101,9 @@ EOF
 
   run upd apply
   [ "$status" -eq 1 ]
+  # Both branch names, because the refusal is only useful if it says which one
+  # the repository is on and which one the engine prepares from.
+  [[ "$output" == *"esta en la rama 'experimento' y el motor prepara desde 'main'"* ]]
   [ ! -s "$NH_MARKER" ]
 }
 
@@ -1102,6 +1119,7 @@ EOF
 
   run upd apply
   local ap_status=$status
+  local ap_output=$output
 
   kill "$locker" 2>/dev/null || true
   wait "$locker" 2>/dev/null || true
@@ -1109,6 +1127,11 @@ EOF
   [ "$st_status" -eq 0 ]
   echo "$st_output" | jq -e '.blockers | map(.code) | index("engine_running")'
   [ "$ap_status" -eq 1 ]
+  # This is the one refusal `apply` gives that is a claim about *another*
+  # process, so it is the one worth pinning: the same sentence comes out when
+  # the lock cannot even be opened if its own guard is removed, and there it
+  # would be false.
+  [[ "$ap_output" == *"hay una comprobacion en marcha ahora mismo"* ]]
   [ ! -s "$NH_MARKER" ]
 }
 
@@ -1140,6 +1163,11 @@ EOF
 
   run upd apply
   [ "$status" -eq 1 ]
+  # "no puedo abrir", not "hay una comprobacion en marcha": nothing is running
+  # here, and this is exactly the pair the guard keeps apart. Deleting it makes
+  # the run fall through to `flock -n 9` on an unopened descriptor and blame a
+  # check that does not exist.
+  [[ "$output" == *"no puedo abrir $STATE/lock; sin el no puedo descartar una comprobacion en marcha"* ]]
   [ ! -s "$NH_MARKER" ]
 }
 
