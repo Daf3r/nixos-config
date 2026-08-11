@@ -7,6 +7,12 @@
 # state it does not know) and the warnings block (a `ready` with findings
 # rendering identically to a clean one).
 
+# `run --separate-stderr` is a flag on `run`, and flags on `run` are a 1.5
+# feature: without this line bats runs them anyway and prints a BW02 warning
+# after the suite, which in the nix build log is a warning nobody will ever be
+# in a position to act on.
+bats_require_minimum_version 1.5.0
+
 UPD="${BATS_TEST_DIRNAME}/../upd.sh"
 
 setup() {
@@ -32,19 +38,20 @@ EOF
   : > "$NH_MARKER"
   PATH="$WORK/bin:$PATH"
 
-  # Stand-ins for the two system profiles `status` compares. They are the only
-  # thing any subcommand reads from the *running* machine, and left at their
-  # defaults they would make the tests below say different things depending on
-  # who runs the suite: a laptop with a generation already staged for the next
-  # boot really does have a pending reboot, so "no blockers on a clean main"
-  # would pass or fail on a fact about the host rather than about the reader.
+  # Stand-ins for the system profile and the running system, the two things
+  # `status` compares. They are the only thing any subcommand reads from the
+  # *running* machine, and left at their defaults they would make the tests
+  # below say different things depending on who runs the suite: a laptop whose
+  # profile is ahead of its running system really is in that state, so "no
+  # blockers on a clean main" would pass or fail on a fact about the host
+  # rather than about the reader.
   #
-  # The default pair is the ordinary case -- nothing staged -- and reaches the
+  # The default pair is the ordinary case -- the two agree -- and reaches the
   # same generation by two different paths, one of them a symlink, so it also
   # holds down the fact that both sides are resolved before being compared.
   mkdir -p "$WORK/gen1" "$WORK/gen2"
   ln -s "$WORK/gen1" "$WORK/perfil"
-  SYS_BOOTED="$WORK/perfil"
+  SYS_PROFILE="$WORK/perfil"
   SYS_CURRENT="$WORK/gen1"
 }
 
@@ -99,15 +106,24 @@ make_rig() {
 
 upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 
-# `status` with the two profile paths pinned. `env` rather than a bare
+# `status` with the two system paths pinned. `env` rather than a bare
 # assignment prefix in front of `run`, which is what the plan wrote: the prefix
 # does reach the child (measured), but only through bash's rule that temporary
 # assignments to a *function* call are exported for its duration, across two
 # nested helpers here. `env` says the same thing without depending on it, and it
 # is the form this file already uses for BRANCH further down.
+#
+# GIT_CEILING_DIRECTORIES stops git's search for a repository at $WORK. Without
+# it, "says it could not read the repo" depends on $TMPDIR not being inside a
+# git repository: `rev-parse --is-inside-work-tree` walks up from $REPO, so on a
+# machine whose temporary directory happened to live under a checkout it would
+# find *that* one, report a work tree, and the test would silently invert into
+# asserting the opposite of what it names. Not the case here today, which is
+# exactly the kind of thing that changes without anyone deciding to change it.
 upd_status() { # $@ the arguments after `status`
   env REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" \
-      _UPD_BOOTED_SYSTEM="$SYS_BOOTED" _UPD_CURRENT_SYSTEM="$SYS_CURRENT" \
+      GIT_CEILING_DIRECTORIES="$WORK" \
+      _UPD_SYSTEM_PROFILE="$SYS_PROFILE" _UPD_CURRENT_SYSTEM="$SYS_CURRENT" \
       bash "$UPD" status "$@"
 }
 
@@ -436,7 +452,7 @@ upd_status() { # $@ the arguments after `status`
   echo "$output" | jq -e '.blockers == []'
 }
 
-@test "status --json reports a generation already staged for the next boot" {
+@test "status --json reports a profile that has parted ways with the running system" {
   # `nh os boot` does not move /run/current-system, so the next nightly check
   # finds the system unchanged and reports `ready` again -- and the panel would
   # cheerfully offer to apply the very same update a second time.
@@ -445,6 +461,29 @@ upd_status() { # $@ the arguments after `status`
   run upd_status --json
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
+  # The wording has to survive the *other* direction too, so it says which two
+  # things disagree and not which one is ahead.
+  echo "$output" | jq -e '.blockers[] | select(.code == "pending_reboot") | .detail
+                          | test("no son la misma generacion")
+                            and (test("proximo arranque") | not)'
+}
+
+@test "status --json blocks when the profile is the one left behind" {
+  # The other direction, and the reason the detail above is worded the way it
+  # is: `nixos-rebuild test` and `nh os test` activate without writing the
+  # profile, so they leave it on the *older* generation while
+  # /run/current-system is on the newer one. Same inequality, opposite sign.
+  # Blocking is right either way -- the two disagree and an apply on top of
+  # that stacks a third state on the pile -- but a message about something
+  # staged for the next boot would be flatly false here.
+  make_rig
+  SYS_PROFILE="$WORK/gen2"
+  SYS_CURRENT="$WORK/gen1"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
+  echo "$output" | jq -e '.blockers[] | select(.code == "pending_reboot") | .detail
+                          | test("proximo arranque") | not'
 }
 
 @test "status --json reports the engine's own lock as engine_running" {
@@ -528,22 +567,37 @@ upd_status() { # $@ the arguments after `status`
   # program: exit 1 and nothing on stdout is the only way to say "no answer".
   # An object with the blockers filled in and the rest of the file unknown would
   # be read as an answer.
+  #
+  # `--separate-stderr` is what makes that assertable at all. A bare `run`
+  # merges the two streams into $output, and the first version of this test
+  # asserted `! echo "$output" | jq -e .` on the merged pair -- which proves
+  # only that the *concatenation* does not parse. Measured on a copy with
+  # `jq -n '{blockers:[]}'` inserted just before require_readable_status: stdout
+  # carried `{"blockers": []}`, stderr carried the refusal, the two together did
+  # not parse, and the test stayed green over precisely the half-object it names.
+  #
+  # And the assertion is on $output, not on $stdout: `run --separate-stderr`
+  # leaves $output holding stdout and $stderr holding stderr, and defines no
+  # $stdout at all (measured on bats 1.14). `[ -z "$stdout" ]` would be a test
+  # that passes on an undefined variable, which is the same defect one layer up.
   make_rig
   status_json '{"schema":3,"state":"ready","checked_at":"x","warnings":[]}'
-  run upd_status --json
+  run --separate-stderr upd_status --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *"schema 3"* ]]
-  ! echo "$output" | jq -e . >/dev/null 2>&1
+  [ -z "$output" ]
+  [[ "$stderr" == *"schema 3"* ]]
 
   printf 'no soy json{' > "$STATE/status.json"
-  run upd_status --json
+  run --separate-stderr upd_status --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no es un objeto JSON legible"* ]]
+  [ -z "$output" ]
+  [[ "$stderr" == *"no es un objeto JSON legible"* ]]
 
   rm -f "$STATE/status.json"
-  run upd_status --json
+  run --separate-stderr upd_status --json
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no hay ninguna comprobacion todavia"* ]]
+  [ -z "$output" ]
+  [[ "$stderr" == *"no hay ninguna comprobacion todavia"* ]]
 }
 
 @test "status refuses arguments it does not understand" {

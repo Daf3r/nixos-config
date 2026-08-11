@@ -28,8 +28,13 @@ set -euo pipefail
 #   0  the status was read and reported (including build_failed/check_failed:
 #      those are outcomes, not reader errors), or the apply succeeded, or
 #      `status --json` produced its object -- blockers and all
-#   1  this reader refuses to act: unreadable/unknown-schema status, a dirty
-#      target tree, a clone it cannot vouch for, a missing tool
+#   1  this reader has no answer to give: a status file that is missing,
+#      unparseable or of an unknown schema. And, for `apply` alone, the
+#      refusals to act: a dirty target tree, a clone it cannot vouch for, a
+#      missing tool. Those last three are exit 1 when they stop an apply and
+#      exit 0 with a `blockers[]` entry when `status --json` reports them --
+#      refusing to act and reporting that acting would be refused are different
+#      answers, and the panel needs the second one to be an answer at all.
 #   2  status.json carries a `state` this reader does not know
 
 REPO="${REPO:-/home/daf3r/nixos-config}"
@@ -331,6 +336,17 @@ case "$cmd" in
     # User= in the unit is the live way to reach it -- so the panel would keep a
     # dead button and a message naming a check that is not running, with nothing
     # ever clearing it. `apply` already separates the two cases; so does this.
+    #
+    # Both probes below open $STATE_DIR/lock for writing, which creates it and
+    # truncates it, and this is the one subcommand a desktop panel is going to
+    # poll on a timer -- so the truncation happens over and over. That is safe
+    # today and stays safe only under one invariant: **the lock file carries no
+    # content**. It is a rendezvous inode for flock(2) and nothing else. The
+    # engine (nixos-upd.sh) and `apply` open it exactly the same way, so a run
+    # that started writing a PID or a timestamp into it would already be racing
+    # them; what this arm adds is a reader that would wipe it every few seconds.
+    # If the lock ever needs to carry something, it needs a second file, not a
+    # read-only probe that opens this one for writing.
     if ! command -v flock >/dev/null 2>&1; then
       add_blocker lock_uncheckable "flock no esta en el PATH: no puedo descartar una comprobacion en marcha, y \`upd apply\` se negara por lo mismo"
     elif ! (exec 9>"$STATE_DIR/lock") 2>/dev/null; then
@@ -339,17 +355,34 @@ case "$cmd" in
       add_blocker engine_running "hay una comprobacion en marcha ahora mismo; espera a que termine"
     fi
 
-    # --- a generation already staged for the next boot -----------------------
-    # An apply that only writes the profile leaves /run/current-system where it
-    # was, so the next nightly check measures against the *old* system, finds
-    # the update missing from it and reports `ready` all over again. A panel
-    # offering that update a second time is describing work that is already
-    # done. The two paths are read from the environment so this is testable
-    # without a second generation on disk; nothing else sets them.
-    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/nix/var/nix/profiles/system}" 2>/dev/null)" || booted=""
+    # --- the profile and the running system have parted ways -----------------
+    # The case this is for: an apply that only writes the profile leaves
+    # /run/current-system where it was, so the next nightly check measures
+    # against the *old* system, finds the update missing from it and reports
+    # `ready` all over again -- and a panel offering that update a second time
+    # is describing work that is already done.
+    #
+    # The two variables are named after what they point at, which is not a
+    # detail. /nix/var/nix/profiles/system is the *profile*: the generation that
+    # will be activated at boot. It is emphatically not "the booted system" --
+    # NixOS spells that /run/booted-system -- and a reader who took the earlier
+    # name at face value and "fixed" the default to match would compare
+    # /run/booted-system against /run/current-system, which differ after any
+    # plain switch onto a new kernel. That is a permanent blocker for a
+    # condition `reboot_recommended` already reports from the closure diff.
+    #
+    # Read from the environment so this is testable without a second generation
+    # on disk; nothing else sets either variable.
+    profile="$(readlink -f "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" 2>/dev/null)" || profile=""
     current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null)" || current=""
-    if [ -n "$booted" ] && [ -n "$current" ] && [ "$booted" != "$current" ]; then
-      add_blocker pending_reboot "ya hay una generacion preparada para el proximo arranque; reinicia antes de aplicar otra"
+    if [ -n "$profile" ] && [ -n "$current" ] && [ "$profile" != "$current" ]; then
+      # Deliberately not "there is a generation staged for the next boot":
+      # that is one of the two ways to get here and the wording would be false
+      # in the other. `nixos-rebuild test` and `nh os test` activate without
+      # touching the profile, so they leave it on the *older* generation and
+      # /run/current-system on the newer -- the same inequality pointing the
+      # other way. Blocking is right for both; naming only one of them is not.
+      add_blocker pending_reboot "el perfil del sistema y el sistema en marcha no son la misma generacion (un apply sin reiniciar, o un \`test\` sin fijar); resuelvelo antes de apilar otra actualizacion encima"
     fi
 
     # The file exactly as the engine wrote it, with `blockers` beside it, and
