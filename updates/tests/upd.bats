@@ -600,6 +600,31 @@ upd_status() { # $@ the arguments after `status`
   [[ "$stderr" == *"no hay ninguna comprobacion todavia"* ]]
 }
 
+@test "status --json refuses rather than emit an object without its blockers" {
+  # The seam between lib/blockers.sh's contract and this subcommand's. That
+  # function promises 0 on every path it can foresee, which leaves the ones it
+  # cannot -- a broken jq, an unwritable $TMPDIR. Without the guard, `set -e`
+  # kills the subcommand carrying whatever exit code the failure had, and this
+  # file's header assigns meanings to 1 and 2 that such a code does not have.
+  #
+  # Injected through $LIB_DIR, the same move nixos-upd.bats already makes for
+  # closure_reboot: the subcommand under test is the real one, only the library
+  # it sources is replaced. There is no way to reach this from the outside --
+  # which is exactly why the guard would otherwise be code nobody ever ran.
+  make_rig
+  mkdir -p "$WORK/lib-roto"
+  { printf '# shellcheck shell=bash\n'
+    printf 'blockers_live() { return 3; }\n'
+  } > "$WORK/lib-roto/blockers.sh"
+
+  run --separate-stderr env REPO="$REPO" STATE_DIR="$STATE" \
+    LIB_DIR="$WORK/lib-roto" bash "$UPD" status --json
+  # Not 3, and not a partial object: the documented refusal.
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"bloqueos en vivo"* ]]
+}
+
 @test "status refuses arguments it does not understand" {
   # `--json` is not decoration: it is the promise that the format is stable
   # enough for a program. Defaulting to it, or accepting a trailing argument and

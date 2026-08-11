@@ -73,13 +73,27 @@ is computed live and never written to disk.
 | blocker | meaning |
 |---|---|
 | `dirty_tree` | `$REPO` has uncommitted or untracked changes |
-| `wrong_branch` | `$REPO` is not on `$BRANCH` |
+| `wrong_branch` | `$REPO` is not on `$BRANCH`, or is on a detached HEAD |
 | `engine_running` | the engine holds its lock right now |
-| `clone_unusable` | `$WT` fails one of the four integrity checks `apply` already makes |
+| `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — deliberately **not** the same answer as `engine_running`, which would be a permanent blocker naming a check that is not running |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, or git could not read all of its work tree, or `git` is missing. Saying "clean" about a tree git only half read is the same defect as the row above |
 | `pending_reboot` | `/nix/var/nix/profiles/system` and `/run/current-system` resolve to different store paths — the profile and the running system are not the same generation. **In either direction**: an apply that has not been rebooted into leaves the profile ahead, and a `nixos-rebuild test` / `nh os test`, which activates without writing the profile, leaves it behind. Blocking is right for both, so the message names the disagreement and not a direction |
 
-Each carries the same literal message `upd apply` would have printed. The panel
-displays it verbatim.
+There is deliberately no `clone_unusable`. `apply` checks four things about the
+clone in `/var/lib/nixos-upd` before it fast-forwards, and repeating them here
+was in the first draft of this design; it is not implemented and will not be.
+The panel polls this on a timer, and those checks open a second repository —
+much more expensive than the `git status` on `$REPO` that the rows above cost.
+A broken clone is rare and `apply` still refuses with its own message. The cost
+is accepted and stated rather than hidden: in that rare case the button is drawn
+enabled over an apply that will fail.
+
+Each blocker carries a message written for someone reading it off the panel —
+close to what `upd apply` would have printed, but not the same string: `apply`
+says `git no esta en el PATH; no aplico`, and the blocker has to say what is
+wrong *and* what would resolve it, because nobody is watching a terminal. **The
+panel displays that `detail` verbatim** — it is the only text there is, so
+whatever a blocker says is what the user reads.
 
 ### 2. `nixos-upd-apply@.service` — the root half
 

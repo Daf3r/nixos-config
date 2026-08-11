@@ -708,7 +708,7 @@ git commit -m "updates: status.json pasa a schema 2, con los cambios en estructu
 | `engine_running` | the engine holds `$STATE_DIR/lock` right now |
 | `pending_reboot` | the system profile and `/run/current-system` are different generations, **in either direction** |
 | `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — *not* the same as the engine holding it |
-| `repo_uncheckable` | `$REPO` could not be opened as a git repository, or `git` is missing |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, **or git could not read all of its work tree**, or `git` is missing |
 
 Consumers must treat an **unknown** `code` as a blocker and render its `detail`, never as noise to skip: this vocabulary grew by two during implementation and can grow again. The logic sketched for Task 8 already does the right thing (any blocker disables the button, the reason is the `detail`s joined); what must not appear is a `switch` on `code` whose `default` shows nothing.
 
@@ -788,11 +788,12 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 **Files:**
 - Added: `updates/lib/blockers.sh`
 - Modified: `updates/upd.sh` (the `status)` arm shrinks; `LIB_DIR` and one `source` at the top)
-- Not modified: `updates/tests/upd.bats` — see below
+- Added: `updates/tests/blockers.bats` (review round: the two clauses of the contract the end-to-end tests cannot reach)
+- Modified: `updates/tests/upd.bats` — **one test added**, none changed; see Step 2
 - Not modified: `updates.nix` — verified against the store, not by reading it
 
 **Interfaces:**
-- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. Always returns 0: an error it cannot resolve is itself a blocker, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them.
+- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. An error it can *foresee* is itself a blocker rather than a failure, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them. Not an unconditional zero, and the header no longer claims one: a broken environment underneath it (no `jq`, no writable `$TMPDIR`) propagates, and `upd.sh` turns that into its documented "exit 1, empty stdout, no answer" with a `|| die`. Nothing is written to stderr on any path — checked by a test, not intended.
 - Consumes: nothing. It reads no globals and no environment; the five things it needs are its five arguments. That is the point of the boundary — the caller owns *this machine's* layout (where the repository is, where the lock lives, which two system paths mean "profile" and "running system"), and the function owns the question "what would stop an apply?".
 - The defaults for the two system paths stay in `upd.sh` (`:305-307`) along with the `_UPD_SYSTEM_PROFILE` / `_UPD_CURRENT_SYSTEM` overrides the tests use. They are facts about NixOS's layout, not about the question.
 
@@ -800,23 +801,23 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 
 **It is a refactor: no behaviour changes.** The net is the 135 tests that already existed.
 
-- [ ] **Step 1: Move it**
+- [x] **Step 1: Move it**
 
-`updates/upd.sh:292-386` (as it stood at `ee4ebd3`) becomes `blockers_live` in `updates/lib/blockers.sh`, with `$REPO`/`$BRANCH`/`$STATE_DIR/lock` and the two resolved system paths as parameters instead of globals. The `add_blocker` helper does not survive the move: instead of growing a JSON string one `jq` call per blocker, the function accumulates flat `code, detail` pairs in a bash array and makes **one** `jq -n --args` call at the end. Same escaping guarantee — no string splicing, and a detail carries a branch name, which is user input — and one process instead of N.
+`updates/upd.sh:292-386` (as it stood at `ee4ebd3`) becomes `blockers_live` in `updates/lib/blockers.sh`, with `$REPO`/`$BRANCH`/`$STATE_DIR/lock` and the two resolved system paths as parameters instead of globals. The `add_blocker` helper does not survive the move: instead of growing a JSON string one `jq` call per blocker, the function accumulates flat `code, detail` pairs in a bash array and makes **one** `jq -n --args … -- "${found[@]}"` call at the end. One process instead of N, and the same escaping guarantee for quotes, backslashes, newlines, `$`, backticks, unicode and embedded JSON — **but only with the `--`**, which the first version of this section claimed was unnecessary and the review disproved. jq keeps parsing options after `--args`, so a value beginning with a dash was read as one: measured, `--json` and `-x` exit 2, and `--args` is accepted and yields `detail: null`. Reachable through a `$repo` whose name starts with a dash, which `git -C` accepts.
 
 `updates/upd.sh` gains the `LIB_DIR` resolution and the `source` that the other three entry points already have (`:51-57`), sourced unconditionally like they do: the file only defines functions.
 
-- [ ] **Step 2: Run the suite without touching it**
+- [x] **Step 2: Run the suite without touching it**
 
-`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok. `shellcheck -x -- *.sh lib/*.sh` → empty.
+`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok at the move itself; 142 after the review round added seven. `shellcheck -x -- *.sh lib/*.sh` → empty.
 
-**No test was modified.** That is the acceptance criterion for this task and not merely an outcome: the 15 `status --json` tests drive the subcommand, never the internals, so a move that needed a test edited would have been a move that changed behaviour. Nothing in `upd.bats` names `add_blocker` or `blockers_live`.
+**No existing test was modified, at any point.** That is the acceptance criterion for the move and not merely an outcome: the 15 `status --json` tests drive the subcommand, never the internals, so a move that needed a test edited would have been a move that changed behaviour. Nothing in `upd.bats` names `add_blocker` or `blockers_live`. The tests *added* afterwards are a different matter and are listed in Step 5.
 
-- [ ] **Step 3: Re-run the mutations on the extracted code**
+- [x] **Step 3: Re-run the mutations on the extracted code**
 
-A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. **20 mutations, 20 killed.**
+A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. 20 mutations, 20 killed — and 24 after Step 5. Intentionally *not* included: swapping the profile and the running system, which is a **equivalent mutant** (the comparison is `!=`, so it is unobservable).
 
-- [ ] **Step 4: Prove the new file reaches the store**
+- [x] **Step 4: Prove the new file reaches the store**
 
 `updates.nix` copies `./lib` wholesale, so in principle nothing there needs editing — but "in principle" is what this repository has been caught by before, so it was checked against the store and not by reading the `.nix`:
 
@@ -828,6 +829,16 @@ $ $out/bin/upd status --json | jq -c '{state, blockers: [.blockers[].code]}'
 ```
 
 And `git add` before believing any of it: flake evaluation only sees tracked files, so a new file left untracked is a green build over a file that was never there.
+
+- [x] **Step 5: The review round**
+
+Three findings, all of them the same shape as the ones Task 5 kept closing — a check that cannot conclude being reported as a clean result — plus the documentation that had drifted:
+
+1. **`jq` and the leading dash**, above. Fixed with `--`, verified over the five failing cases, the normal case and everything that already worked.
+2. **The header promised two things the code did not do.** "Nothing to stderr" was false (`git status`'s warnings went straight through) and "never fails" was false (finding 1). Both are now stated in the form they can be kept, and both are tested.
+3. **`git status` failing read as "clean tree"** — the third copy of the defect the `flock` arm and the repository guard had already closed. In a work tree git cannot fully read (a directory the user cannot open) it warns on stderr, **exits 0, and prints nothing on stdout**, so `[ -n "$(…)" ]` was false and no `dirty_tree` was reported. It now answers `repo_uncheckable`, which is why that row grew in Task 5's table above.
+
+`updates/tests/blockers.bats` (6 tests) exists for the two clauses the end-to-end suite cannot reach: an argument beginning with a dash, and stderr staying empty. Everything else stays in `upd.bats` — duplicating it would mean two places to update and one of them drifting. One test was added to `upd.bats` for the `|| die` seam, injected through `$LIB_DIR` the way `nixos-upd.bats` already stubs `closure_reboot`; without it the guard would be code nobody ever ran, which this repository has a commit about.
 
 **What Task 6 inherits:** an `apply` arm nothing else in this file reaches into, and a `status` arm that is nine lines and a call. The two can now be worked on at the same time without colliding. If Task 6 needs a blocker of its own — say, `apply --boot` wanting to refuse when a generation is already staged — the place to add it is `blockers_live`, and its `detail` should be written for a human reading it off a panel, because that is where it will end up.
 

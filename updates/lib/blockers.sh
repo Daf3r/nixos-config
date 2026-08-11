@@ -19,10 +19,29 @@
 #
 # The function takes everything it needs and reads no globals, which is the
 # whole point of the move: the caller resolves `$REPO`, `$BRANCH`, where the
-# lock lives and which two system paths to compare, and this decides. It writes
-# a JSON array to stdout and nothing to stderr, and it never fails: an error it
-# cannot resolve is itself a blocker, because "I could not check" and "there is
-# nothing to report" are different answers and the panel must not confuse them.
+# lock lives and which two system paths to compare, and this decides. An error
+# it can foresee is itself a blocker rather than a failure, because "I could not
+# check" and "there is nothing to report" are different answers and the panel
+# must not confuse them.
+#
+# The two clauses below are the contract, and they are stated in the form they
+# can actually be kept -- an earlier version of this header promised "nothing to
+# stderr" and "never fails" flatly, and both were false:
+#
+#   stdout   one JSON array, and nothing else on any path.
+#   stderr   nothing. Every command run below either has its stderr silenced or
+#            captured -- including `git status`, whose warnings used to leak
+#            straight through and which now become a blocker instead. This is
+#            checked by a test rather than left as an intention.
+#   exit     0 on every path this function can foresee, including all six
+#            blockers. It is *not* an unconditional 0: if the environment is
+#            broken underneath it -- no `jq`, no writable $TMPDIR -- the failure
+#            propagates, and that is deliberate. The caller runs this inside a
+#            command substitution under `set -e` and turns a non-zero into its
+#            documented "exit 1, empty stdout, no answer", which is the honest
+#            reading. What must never happen is a zero exit over a partial
+#            array, and that cannot happen here: the array is printed by a
+#            single command at the very end.
 #
 # The blocker vocabulary, and the contract for whoever renders it:
 #
@@ -32,8 +51,8 @@
 #   pending_reboot    the system profile and the running system are different
 #                     generations, in either direction
 #   lock_uncheckable  the lock could not be opened at all, or flock is missing
-#   repo_uncheckable  $REPO could not be opened as a git repository, or git is
-#                     missing
+#   repo_uncheckable  $REPO could not be opened as a git repository, or git
+#                     could not read all of its work tree, or git is missing
 #
 # A consumer must treat an unknown `code` as a blocker and show its `detail`
 # rather than skipping it: this list grew from four to six while the subcommand
@@ -67,14 +86,43 @@ blockers_live() {
   elif ! git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     found+=(repo_uncheckable "no puedo leer $repo como repositorio git; sin eso no se si el arbol esta limpio ni en que rama esta")
   else
-    # The same two flags `apply` spells out, for the same reason:
+    # stdout and stderr are kept apart here, and that separation is the whole
+    # point rather than tidiness: `git status` in a work tree it cannot read all
+    # of prints its complaint on stderr, **exits 0, and leaves stdout empty**.
+    # Reproduced with a directory inside the repository the user cannot open:
+    # `warning: could not open directory 'secreto/': Permission denied`, exit 0,
+    # not one porcelain line. A reader that looked only at stdout would then
+    # announce a clean tree over a repository git could not finish reading --
+    # the same defect as answering `engine_running` for a lock that could not be
+    # opened, and it gets the same answer: say the check did not conclude.
+    #
+    # The temp file is how stdout and stderr are captured from a single run.
+    # Two runs of `git status` would be simpler to read and wrong: the tree can
+    # change between them, and this is polled on a timer. If the shell aborts
+    # between mktemp and rm the file is left behind -- an empty file in $TMPDIR,
+    # stated rather than defended against, because the alternative (a trap) is
+    # what corrupted bats' own teardown in lib/nixpin.sh.
+    #
+    # The two flags are the ones `apply` spells out, for the same reason:
     # status.showUntrackedFiles=no and submodule.<name>.ignore=all each silence
     # half of this check from a config file this engine does not own.
-    if [ -n "$(git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none)" ]; then
+    local tree_out tree_err tree_rc=0 err_file
+    err_file="$(mktemp)"
+    tree_out="$(git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none 2>"$err_file")" \
+      || tree_rc=$?
+    tree_err="$(tr '\n' ' ' < "$err_file" | head -c 200)"
+    rm -f "$err_file"
+
+    if [ "$tree_rc" -ne 0 ] || [ -n "$tree_err" ]; then
+      found+=(repo_uncheckable "git no pudo leer entero el arbol de $repo (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no digo que este limpio")
+    elif [ -n "$tree_out" ]; then
       found+=(dirty_tree "el arbol de trabajo en $repo tiene cambios sin commitear; no se aplica encima de ellos")
     fi
 
-    cur_branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD)" || cur_branch=""
+    # `--quiet` covers the ordinary failure (a detached HEAD is not an error
+    # here), and the redirection covers the rest: this function promises to
+    # leave stderr alone, and a promise with an exception in it is not one.
+    cur_branch="$(git -C "$repo" symbolic-ref --quiet --short HEAD 2>/dev/null)" || cur_branch=""
     if [ -z "$cur_branch" ]; then
       found+=(wrong_branch "$repo esta con el HEAD desprendido; ponlo en una rama antes de aplicar")
     elif [ "$cur_branch" != "$branch" ]; then
@@ -147,7 +195,24 @@ blockers_live() {
     return 0
   fi
 
+  # The `--` is load-bearing and was measured, not assumed: jq keeps parsing
+  # options *after* `--args`, so without it a value that begins with a dash is
+  # read as one. Measured on jq 1.8.2 with the pairs below going in:
+  #
+  #   detail "-x algo"  ->  jq: Unknown option -x, exit 2
+  #   detail "--json"   ->  jq: Unknown option --json, exit 2
+  #   detail "--args"   ->  {"detail": null} -- accepted, and silently wrong
+  #   code   "--arg"    ->  jq: --arg takes two parameters, exit 2
+  #
+  # With `--` all four come back verbatim, and everything that already worked
+  # -- quotes, backslashes, newlines, tabs, `$`, backticks, unicode, embedded
+  # JSON, the empty string -- is unchanged. The reachable path is a `$repo`
+  # whose name begins with a dash: `git -C` accepts one (measured), so the
+  # wrong_branch detail, which starts with `$repo`, would start with a dash
+  # too. Exit 2 from here reaches the caller as a failed command substitution
+  # under `set -e`, so the whole subcommand would die with an exit code its own
+  # taxonomy assigns to something else entirely.
   jq -n --args '[ range(0; ($ARGS.positional | length); 2)
                   | { code: $ARGS.positional[.], detail: $ARGS.positional[. + 1] } ]' \
-    "${found[@]}"
+    -- "${found[@]}"
 }

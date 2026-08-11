@@ -302,9 +302,18 @@ case "$cmd" in
     # they are this machine's layout, not a property of the question being
     # asked; the variables exist so the comparison is testable without a second
     # generation on disk, and nothing but the tests sets them.
+    # The `|| die` is the seam between that function's contract and this one's.
+    # It promises 0 on every path it can foresee, which leaves the paths it
+    # cannot -- a broken jq, an unwritable $TMPDIR. Without this, `set -e` would
+    # kill the subcommand with whatever exit code the failure carried, and this
+    # file's own header assigns meanings to 1 and 2 that such a code would not
+    # have. Turning it into the documented refusal keeps the promise the panel
+    # is written against: a non-zero exit always means "no answer", never
+    # "answer with something missing".
     blockers="$(blockers_live "$REPO" "$BRANCH" "$STATE_DIR/lock" \
       "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" \
-      "${_UPD_CURRENT_SYSTEM:-/run/current-system}")"
+      "${_UPD_CURRENT_SYSTEM:-/run/current-system}")" \
+      || die "no pude calcular los bloqueos en vivo; no emito un objeto sin ellos"
 
     # The file exactly as the engine wrote it, with `blockers` beside it, and
     # deliberately not the filtered view `show` builds: there the `from == to`
