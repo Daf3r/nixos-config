@@ -20,9 +20,14 @@ set -euo pipefail
 # rather than dragging that branch onto the prepared commit and leaving $BRANCH
 # behind.
 #
+# `status --json` is the same reading for a program instead of a person: the
+# file as the engine wrote it plus the live reasons an apply would refuse right
+# now, which is the one thing status.json cannot carry.
+#
 # Exit codes:
 #   0  the status was read and reported (including build_failed/check_failed:
-#      those are outcomes, not reader errors), or the apply succeeded
+#      those are outcomes, not reader errors), or the apply succeeded, or
+#      `status --json` produced its object -- blockers and all
 #   1  this reader refuses to act: unreadable/unknown-schema status, a dirty
 #      target tree, a clone it cannot vouch for, a missing tool
 #   2  status.json carries a `state` this reader does not know
@@ -254,6 +259,107 @@ case "$cmd" in
     exit "$rc"
     ;;
 
+  status)
+    # The desktop panel's only entry point, and the reason it is a subcommand
+    # rather than the plugin reading status.json for itself: two of the
+    # conditions that stop an apply are not in that file and cannot be -- the
+    # state of the user's working tree, and the branch it has checked out. Both
+    # change long after the nightly run wrote its status, and today they surface
+    # only as an exit 1 from `apply`. That is fine for a command and useless for
+    # a button, which would be drawn enabled and already doomed.
+    #
+    # The contract, and the reason for the exit codes below: 0 whenever there is
+    # an object to emit, blockers or not, and 1 only when there is none. A
+    # consumer has nothing else to tell "nothing to apply" from "no answer", and
+    # a half-built object -- blockers filled in, the engine's own fields missing
+    # -- would be read as the first.
+    if [ "$#" -ne 2 ] || [ "$2" != "--json" ]; then
+      # Naming what arrived, and only when something did: `upd status` on its
+      # own is a typo and does not need to be told what it typed.
+      if [ "$#" -gt 1 ]; then
+        die "uso: upd status --json; hoy no hay otro formato y he recibido: ${*:2}"
+      fi
+      die "uso: upd status --json; hoy no hay otro formato"
+    fi
+    [ -f "$STATUS" ] || die "no hay ninguna comprobacion todavia"
+    require_readable_status
+
+    blockers='[]'
+    # jq rather than splicing the strings together: a detail carries a branch
+    # name, which is user input, and one quote in it would hand the consumer a
+    # document it cannot parse.
+    add_blocker() { # $1 code, $2 detail
+      blockers="$(printf '%s' "$blockers" \
+        | jq -c --arg c "$1" --arg d "$2" '. + [{code: $c, detail: $d}]')"
+    }
+
+    # --- the two live git facts, and the admission when there are none -------
+    # Both git calls fail silently in the same way: `git status` in a directory
+    # that is not a repository prints nothing on stdout, so a reader taking that
+    # at face value reports a clean tree, and `symbolic-ref` failing there is
+    # indistinguishable from a real detached HEAD. That pair is two confident
+    # statements about a repository that was never opened, and the second one
+    # sends the reader off to `git switch` something that does not exist. So the
+    # opening is checked first and, when it fails, that is what gets reported.
+    if ! command -v git >/dev/null 2>&1; then
+      add_blocker repo_uncheckable "git no esta en el PATH: no puedo mirar ni el arbol ni la rama de $REPO, y \`upd apply\` se negara por lo mismo"
+    elif ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      add_blocker repo_uncheckable "no puedo leer $REPO como repositorio git; sin eso no se si el arbol esta limpio ni en que rama esta"
+    else
+      # The same two flags `apply` spells out, for the same reason:
+      # status.showUntrackedFiles=no and submodule.<name>.ignore=all each
+      # silence half of this check from a config file this engine does not own.
+      if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=normal --ignore-submodules=none)" ]; then
+        add_blocker dirty_tree "el arbol de trabajo en $REPO tiene cambios sin commitear; no se aplica encima de ellos"
+      fi
+
+      cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD)" || cur_branch=""
+      if [ -z "$cur_branch" ]; then
+        add_blocker wrong_branch "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
+      elif [ "$cur_branch" != "$BRANCH" ]; then
+        add_blocker wrong_branch "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'; haz \`git -C $REPO switch $BRANCH\`"
+      fi
+    fi
+
+    # --- the engine's own lock ----------------------------------------------
+    # Three outcomes, not two, and the plan's version of this arm had two: a
+    # single `! (exec 9>"$STATE_DIR/lock" && flock -n 9)` cannot tell "the
+    # engine holds it" from "I could not open it at all" and answers the first
+    # for both. Measured on that version with a $STATE_DIR that does not exist,
+    # and again with one that is read-only: `engine_running`, both times. That
+    # state is permanent -- a lock file left owned by root after a change of
+    # User= in the unit is the live way to reach it -- so the panel would keep a
+    # dead button and a message naming a check that is not running, with nothing
+    # ever clearing it. `apply` already separates the two cases; so does this.
+    if ! command -v flock >/dev/null 2>&1; then
+      add_blocker lock_uncheckable "flock no esta en el PATH: no puedo descartar una comprobacion en marcha, y \`upd apply\` se negara por lo mismo"
+    elif ! (exec 9>"$STATE_DIR/lock") 2>/dev/null; then
+      add_blocker lock_uncheckable "no puedo abrir $STATE_DIR/lock: no se si hay una comprobacion en marcha, y \`upd apply\` se negara por lo mismo"
+    elif ! (exec 9>"$STATE_DIR/lock" && flock -n 9) 2>/dev/null; then
+      add_blocker engine_running "hay una comprobacion en marcha ahora mismo; espera a que termine"
+    fi
+
+    # --- a generation already staged for the next boot -----------------------
+    # An apply that only writes the profile leaves /run/current-system where it
+    # was, so the next nightly check measures against the *old* system, finds
+    # the update missing from it and reports `ready` all over again. A panel
+    # offering that update a second time is describing work that is already
+    # done. The two paths are read from the environment so this is testable
+    # without a second generation on disk; nothing else sets them.
+    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/nix/var/nix/profiles/system}" 2>/dev/null)" || booted=""
+    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null)" || current=""
+    if [ -n "$booted" ] && [ -n "$current" ] && [ "$booted" != "$current" ]; then
+      add_blocker pending_reboot "ya hay una generacion preparada para el proximo arranque; reinicia antes de aplicar otra"
+    fi
+
+    # The file exactly as the engine wrote it, with `blockers` beside it, and
+    # deliberately not the filtered view `show` builds: there the `from == to`
+    # rows are dropped because a human does not need them, here the consumer
+    # counts and groups on its own. Two differently-filtered readings of one
+    # file is how the two come to disagree about what the engine found.
+    jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"
+    ;;
+
   diff)
     [ -f "$STATE_DIR/diff.txt" ] || { echo "no hay diff guardado"; exit 0; }
     # The engine writes diff.txt only on the `ready` path. After a build_failed
@@ -463,9 +569,12 @@ case "$cmd" in
 
   *)
     cat >&2 <<'EOF'
-uso: upd [show|diff|apply|check]
+uso: upd [show|status|diff|apply|check]
 
   show    (por defecto) que dejo preparado la ultima comprobacion
+  status  `upd status --json`: lo mismo en JSON y con los bloqueos de ahora
+          mismo (arbol sucio, rama, motor en marcha, reinicio pendiente), que
+          es lo que lee el widget de la barra
   diff    el diff de closures guardado
   apply   aplica lo preparado: fast-forward y `nh os switch`
   check   lanza una comprobacion ahora, en primer plano

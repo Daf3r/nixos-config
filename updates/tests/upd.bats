@@ -31,6 +31,21 @@ EOF
   export NH_MARKER="$WORK/nh-called"
   : > "$NH_MARKER"
   PATH="$WORK/bin:$PATH"
+
+  # Stand-ins for the two system profiles `status` compares. They are the only
+  # thing any subcommand reads from the *running* machine, and left at their
+  # defaults they would make the tests below say different things depending on
+  # who runs the suite: a laptop with a generation already staged for the next
+  # boot really does have a pending reboot, so "no blockers on a clean main"
+  # would pass or fail on a fact about the host rather than about the reader.
+  #
+  # The default pair is the ordinary case -- nothing staged -- and reaches the
+  # same generation by two different paths, one of them a symlink, so it also
+  # holds down the fact that both sides are resolved before being compared.
+  mkdir -p "$WORK/gen1" "$WORK/gen2"
+  ln -s "$WORK/gen1" "$WORK/perfil"
+  SYS_BOOTED="$WORK/perfil"
+  SYS_CURRENT="$WORK/gen1"
 }
 
 teardown() {
@@ -83,6 +98,18 @@ make_rig() {
 }
 
 upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
+
+# `status` with the two profile paths pinned. `env` rather than a bare
+# assignment prefix in front of `run`, which is what the plan wrote: the prefix
+# does reach the child (measured), but only through bash's rule that temporary
+# assignments to a *function* call are exported for its duration, across two
+# nested helpers here. `env` says the same thing without depending on it, and it
+# is the form this file already uses for BRANCH further down.
+upd_status() { # $@ the arguments after `status`
+  env REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" \
+      _UPD_BOOTED_SYSTEM="$SYS_BOOTED" _UPD_CURRENT_SYSTEM="$SYS_CURRENT" \
+      bash "$UPD" status "$@"
+}
 
 # --- show -------------------------------------------------------------------
 
@@ -346,6 +373,206 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   run upd frobnicate
   [ "$status" -eq 1 ]
   [[ "$output" == *"uso: upd"* ]]
+}
+
+# --- status --json ----------------------------------------------------------
+#
+# This subcommand exists for the desktop panel, and the panel's whole problem is
+# that two of the things which stop an apply are not in status.json and cannot
+# be: the state of the working tree and the branch it has checked out. They
+# change long after the nightly run wrote its file. Everything below is about
+# those live facts being reported *as data*, next to the file, with an exit code
+# that does not lie about whether there was an answer.
+
+@test "status --json reports a dirty tree as a blocker and still exits 0" {
+  # Exit 0 is load-bearing and is why it is asserted on nearly every case here:
+  # a panel that reads non-zero as "no data" would go blank precisely when it
+  # has the most to say. Non-zero is reserved for "there is no object at all".
+  make_rig
+  touch "$REPO/scratch.txt"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+}
+
+@test "status --json sees a modified tracked file, not only an untracked one" {
+  make_rig
+  printf 'editado a mano\n' >> "$REPO/flake.lock"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+}
+
+@test "status --json reports the wrong branch as a blocker, naming both" {
+  make_rig
+  git -C "$REPO" checkout -q -b experimento
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
+  # Both names, because "wrong branch" without them is a dead end for whoever
+  # reads it off the panel: the fix is `git switch <the other one>`.
+  echo "$output" | jq -e '.blockers[] | select(.code == "wrong_branch") | .detail
+                          | test("experimento") and test("main")'
+}
+
+@test "status --json reports a detached HEAD as a wrong_branch blocker" {
+  make_rig
+  git -C "$REPO" checkout -q --detach HEAD
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
+  echo "$output" | jq -e '.blockers[] | select(.code == "wrong_branch") | .detail
+                          | test("desprendido")'
+}
+
+@test "status --json has no blockers on a clean main" {
+  # Also the negative half of the pending-reboot pair below: setup() points the
+  # two profiles at the same generation, so a reader that ignored them -- or
+  # never received them -- would decide this from the host's own profiles and
+  # one of the two tests would fail.
+  make_rig
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers == []'
+}
+
+@test "status --json reports a generation already staged for the next boot" {
+  # `nh os boot` does not move /run/current-system, so the next nightly check
+  # finds the system unchanged and reports `ready` again -- and the panel would
+  # cheerfully offer to apply the very same update a second time.
+  make_rig
+  SYS_CURRENT="$WORK/gen2"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
+}
+
+@test "status --json reports the engine's own lock as engine_running" {
+  make_rig
+  flock "$STATE/lock" -c 'sleep 3' &
+  local locker=$!
+  sleep 0.4
+  run upd_status --json
+  kill "$locker" 2>/dev/null || true
+  wait "$locker" 2>/dev/null || true
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("engine_running")'
+}
+
+@test "status --json does not pass a lock it cannot open off as a running engine" {
+  # The defect measured in the plan's version of this arm: a single
+  # `! (exec 9>"$STATE_DIR/lock" && flock -n 9)` cannot tell "the engine holds
+  # it" from "I could not open it at all", and reports the first for both. That
+  # one is permanent -- a root-owned lock file after a change of User= in the
+  # unit, a $STATE_DIR gone read-only -- so the panel would draw a dead button
+  # for ever and blame a check that is not running, which is the exact shape of
+  # advice this project keeps deleting. `apply` already distinguishes the two;
+  # so must this.
+  #
+  # A directory where the lock file should be, rather than a chmod: it fails the
+  # open for any uid, including the one the nix sandbox happens to build under.
+  make_rig
+  mkdir "$STATE/lock"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("lock_uncheckable")'
+  echo "$output" | jq -e '.blockers | map(.code) | index("engine_running") == null'
+}
+
+@test "status --json says it could not read the repo instead of inventing a branch" {
+  # Same rule one layer up: with no readable git repository at $REPO both git
+  # calls fail, and a reader that only looked at their output would announce a
+  # clean tree and a detached HEAD -- two statements about a repository it never
+  # managed to open.
+  make_rig
+  rm -rf "$REPO/.git"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("repo_uncheckable")'
+  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch") == null'
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree") == null'
+}
+
+@test "status --json gives every blocker a code and a detail that says something" {
+  # The panel renders `detail` verbatim, so an empty one is a disabled button
+  # with no explanation next to it.
+  make_rig
+  touch "$REPO/scratch.txt"
+  git -C "$REPO" checkout -q -b experimento
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | length >= 2'
+  echo "$output" | jq -e '.blockers | all(.code | type == "string" and (length > 0))'
+  echo "$output" | jq -e '.blockers | all(.detail | type == "string" and (length > 0))'
+}
+
+@test "status --json emits the engine's object unfiltered" {
+  # `show` drops the `from == to` rows because a human does not need them. This
+  # one must not: the consumer is a machine that counts and groups on its own,
+  # and a second, differently-filtered view of the same file is how the two
+  # start disagreeing. Everything the file carries is passed through, and
+  # `blockers` is added beside it.
+  make_rig
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'type == "object"'
+  echo "$output" | jq -e '.changes | map(.name) | index("brave-origin")'
+  echo "$output" | jq -e '.state == "ready" and .schema == 2'
+  echo "$output" | jq -e '.closure_diff.size_delta_mb == 8.88'
+  echo "$output" | jq -e '.reboot_recommended == false and .warnings == []'
+  echo "$output" | jq -e '.checked_at == "2026-08-09T03:00:11+02:00"'
+}
+
+@test "status --json refuses a file it cannot vouch for instead of emitting half an object" {
+  # Unlike `show`, which prints its refusal and is done, this one is read by a
+  # program: exit 1 and nothing on stdout is the only way to say "no answer".
+  # An object with the blockers filled in and the rest of the file unknown would
+  # be read as an answer.
+  make_rig
+  status_json '{"schema":3,"state":"ready","checked_at":"x","warnings":[]}'
+  run upd_status --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema 3"* ]]
+  ! echo "$output" | jq -e . >/dev/null 2>&1
+
+  printf 'no soy json{' > "$STATE/status.json"
+  run upd_status --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no es un objeto JSON legible"* ]]
+
+  rm -f "$STATE/status.json"
+  run upd_status --json
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no hay ninguna comprobacion todavia"* ]]
+}
+
+@test "status refuses arguments it does not understand" {
+  # `--json` is not decoration: it is the promise that the format is stable
+  # enough for a program. Defaulting to it, or accepting a trailing argument and
+  # ignoring it, is what `apply --boot` was measured doing before its own guard
+  # landed -- and the day a second format exists, everything written for the
+  # first would already have been accepted.
+  make_rig
+  run upd_status
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"uso: upd status --json"* ]]
+
+  run upd_status --texto
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--texto"* ]]
+
+  run upd_status --json --frobnicate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--frobnicate"* ]]
+}
+
+@test "the usage text announces status" {
+  # An entry point nothing mentions is one nobody finds, and this is the only
+  # one the panel will ever call.
+  run upd frobnicate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"status"* ]]
+  [[ "$output" == *"--json"* ]]
 }
 
 # --- apply ------------------------------------------------------------------
