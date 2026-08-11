@@ -120,6 +120,14 @@ let
   #   repository owned by $SUDO_UID, so `sudo nh os switch ~/nixos-config`
   #   works. A systemd unit has no SUDO_UID, so it does not.
   #
+  #   And `--elevation-strategy none`, which the script below now passes, takes
+  #   that accidental cover away for good: nh no longer shells out through sudo
+  #   at all, it runs nix directly as whoever it already is. Re-measured through
+  #   nh itself, as euid 0, against a repository owned by somebody else --
+  #   without this config `nh os boot --elevation-strategy none` dies with `is
+  #   not owned by current user`; with it, it gets past the fetch. So this is
+  #   not leftover from the first attempt, it is load-bearing for the fixed one.
+  #
   # And the shape of the fix was measured too, because the obvious one is
   # wrong: `GIT_CONFIG_GLOBAL` pointing at the same file changes nothing, since
   # that variable is git(1)'s and libgit2 does not read it. `HOME` and
@@ -156,15 +164,182 @@ let
   # activation under the manager's 90-second default would be killed halfway:
   # `Type=oneshot` disables the start timeout, and every oneshot on this machine
   # that does not set one reports `TimeoutStartUSec=infinity`.
-  applyScript = pkgs.writeShellScript "nixos-upd-apply" ''
+  #
+  # `--elevation-strategy none` is not optional and it is not a style choice.
+  # Without it this unit dies in under a second, and it did, on the machine:
+  #
+  #   nixos-upd-apply[1395582]: 0: Don't run nh os as root. It will escalate
+  #                                its privileges internally as needed.
+  #   nixos-upd-apply@boot.service: Main process exited, code=exited, status=1
+  #
+  # nh refuses to be root on purpose, because it expects to be started by a user
+  # and to elevate itself. Here it is already root and there is nothing to
+  # elevate, which is exactly what `none` says. `--bypass-root-check` also gets
+  # past the refusal -- measured, with a `! Bypassing root check; running nix as
+  # root` warning -- but it leaves the strategy at `auto`, so nh would go on
+  # hunting for doas/sudo/run0/pkexec while already root and without a TTY. One
+  # of the two options describes the situation and the other only silences the
+  # complaint about it.
+  #
+  # This body is what `applyCommand` below runs against the real nh, as euid 0,
+  # at build time. Editing the nh line here without reading that check first is
+  # how the same twelve-hour round happens twice.
+  applyScript = pkgs.writeShellScript "nixos-upd-apply-body" ''
     set -euo pipefail
     mode="''${1:-}"
     case "$mode" in
       switch|boot) ;;
       *) printf 'nixos-upd-apply: unknown mode %q\n' "$mode" >&2; exit 1 ;;
     esac
-    exec ${pkgs.nh}/bin/nh os "$mode" ${lib.escapeShellArg repo}
+    # The safe.directory exemption travels with the command that needs it rather
+    # than sitting in the unit's Environment=, where it started. Two reasons, and
+    # the second is the one that moved it: it is the only thing standing between
+    # this command and `is not owned by current user`, so it belongs next to the
+    # command; and in the unit it was a second place to delete it from, invisible
+    # to the build-time check below. Measured -- with it in the unit, dropping it
+    # left the whole system building green.
+    export XDG_CONFIG_HOME=${applyGitConfig}
+    exec ${pkgs.nh}/bin/nh os "$mode" --elevation-strategy none ${lib.escapeShellArg repo}
   '';
+
+  # What the unit actually executes -- and it is `applyScript` byte for byte,
+  # installed by a derivation that first runs it against the real nh binary and
+  # refuses to produce anything if nh turns it down. Making the checked copy the
+  # thing ExecStart points at is the whole mechanism: there is no way to get the
+  # script into the system without the check having passed, which is the same
+  # bargain the bats suite already gets from `doCheck` above.
+  #
+  # It exists because the root refusal above shipped. Nothing in the suite could
+  # have caught it: bats stubs `nh`, and a stub accepts whatever it is handed --
+  # the one thing that knows nh rejects this command line is nh. So the check
+  # runs the real binary. What it does *not* need is root, a daemon, or an
+  # activation:
+  #
+  #   `unshare -Ur` gives a process euid 0 inside a user namespace, which is all
+  #   nh's check looks at (`Uid::effective().is_root()`), and unprivileged user
+  #   namespaces nest inside the nix build sandbox -- verified, not assumed.
+  #
+  #   The repository path in the script does not exist inside the sandbox, so
+  #   the run dies at flake resolution. That is *after* the root check, which is
+  #   what makes the two outcomes tell different stories.
+  #
+  # nh probes `nix --version` and `nix config show experimental-features` before
+  # it ever looks at the uid, hence nix on the PATH and NIX_CONFIG below. That is
+  # also this check's main fragility: an nh that grows a new pre-flight probe
+  # would fail here for a reason that has nothing to do with the invocation. It
+  # fails *loudly* and the control below says which of the two happened, which is
+  # the trade this file keeps making -- a build that stops with an explanation
+  # beats a check that quietly stops checking.
+  applyCommand = pkgs.runCommand "nixos-upd-apply"
+    {
+      nativeBuildInputs = [ pkgs.util-linux pkgs.nh pkgs.git config.nix.package ];
+      # nh shells out to nix for both pre-flight probes, and the sandbox has no
+      # nix.conf, so without this it dies before reaching anything we care about.
+      NIX_CONFIG = "experimental-features = nix-command flakes";
+    }
+    ''
+      bail="Don't run nh os as root"
+
+      # A precondition, not a formality. If the real repository were visible
+      # from in here, running the real apply command below would not stop at a
+      # missing flake -- it would start building the system inside a build.
+      if [ -e ${lib.escapeShellArg repo} ]; then
+        echo "check: ${repo} is visible from inside this build."
+        echo "check: running the apply command here could start a real build."
+        echo "check: refusing rather than finding out. Is the sandbox off?"
+        exit 1
+      fi
+
+      # --- the control ------------------------------------------------------
+      # A plain unflagged `nh os`, run the same way, must still be refused. If
+      # it is not, nothing below proves anything: either the namespace stopped
+      # handing out euid 0, or nh stopped refusing root, or it died on some new
+      # pre-flight probe before it got that far. Any of the three and this check
+      # has to be looked at rather than trusted -- so it says so and stops.
+      #
+      # Deliberately *not* derived from the script by deleting the flag from it,
+      # which was the first version. That control disappears exactly when the
+      # flag does, so reverting the fix failed here, with a message about the
+      # control being misplaced -- a guard blaming the wrong thing, which is the
+      # same defect this task spent its morning removing from `upd apply`.
+      unshare -Ur nh os boot --dry /nonexistent-flake-xyz > control.log 2>&1 || true
+      if ! grep -qF "$bail" control.log; then
+        echo "check: an unflagged \`nh os\` run as root was NOT refused, so this"
+        echo "check: check can no longer tell a good command line from a bad one."
+        echo "--- what the control printed ---"
+        cat control.log
+        exit 1
+      fi
+
+      # --- the thing being checked ------------------------------------------
+      # The script prints its own euid first, so the log carries the proof that
+      # it ran as root. Without it, deleting the `unshare` from this line would
+      # leave the run as an ordinary user, nh would have nothing to complain
+      # about, and the check would pass while testing nothing at all.
+      unshare -Ur sh -c 'echo "euid=$(id -u)"; exec ${applyScript} boot' \
+        > real.log 2>&1 || true
+      if ! grep -qx "euid=0" real.log; then
+        echo "check: the run under test was not root, so nh was never going to"
+        echo "check: refuse it and this proves nothing."
+        cat real.log
+        exit 1
+      fi
+      if grep -qF "$bail" real.log; then
+        echo "check: nh refuses the command line this unit would run as root."
+        echo "check: this is the failure of 2026-08-11, back again -- the unit"
+        echo "check: died in 48 ms and the switch never happened."
+        echo "--- what it printed ---"
+        cat real.log
+        exit 1
+      fi
+
+      # `--bypass-root-check` also gets past the refusal, so the assertion above
+      # cannot tell the two apart -- measured, it stayed green when the flag was
+      # swapped. What does tell them apart is that nh announces the second one,
+      # and the announcement is the thing worth refusing: it means the strategy
+      # is still `auto` and nh will go looking for doas/sudo/run0/pkexec while
+      # already root and without a TTY.
+      if grep -qF "Bypassing root check" real.log; then
+        echo "check: this command line silences nh's root refusal instead of"
+        echo "check: telling nh there is nothing to elevate. Use"
+        echo "check: --elevation-strategy none, not --bypass-root-check."
+        cat real.log
+        exit 1
+      fi
+
+      # --- and that the git config is found where the command points at it ---
+      # Narrower than it looks, and the wording matters: this proves the file is
+      # where the apply command says and carries the right path, not that
+      # libgit2 honours it. That half was measured by hand (see applyGitConfig)
+      # and its live proof is the first real apply, because a repository owned
+      # by somebody else is exactly what a build sandbox does not have.
+      #
+      # The path is read *out of the script* rather than interpolated again from
+      # Nix, and that is what gives the assertion teeth: an export that goes
+      # missing, or one that points somewhere else, both land here. Measured --
+      # with the two sides interpolated independently, deleting the export from
+      # the script left the whole system building green.
+      xdg="$(sed -n 's/^export XDG_CONFIG_HOME=//p' ${applyScript})"
+      if [ -z "$xdg" ]; then
+        echo "check: the apply command sets no XDG_CONFIG_HOME, so nothing tells"
+        echo "check: libgit2 that ${repo} may be opened by a uid that does not"
+        echo "check: own it. As root, that is where the apply stops."
+        exit 1
+      fi
+      mkdir -p nohome
+      got="$(XDG_CONFIG_HOME=$xdg HOME=$PWD/nohome \
+             git config --get-all safe.directory || true)"
+      if [ "$got" != ${lib.escapeShellArg repo} ]; then
+        echo "check: with the XDG_CONFIG_HOME the apply command exports, git"
+        echo "check: reads safe.directory as '$got' instead of '${repo}'."
+        exit 1
+      fi
+
+      echo "check: nh accepts this command line as root without being told to"
+      echo "check: ignore its own refusal, and the safe.directory exemption is"
+      echo "check: readable at the path the command exports"
+      install -m 0555 ${applyScript} $out
+    '';
 
   nixos-upd = pkgs.stdenvNoCC.mkDerivation {
     pname = "nixos-upd";
@@ -372,16 +547,12 @@ in
     description = "Apply the prepared system update (%i)";
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${applyScript} %i";
-      Environment = [
-        # nh shells out to nix, which needs these on a system unit's minimal PATH.
-        "PATH=/run/current-system/sw/bin:/run/wrappers/bin"
-        # The safe.directory exemption, and the only reason this unit needs any
-        # git configuration at all. Without it the activation dies before it
-        # starts, with libgit2 refusing to open a repository root does not own.
-        # See applyGitConfig above for the measurements.
-        "XDG_CONFIG_HOME=${applyGitConfig}"
-      ];
+      ExecStart = "${applyCommand} %i";
+      # nh shells out to nix, which needs these on a system unit's minimal PATH.
+      # XDG_CONFIG_HOME is deliberately NOT here: the safe.directory exemption
+      # lives inside the script, so that the build-time check runs the same
+      # environment the unit does. See applyScript.
+      Environment = "PATH=/run/current-system/sw/bin:/run/wrappers/bin";
     };
   };
 
