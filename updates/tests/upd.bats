@@ -104,7 +104,14 @@ make_rig() {
   ready_status
 }
 
-upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
+# GIT_CEILING_DIRECTORIES for the same reason upd_status carries it, spelled
+# out in the comment below: `apply` walks up from $REPO with `git status` and
+# `symbolic-ref` too, so the contract test that removes $REPO/.git rested on no
+# ancestor of $TMPDIR being a git repository. Measured today the walk stops at
+# the /tmp mount boundary -- a fact about this machine, not about the reader,
+# and one nobody would think to check before moving $TMPDIR. Both helpers reach
+# the same script; only one of them was pinned.
+upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" "$@"; }
 
 # `status` with the two system paths pinned. `env` rather than a bare
 # assignment prefix in front of `run`, which is what the plan wrote: the prefix
