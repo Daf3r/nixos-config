@@ -145,6 +145,22 @@ setup() {
   grep -q 'inputs_diff' "$BATS_TMPDIR/notaref-err.txt"
 }
 
+@test "inputs_diff names the segment when a follows path leads nowhere" {
+  # A segment that does not exist already fails -- null is neither a node key
+  # nor a path, so it lands in the catch-all refusal. Status and silence are
+  # identical either way, measured, which is exactly why this asserts on the
+  # message: without the specific guard the operator gets
+  # "an input reference that is neither a node key nor a follows path: null",
+  # which does not say which path, which node, or which segment. A corrupt lock
+  # is the one moment that message has a job to do.
+  jq '.nodes.depB.inputs.inner = ["noexiste"]' "$NESTED" > "$BATS_TMPDIR/badseg.json"
+  run bash -c "inputs_diff '$BATS_TMPDIR/badseg.json' '$BATS_TMPDIR/badseg.json' 2> '$BATS_TMPDIR/badseg-err.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'inputs_diff' "$BATS_TMPDIR/badseg-err.txt"
+  grep -q 'noexiste' "$BATS_TMPDIR/badseg-err.txt"
+}
+
 @test "inputs_diff does not report an input that has no rev on either side" {
   # Not every input type carries a rev. `local` in lock-follows.json is a real
   # `path:` input as nix locked it: narHash and lastModified, no rev at all.
