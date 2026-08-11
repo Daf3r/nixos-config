@@ -1035,6 +1035,107 @@ EOF
   [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
 }
 
+# --- the contract the two surfaces share -------------------------------------
+#
+# Five of the six blockers are expressed twice: once in lib/blockers.sh, for the
+# panel, and once as a guard inside `apply`, for the terminal. That duplication
+# is deliberate -- `apply` refusing on its own account is what makes it safe to
+# run without a panel, and wiring it through `blockers_live` would couple the
+# command to the panel's library -- but duplication is how two readings of one
+# rule drift apart. This repository has closed that shape twice already: the
+# filter in `show` versus `status --json`, and the reboot advisory versus the
+# footer under it.
+#
+# So the agreement is pinned here rather than left to good intentions. Each of
+# these builds one situation and asserts both halves of it: the panel reports
+# the blocker, **and** the terminal refuses. Deleting either half turns one of
+# these red, which is the whole point -- the tests above cover each surface
+# alone, and none of them would notice the two disagreeing.
+#
+# `pending_reboot` is deliberately absent: it is the one blocker `apply` does
+# not reproduce, and that asymmetry is a decision (a person may stack a
+# generation knowingly; the panel's drive-by user should not). It is written up
+# in the task report rather than encoded here.
+
+@test "contrato: un arbol sucio bloquea el panel y frena el terminal" {
+  make_rig
+  touch "$REPO/scratch.txt"
+
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "contrato: la rama equivocada bloquea el panel y frena el terminal" {
+  make_rig
+  git -C "$REPO" checkout -q -b experimento
+
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "contrato: el motor en marcha bloquea el panel y frena el terminal" {
+  make_rig
+  flock "$STATE/lock" -c 'sleep 3' &
+  local locker=$!
+  sleep 0.4
+
+  run upd_status --json
+  local st_status=$status
+  local st_output=$output
+
+  run upd apply
+  local ap_status=$status
+
+  kill "$locker" 2>/dev/null || true
+  wait "$locker" 2>/dev/null || true
+
+  [ "$st_status" -eq 0 ]
+  echo "$st_output" | jq -e '.blockers | map(.code) | index("engine_running")'
+  [ "$ap_status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "contrato: un repo ilegible bloquea el panel y frena el terminal" {
+  make_rig
+  rm -rf "$REPO/.git"
+
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("repo_uncheckable")'
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+  # The two refuse for the same reason and say different things: the panel
+  # names the repository, `apply` reaches its detached-HEAD guard and blames
+  # that. Both stop, which is what this pins; the wording is noted in the task
+  # report as something for whoever touches `apply` next, not papered over here.
+}
+
+@test "contrato: un lock inabrible bloquea el panel y frena el terminal" {
+  make_rig
+  rm -f "$STATE/lock"
+  mkdir "$STATE/lock"
+
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("lock_uncheckable")'
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+}
+
 # --- check ------------------------------------------------------------------
 
 @test "check runs the engine directly, not through systemctl" {
