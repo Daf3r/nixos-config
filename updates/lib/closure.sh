@@ -20,6 +20,12 @@
 # matches a number followed by a unit. Versions are comma-separated too, which
 # is why the size is identified by shape and stripped from the end rather than
 # by splitting on commas.
+#
+# Output contract: one JSON object followed by a trailing newline, so that
+# `closure_parse > file` produces a well-formed text file and not one that ends
+# mid-line. Callers capturing it with $(...) get the newline stripped for them
+# and are unaffected either way; callers redirecting to disk are not, which is
+# why this is stated rather than left to whichever printf happened to be used.
 
 # stdin: diff text. stdout: one JSON object. Returns 1 if nothing parsed.
 closure_parse() {
@@ -30,6 +36,11 @@ closure_parse() {
     printf '%s\n' "$raw" \
       | sed 's/\x1b\[[0-9;]*m//g' \
       | awk -F': ' '
+        # The unit list lives in THREE places: the two size regexes below and
+        # this function. Adding one (a TiB from some future nix) to only the
+        # regexes is the dangerous half-edit: the line still parses, and the
+        # size silently becomes 0 because this falls through to the return at
+        # the end. Change all three together.
         function bytes(s,   n, u) {
           n = s; u = s
           sub(/ .*$/, "", n)
@@ -43,8 +54,12 @@ closure_parse() {
         NF < 2 { next }
         {
           name = $1
-          rest = $0
-          sub(/^[^:]*: /, "", rest)
+          # Cut where FS already cut, rather than re-finding the separator with
+          # a regex that disagrees with it: `foo:bar: 1.0 → 2.0` splits on the
+          # `: ` after foo:bar, but /^[^:]*: / would stop at the first colon and
+          # leave the rest of the name inside `from`. +3 skips the name plus the
+          # two characters of ": ".
+          rest = substr($0, length($1) + 3)
 
           size = 0
           only_size = 0
@@ -103,11 +118,16 @@ closure_parse() {
   # Empty input is a legitimate empty diff. Non-empty input that yielded
   # nothing is the format having moved under us, and that must not be
   # indistinguishable from "nothing changed".
+  #
+  # `|| return 1` and not a bare assignment: the callers run under
+  # `set -euo pipefail`, so an exploding jq here would take the whole calling
+  # script down instead of returning the failure this function promises.
   local parsed
-  parsed="$(printf '%s' "$out" | jq -r '(.added | length) + (.removed | length) + (.changed | length)')"
+  parsed="$(printf '%s' "$out" | jq -r '(.added | length) + (.removed | length) + (.changed | length)')" \
+    || return 1
   if [ "$parsed" -eq 0 ] && [ -n "$(printf '%s' "$raw" | tr -d '[:space:]')" ]; then
     return 1
   fi
 
-  printf '%s' "$out"
+  printf '%s\n' "$out"
 }

@@ -47,8 +47,18 @@ setup() {
   # Grepped for the escaped spelling jq emits, not for a raw ESC byte: jq
   # escapes control characters on output, so a search for the byte itself
   # would find nothing even against unstripped input and would prove nothing.
+  #
+  # There is real output before anything is grepped for two reasons. `grep -c`
+  # prints 0 and exits 1 on empty input just as it does on output with no
+  # match, so a closure_parse that had started failing outright would satisfy
+  # a bare "grep found nothing" and this test would go on passing while
+  # checking nothing at all.
+  run bash -c "closure_parse < '$FIX'"
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
   run bash -c "closure_parse < '$FIX' | grep -c 'u001b'"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 1 ]
+  [ "$output" = "0" ]
   run bash -c "closure_parse < '$FIX' | jq -e '.changed[] | select(.name==\"codex-desktop\") | .to == \"26.803.81509\"'"
   [ "$status" -eq 0 ]
 }
@@ -62,6 +72,40 @@ setup() {
   printf 'kitty: 1024.0 KiB\n' > "$BATS_TMPDIR/nover.txt"
   run bash -c "closure_parse < '$BATS_TMPDIR/nover.txt' | jq -e '.size_delta_mb == 1'"
   [ "$status" -eq 0 ]
+}
+
+@test "closure_parse totals the whole fixture at 1239.18 MB" {
+  # The aggregate, which is where the comma bug actually showed itself. Over
+  # the 19 lines copied from the real diff the sum is 8.88, and it was 6.33
+  # while the five entries written as a bare size were each counted as zero.
+  # The number here is larger because the fixture also carries the three
+  # hand-written lines: 8.88 + 1.5 MiB + 1.2 GiB = 1239.18.
+  #
+  # The synthetic one-line tests above pin the branches; only this pins the
+  # sum they feed. It doubles as a tripwire for double counting, and for
+  # anyone regenerating the fixture from a later diff.txt -- if this number
+  # moves, the input moved with it and the hand-written lines need checking.
+  run bash -c "closure_parse < '$FIX' | jq -e '.size_delta_mb == 1239.18'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse cuts the name where the field separator did" {
+  # No package on this machine is named with a colon, but the two ways this
+  # parser located the separator used to disagree, and only one of them was
+  # the one awk had already applied. The wrong one leaves the tail of the name
+  # sitting inside `from`.
+  printf 'foo:bar: 1.0 → 2.0\n' > "$BATS_TMPDIR/colon.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/colon.txt' | jq -e '.changed[0].name == \"foo:bar\" and .changed[0].from == \"1.0\" and .changed[0].to == \"2.0\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse ends its output with a newline" {
+  # Stated in the header as part of the contract, so it gets an assertion:
+  # `closure_parse > file` has to leave a well-formed text file. bats strips
+  # the trailing newline from $output, so this has to look at the byte.
+  run bash -c "closure_parse < '$FIX' | tail -c 1 | od -An -c | tr -d ' '"
+  [ "$status" -eq 0 ]
+  [ "$output" = '\n' ]
 }
 
 @test "closure_parse sums sizes across units into MB" {
@@ -98,6 +142,32 @@ setup() {
   printf 'warning: something odd happened\ngcc: 16.1.0 → 16.2.0\n' > "$BATS_TMPDIR/mixed.txt"
   run bash -c "closure_parse < '$BATS_TMPDIR/mixed.txt' | jq -e '(.changed | length) == 1 and .changed[0].name == \"gcc\"'"
   [ "$status" -eq 0 ]
+}
+
+@test "closure_parse fails loudly when the guard jq does, instead of returning 0" {
+  # The guard at the end of closure.sh runs a second jq, and that call used to
+  # be the one external command whose exit status nobody looked at. Measured
+  # with this same stub: the failure left `parsed` empty, `[ "" -eq 0 ]` died
+  # with "integer expected", the if was therefore false, the guard was skipped
+  # and the function returned 0. A false success out of the guard whose whole
+  # job is to refuse to report a diff it cannot vouch for.
+  #
+  # jq is stubbed to work once and fail after that, so the pipeline succeeds
+  # and only the guard call breaks. Same trick as status.bats.
+  export JQ_CALLS="$BATS_TMPDIR/jq-calls"
+  echo 0 > "$JQ_CALLS"
+  jq() {
+    local n
+    n=$(cat "$JQ_CALLS")
+    n=$((n + 1))
+    echo "$n" > "$JQ_CALLS"
+    if [ "$n" -ge 2 ]; then return 1; fi
+    command jq "$@"
+  }
+  export -f jq
+
+  run bash -c "closure_parse < '$FIX'"
+  [ "$status" -eq 1 ]
 }
 
 @test "closure_parse on empty input is an empty diff, not an error" {
