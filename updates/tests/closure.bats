@@ -267,3 +267,17 @@ setup() {
   [ "$status" -ne 0 ]
   [ -z "$output" ]
 }
+
+@test "closure_reboot reads what closure_parse writes, on the real diff" {
+  # The two functions meet here, over the fixture copied from the 2026-08-11
+  # /var/lib/nixos-upd/diff.txt: this is the update actually waiting on this
+  # machine, and it must come out as "reboot", since nvidia-open moves.
+  #
+  # It is also the only case that pins nvidia-x11 and initrd-linux-xanmod. The
+  # five cases above cover one list entry each for the kernel, the module and
+  # mesa; those two could be deleted from the watch list and nothing else here
+  # would notice. Asserting the whole reason list, sorted, rather than just the
+  # boolean: the boolean would still be true with either of them gone.
+  run bash -c "closure_parse < '$FIX' | closure_reboot | jq -ce '.reboot_recommended == true and (.reboot_reason | sort) == [\"initrd-linux-xanmod\",\"nvidia-open\",\"nvidia-x11\"]'"
+  [ "$status" -eq 0 ]
+}
