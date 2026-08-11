@@ -676,118 +676,90 @@ git commit -m "updates: status.json pasa a schema 2, con los cambios en estructu
 
 ---
 
-### Task 5: `upd status --json`
+### Task 5: `upd status --json` — done in `c53dc4d`, revised in `ee4ebd3`
+
+> **This section was rewritten after the fact**, in the second review round, and
+> now describes what is in the tree rather than what was designed. Six things
+> came out different, each of them measured against the machine before it was
+> changed rather than argued; the evidence is in
+> `.superpowers/sdd/2026-08-11-widget-upd-barra/task-5-report.md`.
+>
+> It is written this way because the previous version of this section was about
+> to do damage: Task 6 is written by reading this file, and until this edit the
+> code block below still said `_UPD_BOOTED_SYSTEM`, a name that was deliberately
+> retired. The source of truth is `updates/upd.sh:267-394`; what follows is what
+> Task 6 and the plugin tasks need in order not to reintroduce any of it.
 
 **Files:**
-- Modify: `updates/upd.sh` (new `status` case in the `case "$cmd"` block)
-- Modify: `updates/tests/upd.bats`
+- Modified: `updates/upd.sh` (new `status` arm in the `case "$cmd"` block, between `show)` and `diff)`)
+- Modified: `updates/tests/upd.bats`
 
 **Interfaces:**
-- Produces: `upd status --json` on stdout — the `status.json` object plus `blockers: [{code, detail}]`. Exit 0 whenever it could produce an object, including when blockers exist; exit 1 only if the status file is unreadable or of an unknown schema.
+- Produces: `upd status --json` on stdout — the `status.json` object **exactly as the engine wrote it**, plus `blockers: [{code, detail}]`. No filtering of any kind: `show` drops the `from == to` rows out of `changes[]` because a human does not need them, this arm does not, because the consumer counts and groups on its own and two differently-filtered readings of one file is how the two come to disagree.
+- Exit 0 whenever there is an object to emit, blockers and all. Exit 1 when there is none — a status file that is missing, unparseable, or of a schema this reader does not understand — and in that case **stdout is empty and the refusal goes to stderr**. That pairing is the contract: it is what lets a consumer tell "nothing to apply" from "no answer", and a half-built object would be read as the first.
+- `upd status` takes `--json` and nothing else. Both a missing and an extra argument are refused, for the reason `apply --boot` was refused in Task 3: an option accepted and ignored is indistinguishable from an option that worked.
+
+**The blocker vocabulary** — six codes, not the four the design named:
+
+| `code` | When |
+|---|---|
+| `dirty_tree` | `$REPO` has uncommitted or untracked changes |
+| `wrong_branch` | `$REPO` is on a branch other than `$BRANCH`, or on a detached HEAD |
+| `engine_running` | the engine holds `$STATE_DIR/lock` right now |
+| `pending_reboot` | the system profile and `/run/current-system` are different generations, **in either direction** |
+| `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — *not* the same as the engine holding it |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, or `git` is missing |
+
+Consumers must treat an **unknown** `code` as a blocker and render its `detail`, never as noise to skip: this vocabulary grew by two during implementation and can grow again. The logic sketched for Task 8 already does the right thing (any blocker disables the button, the reason is the `detail`s joined); what must not appear is a `switch` on `code` whose `default` shows nothing.
+
+**What differs from the original design, and why**
+
+1. **The `flock` block has three outcomes, not two.** The single `if ! (exec 9>"$STATE_DIR/lock" && flock -n 9)` cannot tell "the engine holds it" from "I could not open it at all", and answers the first for both. Measured with a non-existent `$STATE_DIR` and again with a read-only one: `engine_running`, both times. That state is permanent — a lock file left owned by root after a change of `User=` in the unit is the live way to reach it — so the panel would keep a dead button for ever, blaming a check that is not running. `apply` already separates the two cases (`updates/upd.sh:451-456`); so does this.
+2. **A guard in front of the two git calls.** Both fail silently in the same way: `git status` in a directory that is not a repository prints nothing on stdout, which reads as a clean tree, and `symbolic-ref` failing there is indistinguishable from a real detached HEAD. Two confident statements about a repository that was never opened, the second of which sends the reader off to `git switch` something that does not exist.
+3. **`$#` is validated, not just `$2`.** See the interface note above.
+4. **`_UPD_SYSTEM_PROFILE`, not `_UPD_BOOTED_SYSTEM`.** `/nix/var/nix/profiles/system` is the *profile*; NixOS spells the booted system `/run/booted-system`. The old name is a trap with a concrete cost: whoever aligns the default with the name ends up comparing `/run/booted-system` against `/run/current-system`, which differ after any plain switch onto a new kernel, and turns the blocker into a permanent one for a condition `reboot_recommended` already reports from the closure diff. **`_UPD_CURRENT_SYSTEM` keeps its name** — that one is exact. Neither variable is set by anything but the tests.
+5. **`pending_reboot`'s `detail` names the disagreement, not a direction.** `nixos-rebuild test` and `nh os test` activate without writing the profile, leaving it on the *older* generation while `/run/current-system` is on the newer one — the same inequality with the opposite sign. Blocking is right for both; "there is a generation staged for the next boot" is false for one of them. The code keeps its name (it is the dominant case and it is interface for Tasks 8-10); only the wording is neutral.
+6. **There is no `--help` in `upd.sh`.** The original Step 3 said to add `status` "to the usage text in the `*)` arm and to the `--help` output". The second does not exist: `upd --help` falls into `*)`, prints the usage and exits 1. There is one text, and it is the one that was edited. Adding a real `--help` with exit 0 would be an interface change nobody asked for.
 
 - [ ] **Step 1: Write the failing tests**
 
-```bash
-@test "upd status --json reports a dirty tree as a blocker" {
-  touch "$REPO/scratch.txt"
-  run upd_main status --json
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
-}
+Fifteen of them, in a `--- status --json ---` section of `updates/tests/upd.bats` (`:394-630`). Rather than reproduce them here — a copy in this file is a copy that goes stale, which is what this whole section is a correction of — what matters for the tasks that come after:
 
-@test "upd status --json reports the wrong branch as a blocker" {
-  git -C "$REPO" switch -c experimento
-  run upd_main status --json
-  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
-}
-
-@test "upd status --json has no blockers on a clean main" {
-  run upd_main status --json
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers == []'
-}
-
-@test "upd status --json reports a pending reboot" {
-  # A `boot` apply does not move /run/current-system, so the next check would
-  # report `ready` again and the same update would be applied twice.
-  _UPD_BOOTED_SYSTEM="$BATS_TMPDIR/a" _UPD_CURRENT_SYSTEM="$BATS_TMPDIR/b" \
-    run upd_main status --json
-  echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
-}
-
-@test "upd status --json passes the engine's own message through" {
-  touch "$REPO/scratch.txt"
-  run upd_main status --json
-  echo "$output" | jq -e '.blockers[] | select(.code == "dirty_tree") | .detail | length > 0'
-}
-```
+- The harness is **`upd_status`** (`updates/tests/upd.bats:123-128`), a sibling of the file's existing `upd` helper. Not `upd_main`, which this plan invented and which `upd.bats` has never had; the note under Task 4 already says to follow the file's own style, and that is what was done.
+- It pins the two system paths through **`env`**, not through an assignment prefix in front of `run`. The prefix does reach the child — measured, it works through bash's rule that temporary assignments to a *function* call are exported for its duration — but `env` says so without depending on it, and it is the form the file already uses for `BRANCH`.
+- It sets **`GIT_CEILING_DIRECTORIES="$WORK"`**. `rev-parse --is-inside-work-tree` walks up the parents, so a `$TMPDIR` inside a git repository would make the `repo_uncheckable` test assert the opposite of what it names. Verified by building that scenario on purpose: with the ceiling green, without it red.
+- The refusal test uses **`run --separate-stderr`** and asserts `[ -z "$output" ]`. A bare `run` merges the two streams, so an assertion about "nothing on stdout" made on `$output` really only says the *concatenation* does not parse — measured: with `jq -n '{blockers:[]}'` inserted before `require_readable_status`, stdout carried the half-object and the test stayed green. **Do not "fix" this to `[ -z "$stdout" ]`**: `run --separate-stderr` defines `$output` and `$stderr` and no `$stdout` at all, so that assertion passes on an undefined variable, always. The file declares `bats_require_minimum_version 1.5.0` for the flag.
+- Both directions of `pending_reboot` have a test. One of them would pass on a `detail` that branches by direction; the pair does not.
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: five failures — `upd` prints its usage and exits 1 on the unknown `status` command.
+Run: `nix run nixpkgs#bats -- tests/` from `updates/`
+Observed: fourteen failures (the fifteenth test arrived with the review round), the rest of the suite untouched — `upd` prints its usage and exits 1 on the unknown `status` command.
 
 - [ ] **Step 3: Implement**
 
-Add to `updates/upd.sh` before the `*)` arm. The two `_UPD_*_SYSTEM` variables exist so the reboot check is testable without a second generation:
+`updates/upd.sh:267-394`, added before the `*)` arm. Read it there rather than from a copy. Its shape, in order: argument validation → `[ -f "$STATUS" ]` → `require_readable_status` → `blockers='[]'` and a jq-based `add_blocker` → the git guard and the two live git facts → the three-way lock check → the profile comparison → `jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"`.
 
-```bash
-  status)
-    # The plugin's only entry point. It exists rather than letting the plugin
-    # read status.json because two of the conditions that stop an apply are not
-    # in that file and cannot be: the state of the user's working tree, and the
-    # branch it has checked out. Both change long after the nightly run wrote
-    # its status, and today they surface only as an exit 1 from `apply` — fine
-    # for a command, useless for a panel whose button would be doomed before it
-    # is drawn.
-    [ "${2:-}" = "--json" ] || die "uso: upd status --json"
-    [ -f "$STATUS" ] || die "no hay ninguna comprobacion todavia"
-    require_readable_status
+Also add `status` to the usage text in the `*)` arm (`updates/upd.sh:605-613`), and extend the exit-code taxonomy in the file header (`:27-38`) — a dirty tree is exit 1 when it stops an `apply` and exit 0 with a `blockers[]` entry when `status --json` reports it, and the header said only the first.
 
-    blockers='[]'
-    add_blocker() { # $1 code, $2 detail
-      blockers="$(printf '%s' "$blockers" | jq -c --arg c "$1" --arg d "$2" '. + [{code: $c, detail: $d}]')"
-    }
-
-    if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=normal --ignore-submodules=none 2>/dev/null)" ]; then
-      add_blocker dirty_tree "el arbol de trabajo tiene cambios sin commitear; no aplico"
-    fi
-
-    cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)" || cur_branch=""
-    if [ -z "$cur_branch" ]; then
-      add_blocker wrong_branch "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
-    elif [ "$cur_branch" != "$BRANCH" ]; then
-      add_blocker wrong_branch "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'"
-    fi
-
-    if ! (exec 9>"$STATE_DIR/lock" && flock -n 9) 2>/dev/null; then
-      add_blocker engine_running "hay una comprobacion en marcha ahora mismo"
-    fi
-
-    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/nix/var/nix/profiles/system}" 2>/dev/null || true)"
-    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null || true)"
-    if [ -n "$booted" ] && [ -n "$current" ] && [ "$booted" != "$current" ]; then
-      add_blocker pending_reboot "ya hay una generacion aplicada para el proximo arranque; reinicia antes de aplicar otra"
-    fi
-
-    jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"
-    ;;
-```
-
-Add `status` to the usage text in the `*)` arm and to the `--help` output.
+One invariant this arm depends on and now states in place (`updates/upd.sh:340-349`): **`$STATE_DIR/lock` carries no content.** Both probes open it for writing, which truncates it, and this is the one subcommand a panel will poll on a timer. If the lock ever has to carry a PID or a timestamp, it needs a second file.
 
 - [ ] **Step 4: Run the tests**
 
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: PASS.
+`nix run nixpkgs#bats -- tests/` → 135 ok, 0 not ok. `shellcheck -x -- *.sh lib/*.sh` → empty.
+Beyond the suite: every test was checked counterfactually, by breaking the production line it claims to cover on a copy outside the repository and confirming it goes red — 18 mutations, 18 killed. Two of those mutations restore this plan's original `flock` block and its missing repository guard, so a later "simplification" back to the design turns the suite red at the exact spot.
 
 - [ ] **Step 5: Verify against the live machine**
 
+**Not** `upd status --json` from `$PATH`: that binary is the installed one, built before this change, and it does not know the subcommand. Until a `nh os switch` it has to be the script from the checkout, with the variables the store wrapper supplies:
+
 ```bash
-upd status --json | jq '.state, .reboot_recommended, .blockers'
+env REPO=/home/daf3r/nixos-config BRANCH=main STATE_DIR=/var/lib/nixos-upd \
+    LIB_DIR=/home/daf3r/nixos-config/updates/lib \
+    bash updates/upd.sh status --json | jq '{state, reboot_recommended, blockers}'
 ```
 
-Expected: `blockers` is `[]` on a clean main. Then dirty the tree with `touch ~/nixos-config/borrame.txt`, run it again, confirm `dirty_tree` appears, and `rm ~/nixos-config/borrame.txt`.
+And `blockers` is **not** `[]` on a working branch: the engine prepares from `main`, so `wrong_branch` is the correct answer and the sign that it works. Both were run — with `BRANCH=main` the two real blockers appear (`dirty_tree`, `wrong_branch`) and with `BRANCH=upd-barra` on a clean tree the list is empty, exit 0 in both cases, against the real schema-2 `status.json`.
 
 - [ ] **Step 6: Commit**
 
@@ -795,6 +767,8 @@ Expected: `blockers` is `[]` on a clean main. Then dirty the tree with `touch ~/
 git add updates/upd.sh updates/tests/upd.bats
 git commit -m "upd: subcomando status --json con los bloqueos en vivo"
 ```
+
+Explicit paths, never `git add -A`: there is an untracked file from another session in this tree.
 
 ---
 
