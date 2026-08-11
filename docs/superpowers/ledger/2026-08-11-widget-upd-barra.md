@@ -5,34 +5,44 @@ Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 Rama: `upd-barra`, desde `9864df3` en `main`. **Sin integrar.**
 
 Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 6 de 11 hechas**, más una
-tarea 5b que no estaba en el plan. Cada una con revisión y sus rondas de arreglo
-cerradas, salvo la última — ver «Dónde se paró exactamente».
+tarea 5b que no estaba en el plan. Cada una con revisión y **todas sus rondas de
+arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
 
 **156 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
 corriendo dentro de la derivación.
 
 ## Dónde se paró exactamente
 
-HEAD en **`02fe3c4`**, árbol limpio. La tarea 6 está implementada y **revisada
-con veredicto de aprobación**; lo que quedó a medias es su **ronda 3**, que es de
-pulido y no de comportamiento. El implementador se detuvo sin commitear nada, así
-que no hay trabajo colgando en el árbol.
+HEAD en **`f45e029`**, árbol limpio. La tarea 6 está implementada, revisada con
+veredicto de aprobación y **con su ronda 3 de pulido cerrada**. Ninguna de las
+tres cosas de esa ronda tocó `updates/upd.sh`: no hay cambio de comportamiento
+en producción respecto a `02fe3c4`.
 
-Los tres puntos de esa ronda, por orden de valor:
+Qué entró, y qué dejó medido cada punto:
 
-1. **Anclar el mensaje de `apply` en los cuatro contratos donde hoy ya es
-   correcto** (árbol sucio, rama, motor en marcha, lock inabrible) —
-   `updates/tests/upd.bats:1060-1139`, una aserción por test. La quinta pareja,
-   la del repo ilegible, **no se ancla**: ahí `apply` culpa a un HEAD desprendido
-   y anclar la redacción exigiría arreglar `apply`, que es de la tarea 7.
-2. **Corregir la ficha C9 del informe** en `.superpowers/…/task-6-report.md`:
-   describe como cascada un mensaje que sale de la guardia del clon
-   (`upd.sh:529`), no de la que nombra. Medido: `|| cur_branch=""` sobrevive,
-   pero borrar la guardia del todo **muere** con rc 128.
-3. `updates/tests/upd.bats:107` — el ayudante `upd()` no exporta
-   `GIT_CEILING_DIRECTORIES`, que sí exporta `upd_status()` (`:125`) por esta
-   misma razón. El test del repo ilegible depende de que ningún antecesor de
-   `$TMPDIR` sea un repo git.
+1. **El mensaje de `apply` anclado en los cuatro contratos donde hoy ya es
+   correcto** (árbol sucio, rama, motor en marcha, lock inabrible), una aserción
+   por test. La quinta pareja, la del repo ilegible, **sigue sin anclar** y con
+   la razón escrita en el bloque: ahí `apply` culpa a un HEAD desprendido, y
+   anclar esa redacción exigiría arreglar `apply`, que es de la tarea 7.
+   Las cuatro se mataron mutando; **una de esas mutaciones es el mutante C10 que
+   sobrevivió en la ronda 2** —borrar la guardia `exec 9>`—, así que ese hueco
+   queda cerrado.
+2. **Ficha C9 del informe reescrita contra medición.** Su conclusión aguantaba y
+   su evidencia no: la frase que citaba sale de la guardia del clon
+   (`upd.sh:529-530`), que corre **antes** que la del HEAD desprendido, así que
+   la cascada que describía no existe. Lo medido: `|| cur_branch=""` sobrevive y
+   entonces habla la guardia **de rama** con el nombre vacío; borrar la guardia
+   del todo **muere** con rc 128, porque errexit se lleva `apply`.
+3. **`upd()` exporta ya `GIT_CEILING_DIRECTORIES`**, como `upd_status()`.
+   Demostrado con un `$TMPDIR` dentro de un repo git: sin el techo el test
+   **seguía diciendo `ok`** mientras `apply` se iba a operar sobre el repositorio
+   de fuera y le hacía un `git fetch` de verdad (`FETCH_HEAD` escrito). Misma
+   familia que el `nh` real de la ronda 1.
+
+El informe completo de las tres rondas está en
+`.superpowers/sdd/2026-08-11-widget-upd-barra/task-6-report.md`, que **no está
+versionado** — de ahí que lo que importa se resuma aquí.
 
 ## Lo que hace falta de daf3r
 
@@ -68,7 +78,7 @@ pero la primera ejecución real será en esta máquina.
 | 4 | `status.json` a schema 2 y el motor componiendo el cuerpo nuevo | `5d59da9..9dd0ed6` |
 | 5 | `upd status --json` con los bloqueos en vivo | `c53dc4d..47df65d` |
 | 5b | `lib/blockers.sh` — el cálculo de bloqueos sale de `upd.sh` | `9f1289f..28f5154` |
-| 6 | `apply --ff-only` y `apply --boot` | `bc4e06f..02fe3c4` |
+| 6 | `apply --ff-only` y `apply --boot` | `bc4e06f..f45e029` |
 
 **La tarea 5b no estaba en el plan.** Se intercaló por decisión de daf3r: la
 tarea 6 reescribía `apply` entero, así que extraer después habría significado
@@ -309,18 +319,21 @@ de producción que el test dice cubrir y confirmar que el test cae.
 
 | Tarea | Qué falta | Necesita root |
 |---|---|---|
-| 6 | **la ronda 3, de pulido** — ver «Dónde se paró exactamente» | no |
 | 7 | Unidad `nixos-upd-apply@` y reglas polkit | **sí**, paso 4 |
 | 8 | `logic.js` del plugin y sus pruebas | no |
 | 9 | `plugin.json`, `Daemon.qml`, `Widget.qml`, declaración en `dms.nix` | **sí**, paso 5 |
 | 10 | `Popout.qml` y las acciones del daemon | **sí**, paso 4 |
 | 11 | Retirar la fase 2 de la spec vieja, READMEs y pasada de verificación | no |
 
-**La tarea 7 hereda dos cosas.** Que **haga visible el fallo del unit por su
+**La tarea 7 hereda tres cosas.** Que **haga visible el fallo del unit por su
 cuenta** (estado del `systemctl start`), que es donde se cierra el lazo del
-`--ff-only` que no llega a aplicarse. Y que `apply`, si pierde su guardia de
+`--ff-only` que no llega a aplicarse. Que `apply`, si pierde su guardia de
 apertura del lock, diría «hay una comprobacion en marcha» siendo falso — hoy
-inalcanzable porque la guardia está, y anclado por el test de contrato.
+inalcanzable porque la guardia está, y anclado por el test de contrato. Y la
+**guardia del HEAD desprendido**, que arrastra dos defectos de la misma pieza:
+su frase culpa a un HEAD desprendido cuando lo que pasa es que el repositorio no
+se puede leer, y **no tiene ningún test propio en toda la suite** — medido:
+cambiar su `|| die` por `|| cur_branch=""` sobrevive a los 156.
 
 **La tarea 11 hereda**: podar la cabecera de `blockers.sh`, marcar las casillas
 `- [ ]` de todas las tareas del plan a la vez, y **llevar a `updates/README.md`
