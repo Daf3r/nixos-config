@@ -91,5 +91,24 @@
     # Off: this pulls in khal, a CLI calendar that would need its own config and
     # a CalDAV account to show anything. Nothing on this machine feeds it.
     enableCalendarEvents = false;
+
+    # Claude subscription usage — github:Daf3r/dms-plugins, ported from the
+    # Noctalia build. The attribute name is the DIRECTORY that gets created
+    # under ~/.config/DankMaterialShell/plugins/, so it is hyphenated; the
+    # plugin's own `id` is `claudeUsage` in camelCase because DMS's plugin
+    # schema demands it. Declaring this REPLACES the development symlink at
+    # that same path with a read-only link into the store, so from here on a
+    # code change needs a push, a `nix flake update dms-plugins` and a switch —
+    # see the input's comment in ./flake.nix for why it is not a local path.
+    #
+    # `settings` is left out ON PURPOSE, and it is the same one-or-the-other as
+    # the shell's own `settings = { }` above. The submodule's `settings` flips
+    # `managePluginSettings`, which writes plugin_settings.json as a read-only
+    # store symlink — and the plugin ships a settings panel of its own, which
+    # would then have nothing it could save to.
+    plugins.claude-usage = {
+      enable = true;
+      src = "${inputs.dms-plugins}/claude-usage";
+    };
   };
 }

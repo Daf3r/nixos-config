@@ -59,6 +59,22 @@
         "type": "github"
       }
     },
+    "dms-plugins": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786408881,
+        "narHash": "sha256-al1OiPIhVzZoYk3u1HR8sVXQJTN86jL68vb79igUH6w=",
+        "owner": "Daf3r",
+        "repo": "dms-plugins",
+        "rev": "e5aecdc9bc2ab0d089664906fdbe2660c5be3016",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Daf3r",
+        "repo": "dms-plugins",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -196,6 +212,7 @@
         "claude-desktop": "claude-desktop",
         "codex-desktop-linux": "codex-desktop-linux",
         "dms": "dms",
+        "dms-plugins": "dms-plugins",
         "home-manager": "home-manager",
         "nixpkgs": "nixpkgs_3",
         "noctalia": "noctalia"

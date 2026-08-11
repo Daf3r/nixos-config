@@ -65,6 +65,28 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # My own DMS plugins — today just claude-usage, wired up in ./dms.nix.
+    #
+    # `flake = false` because the repo ships no flake.nix: it is a source tree
+    # of QML and JavaScript, not something that builds. The DMS module's
+    # `plugins.<name>.src` takes it and links the subdirectory into
+    # ~/.config/DankMaterialShell/plugins/.
+    #
+    # An input, and not the local path the plugin's own README first suggested,
+    # because flakes evaluate in PURE mode: `src = /home/daf3r/Projects/...`
+    # dies with "access to absolute path is forbidden in pure evaluation mode".
+    # A `path:` input would have worked too, but it would tie this flake to a
+    # directory that only exists on this machine.
+    #
+    # Unlike `dms` above this is NOT pinned to a tag — it is my own repo, and
+    # `nix flake update dms-plugins` after a push is the intended loop. Note
+    # that a change is not live until that update lands: editing the working
+    # copy does nothing on its own once the plugin is declared here.
+    dms-plugins = {
+      url = "github:Daf3r/dms-plugins";
+      flake = false;
+    };
+
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
