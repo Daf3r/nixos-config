@@ -888,111 +888,87 @@ Two smaller things from the same round: `tr … | head -c 200` was a race under 
 
 ---
 
-### Task 7: The root unit and the polkit rules
+### Task 7: The root unit and the polkit rules — done
+
+> Rewritten after the fact, like Tasks 5 and 6 above, and for the same reason:
+> the source of truth is the tree, and a copy of the code in this file is a copy
+> that goes stale. What follows is the shape of what landed and the decisions
+> that are not visible in a diff. `updates.nix`, and the `apply)` arm of
+> `updates/upd.sh`.
 
 **Files:**
-- Modify: `updates.nix`
+- Modified: `updates.nix` — the unit, the polkit rules, and a git config the brief did not have.
+- Modified: `updates/upd.sh` — **the `apply)` arm**, which the brief did not list. See below.
+- Modified: `updates/tests/upd.bats` — two new tests, and the fifth contract pair anchored at last.
+- Modified: this plan's Task 10, and the spec's §2 and flow, against measurement.
 
 **Interfaces:**
-- Produces: `nixos-upd-apply@switch.service` and `nixos-upd-apply@boot.service`, startable by daf3r with a password prompt. `nixos-upd.service` startable by daf3r with no prompt.
+- `nixos-upd-apply@switch.service` and `nixos-upd-apply@boot.service` — root oneshots that run `nh os switch|boot ${repo}` and nothing else. Startable by daf3r with a password prompt every time. Any other instance name is refused by the unit's own script, not only by polkit.
+- `nixos-upd.service` — startable by daf3r with no prompt.
 
-- [ ] **Step 1: Add the unit**
+**Four things the brief did not have**
 
-In `updates.nix`, alongside the existing `systemd.services.nixos-upd`:
+1. **Root cannot open daf3r's repository, and the unit dies before `nh` starts.**
+   Not a hypothesis: `nix flake metadata /home/daf3r/nixos-config` resolves to
+   `git+file://`, so the apply reads the repository through nix's git fetcher,
+   which is libgit2 — and libgit2 refuses a repository whose owner is not the
+   calling euid. Reproduced end to end with `nix flake metadata` on a root-owned
+   repository: `repository path '…' is not owned by current user (libgit2 error
+   code = 7)`. The reason nobody meets this by hand is `sudo`, which libgit2
+   accepts via `$SUDO_UID`; a systemd unit has none. The unit therefore carries
+   its own `XDG_CONFIG_HOME` holding a single `safe.directory` line — scoped to
+   this one unit rather than to `/etc/gitconfig`. `GIT_CONFIG_GLOBAL` was tried
+   first and does nothing: it is git(1)'s variable and libgit2 ignores it.
+2. **`upd apply` blamed the HEAD for a repository that was not there**, and its
+   detached-HEAD guard had no test anywhere in the suite — Task 6 measured both
+   and left them here. With `$REPO/.git` removed, `git status` printed nothing on
+   stdout so the dirty-tree guard announced a clean tree, and `symbolic-ref`
+   then failed exactly as it does on a real detached HEAD. `apply` now opens
+   with the same `rev-parse --is-inside-work-tree` check `lib/blockers.sh` opens
+   with, which is what made the **fifth contract pair anchorable** after Task 6
+   deliberately left it unanchored.
+3. **The unit's outcome has to reach whoever started it**, and `--no-block` threw
+   it away. Measured: blocking `systemctl start` on a oneshot exits 1 when the
+   unit fails; `--no-block` exits 0 before it has run. And the
+   `ActiveState`/`Result` poll that `--no-block` forced cannot recover the
+   difference, because a unit that has never run and one that finished
+   successfully both report `inactive`/`success`. Task 10's snippet in this file
+   read that pair as a completed apply. Corrected here and in the spec, in the
+   same commit as the unit.
+4. **No `TimeoutStartSec`, and that is a decision.** The obvious guard — a
+   twenty-minute switch killed by the manager's 90-second default — does not
+   apply: `Type=oneshot` disables the start timeout, and every oneshot on this
+   machine that sets none reports `TimeoutStartUSec=infinity`. Measured before
+   adding anything, and nothing added.
 
-```nix
-  # The root half of an apply. It does one thing: activate. The git
-  # fast-forward has already happened, as daf3r, via `upd apply --ff-only` --
-  # if root did the merge, .git would end up with root-owned objects and the
-  # user's next commit would fail.
-  #
-  # A unit rather than a child of the shell, so a `dms restart` in the middle of
-  # a twenty-minute switch does not orphan it and its result stays queryable
-  # afterwards. Instance name is the nh verb, and nothing else is accepted.
-  systemd.services."nixos-upd-apply@" = {
-    description = "Apply the prepared system update (%i)";
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${pkgs.writeShellScript "nixos-upd-apply" ''
-        set -euo pipefail
-        case "$1" in
-          switch|boot) ;;
-          *) echo "nixos-upd-apply: unknown mode '$1'" >&2; exit 1 ;;
-        esac
-        exec ${pkgs.nh}/bin/nh os "$1" /home/daf3r/nixos-config
-      ''} %i";
-      # nh shells out to nix, which needs these on a system unit's minimal PATH.
-      Environment = "PATH=/run/current-system/sw/bin:/run/wrappers/bin";
-    };
-  };
-```
+**Testing notes**
 
-Verify the `nh` attribute name against the pinned nixpkgs before building — if `pkgs.nh` does not exist under that name the build fails loudly, which is the desired failure.
+- The unit and the rules are `.nix`, so the bats suite cannot reach them. What
+  stands in for it: the generated `nixos-upd-apply@.service`, its script and its
+  git config were read out of the built system rather than out of the source;
+  the script was run against `--frobnicate`, `switchh`, `""` and no argument at
+  all; and the generated `10-nixos.rules` was evaluated in a JS harness that
+  registers the callbacks the way polkitd does and asks them about eleven
+  concrete pairs — including the other user, the other action, the other unit,
+  and `nixos-upd-apply@test.service`, none of which the rule may widen to.
+- The two `Environment=PATH=` lines in the generated unit — NixOS's default and
+  ours — were checked rather than reasoned about: the later assignment wins,
+  demonstrated with a throwaway user unit.
+- 7 mutations, 7 killed, all on a copy of `updates/` under `/tmp`. The one that
+  matters is `|| cur_branch=""` on the detached-HEAD guard: it survived all 156
+  tests before this task and now kills exactly one, the new test written for it.
 
-- [ ] **Step 2: Add the polkit rules**
+**What Task 8 inherits:** a unit whose failure is legible to a blocking caller,
+polkit rules verified by evaluation rather than by reading, and an `apply` whose
+five refusals all say what they mean.
 
-```nix
-  # Two levels on purpose.
-  #
-  # The check only builds -- it can never change the running system -- so
-  # demanding a password for it is friction with nothing bought. The apply gets
-  # auth_admin every time, and deliberately NOT auth_admin_keep: a five-minute
-  # grace period on the one action that changes the system is exactly what we do
-  # not want.
-  #
-  # A polkit rule can be syntactically fine and silently authorise nothing --
-  # that already happened on this machine with gamemode. The acceptance test is
-  # starting the unit and seeing the prompt, not reading this block.
-  security.polkit.extraConfig = '''
-    polkit.addRule(function(action, subject) {
-      if (action.id != "org.freedesktop.systemd1.manage-units") return undefined;
-      if (subject.user != "daf3r") return undefined;
-      var unit = action.lookup("unit");
-      if (unit == "nixos-upd.service") return polkit.Result.YES;
-      if (unit == "nixos-upd-apply@switch.service" ||
-          unit == "nixos-upd-apply@boot.service") return polkit.Result.AUTH_ADMIN;
-      return undefined;
-    });
-  ''';
-```
-
-(The `'''` above is this document's quoting; in the `.nix` file use Nix's `''` string delimiters.)
-
-- [ ] **Step 3: Build**
-
-Run: `nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link`
-Expected: builds. A red bats suite or a missing `pkgs.nh` stops it here.
-
-- [ ] **Step 4: Apply and verify by hand — this is the acceptance test**
-
-The switch must be run by daf3r (needs root):
-
-```bash
-nh os switch ~/nixos-config
-```
-
-Then, with the graphical session running:
-
-```bash
-systemctl start nixos-upd.service
-```
-
-Expected: **no prompt**, the unit runs, `systemctl status nixos-upd.service` shows it executed.
-
-```bash
-systemctl start nixos-upd-apply@boot.service
-```
-
-Expected: the **DMS polkit modal appears** asking for a password. Cancel it. Confirm with `systemctl is-active nixos-upd-apply@boot.service` that it did not run, and that `readlink /nix/var/nix/profiles/system` is unchanged.
-
-If no modal appears, the rule did not take effect — check `journalctl -u polkit -b` and do not proceed to Task 8 until it does. A silently-ineffective polkit rule is the known failure mode here.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add updates.nix
-git commit -m "updates: unidad de apply con root y reglas polkit acotadas"
-```
+**Still outstanding, and it is daf3r's to run:** the acceptance test. Steps 3–5
+of the original brief are in the Task 7 report as a copy-and-paste block —
+`nh os switch`, then `systemctl start nixos-upd.service` expecting **no** prompt,
+then `systemctl start nixos-upd-apply@boot.service` expecting the DMS modal. A
+silently-ineffective polkit rule is the known failure mode here, and it has
+happened on this machine before with gamemode. Do not start Task 8 until the
+modal has been seen.
 
 ---
 
@@ -1461,7 +1437,18 @@ Then add to `Daemon.qml`:
                 root.republish()
                 return
             }
-            unitProc.command = ["systemctl", "start", "--no-block",
+            // No --no-block. Amended in Task 7 against measurement, and the
+            // measurement is in that task's report and in the spec: --no-block
+            // returns 0 before the unit has run, and the ActiveState/Result
+            // poll it forced cannot make up the difference, because a unit that
+            // has *never run* and one that *finished successfully* both say
+            // `inactive` / `success`. The watcher below used to treat that pair
+            // as a completed apply -- so the panel could announce success over
+            // an `nh` that had not started. Blocking, the exit status is the
+            // answer: 0 the apply finished and succeeded, non-zero it failed or
+            // the polkit prompt was cancelled. A Process does not block the UI
+            // thread, so this costs nothing.
+            unitProc.command = ["systemctl", "start",
                                 "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
             unitProc.running = true
         }
@@ -1471,46 +1458,21 @@ Then add to `Daemon.qml`:
         id: unitProc
         stderr: StdioCollector { id: unitErr }
         onExited: (code, st) => {
+            root.applying = false
             if (code !== 0) {
-                root.applying = false
                 root.lastError = unitErr.text      // includes a cancelled polkit prompt
                 root.republish()
                 return
             }
-            unitWatch.running = true
+            root.poll()   // poll() republishes with the fresh status
         }
     }
 
-    // --no-block returns as soon as the job is queued, so completion has to be
-    // watched for. A switch can take twenty minutes; the shell must not pretend
-    // it is done when it is only started.
-    Timer {
-        id: unitWatch
-        interval: 3000
-        repeat: true
-        onTriggered: watchProc.running = true
-    }
-
-    Process {
-        id: watchProc
-        command: ["systemctl", "show", "-p", "ActiveState", "-p", "Result", "--value",
-                  "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const lines = text.trim().split("\n")
-                if (lines[0] === "failed" || (lines[0] === "inactive" && lines[1] !== "success")) {
-                    root.applying = false
-                    unitWatch.running = false
-                    root.lastError = "la unidad termino en " + lines[1]
-                    root.republish()
-                } else if (lines[0] === "inactive" && lines[1] === "success") {
-                    root.applying = false
-                    unitWatch.running = false
-                    root.poll()   // poll() republishes with the fresh status
-                }
-            }
-        }
-    }
+    // What is deliberately NOT here any more: the 3-second ActiveState/Result
+    // watcher. It is still the only way to recover an outcome after a
+    // `dms restart` mid-apply, and if that reattach path is wanted it belongs
+    // in Task 11 with `inactive`/`success` read as "not running" -- never as
+    // "succeeded", which is the reading that made it wrong here.
 
     function check() {
         checkProc.running = true

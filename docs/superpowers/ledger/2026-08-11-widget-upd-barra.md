@@ -4,19 +4,34 @@ Plan: `docs/superpowers/plans/2026-08-11-widget-upd-barra.md`
 Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 Rama: `upd-barra`, desde `9864df3` en `main`. **Sin integrar.**
 
-Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 6 de 11 hechas**, más una
+Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 7 de 11 hechas**, más una
 tarea 5b que no estaba en el plan. Cada una con revisión y **todas sus rondas de
 arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
 
-**156 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
+**158 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
 corriendo dentro de la derivación.
+
+**La tarea 7 tiene un paso que no puede darse sin root y no está dado**: ver el
+modal de polkit. Hasta entonces la tarea está escrita y construida, no aceptada
+— y una regla polkit que no autoriza nada en silencio ya pasó aquí con gamemode.
 
 ## Dónde se paró exactamente
 
-HEAD en **`f45e029`**, árbol limpio. La tarea 6 está implementada, revisada con
-veredicto de aprobación y **con su ronda 3 de pulido cerrada**. Ninguna de las
-tres cosas de esa ronda tocó `updates/upd.sh`: no hay cambio de comportamiento
-en producción respecto a `02fe3c4`.
+HEAD en **`8585c61`**, árbol limpio salvo la spec del `.deb` de ChatGPT, que es
+de otra sesión. La tarea 7 está implementada y construida; **falta su prueba de
+aceptación**, que es de daf3r (más abajo, «Lo que hace falta de daf3r»).
+
+Qué entró en la tarea 7:
+
+1. **`nixos-upd-apply@switch` y `@boot`** (`updates.nix`), oneshots de root que
+   solo activan, con el modo validado dentro de la unidad y no solo en polkit.
+2. **Las reglas polkit**, `YES` para `nixos-upd.service` y `AUTH_ADMIN` —nunca
+   `AUTH_ADMIN_KEEP`— para las dos instancias del apply.
+3. **`apply` deja de culpar al HEAD de un repositorio que no puede abrir**
+   (`updates/upd.sh`), con test propio para la guardia del HEAD desprendido y la
+   **quinta pareja del contrato anclada** por fin.
+4. **El `--no-block` de la tarea 10 corregido contra medición**, en el plan y en
+   la spec.
 
 Qué entró, y qué dejó medido cada punto:
 
@@ -67,6 +82,42 @@ con el mismo nixpkgs fijado y solo activa el motor nuevo.
 **`nh os boot` no lo ha ejecutado nadie de verdad**, solo el stub. Los tests
 prueban con igualdad exacta que se invoca como `os boot` y no como `os switch`,
 pero la primera ejecución real será en esta máquina.
+
+### La prueba de aceptación de la tarea 7
+
+Es el paso que decide si las reglas polkit sirven, y **no puede darlo nadie más**.
+Después del switch de arriba, con la sesión gráfica en marcha:
+
+```
+systemctl start nixos-upd.service
+```
+
+Debe correr **sin pedir contraseña**. Se comprueba con
+`systemctl show nixos-upd.service -p Result -p ExecMainStatus`.
+
+```
+systemctl start nixos-upd-apply@boot.service
+```
+
+Debe **salir el modal de DMS** pidiendo contraseña. Se cancela. Después,
+`systemctl is-active nixos-upd-apply@boot.service` debe decir `inactive` y
+`readlink /nix/var/nix/profiles/system` debe seguir apuntando a lo mismo que
+antes.
+
+Si no aparece modal, la regla no surtió efecto: `journalctl -u polkit -b`, y **no
+se empieza la tarea 8**. Una regla polkit sintácticamente correcta que autoriza
+cero en silencio ya pasó en esta máquina con gamemode.
+
+Y hay un tercer comando que solo la primera ejecución real puede validar, el que
+prueba que root puede leer el repositorio de daf3r:
+
+```
+systemctl start nixos-upd-apply@boot.service   # esta vez con la contraseña
+journalctl -u nixos-upd-apply@boot.service -b --no-pager | tail -20
+```
+
+Lo que **no** debe aparecer ahí es `is not owned by current user`. Si aparece, la
+línea `safe.directory` de la unidad no está llegando a libgit2.
 
 ## Qué hay hecho
 
@@ -226,6 +277,30 @@ de producción que el test dice cubrir y confirmar que el test cae.
 - **`tr … | head -c N` bajo `pipefail` es una carrera**: reproducida a 38 KB en
   una pasada y no en otra del mismo tamaño. Las expansiones de bash la eliminan y
   ahorran dos procesos.
+- **Una ruta pelada de flake es un repositorio git para nix.**
+  `nix flake metadata ~/nixos-config` responde
+  `git+file:///home/daf3r/nixos-config`. Todo lo que aplique desde ahí pasa por
+  el fetcher de git, no lee un directorio.
+- **libgit2 se niega ante un repositorio cuyo dueño no es el euid que llama**, y
+  nix no puede desactivarlo: importa `git_libgit2_init` y **no**
+  `git_libgit2_opts`. Reproducido: `repository path '...' is not owned by current
+  user (libgit2 error code = 7)`. **`sudo` es lo que lo tapa** —libgit2 acepta el
+  dueño si coincide con `$SUDO_UID`—, así que el fallo aparece justo donde no hay
+  sudo: en una unidad de systemd. Se arregla con `safe.directory`, y **solo por
+  `HOME` o `XDG_CONFIG_HOME`**: `GIT_CONFIG_GLOBAL` es de git(1) y libgit2 lo
+  ignora, medido.
+- **`Type=oneshot` desactiva el timeout de arranque.** Todos los oneshot de esta
+  máquina que no fijan `TimeoutStartSec` dicen `TimeoutStartUSec=infinity`. Un
+  switch de veinte minutos no necesita salvaguarda; añadirla lo haría *más*
+  estricto, no menos. (`nixos-upd.service` fija 3h, que es exactamente eso.)
+- **`systemctl start` de un oneshot devuelve el resultado; `--no-block` no.**
+  Medido: bloqueando, RC=1 y `Job for … failed`; con `--no-block`, RC=0 antes de
+  que la unidad haya corrido. Y el sondeo posterior **no lo recupera**: una
+  unidad que **nunca ha corrido** y una que **terminó bien** dicen las dos
+  `inactive`/`success`. Solo el fallo es legible por ahí.
+- **Dos `Environment=PATH=` en la misma unidad: gana la última.** NixOS pone la
+  suya siempre, así que la de uno va después y la sustituye. Comprobado con una
+  unidad de usuario de usar y tirar, no deducido del manual.
 
 ## Decisiones tomadas, con su porqué
 
@@ -319,21 +394,30 @@ de producción que el test dice cubrir y confirmar que el test cae.
 
 | Tarea | Qué falta | Necesita root |
 |---|---|---|
-| 7 | Unidad `nixos-upd-apply@` y reglas polkit | **sí**, paso 4 |
+| 7 | **solo la prueba de aceptación**: ver el modal | **sí** |
 | 8 | `logic.js` del plugin y sus pruebas | no |
 | 9 | `plugin.json`, `Daemon.qml`, `Widget.qml`, declaración en `dms.nix` | **sí**, paso 5 |
 | 10 | `Popout.qml` y las acciones del daemon | **sí**, paso 4 |
 | 11 | Retirar la fase 2 de la spec vieja, READMEs y pasada de verificación | no |
 
-**La tarea 7 hereda tres cosas.** Que **haga visible el fallo del unit por su
-cuenta** (estado del `systemctl start`), que es donde se cierra el lazo del
-`--ff-only` que no llega a aplicarse. Que `apply`, si pierde su guardia de
-apertura del lock, diría «hay una comprobacion en marcha» siendo falso — hoy
-inalcanzable porque la guardia está, y anclado por el test de contrato. Y la
-**guardia del HEAD desprendido**, que arrastra dos defectos de la misma pieza:
-su frase culpa a un HEAD desprendido cuando lo que pasa es que el repositorio no
-se puede leer, y **no tiene ningún test propio en toda la suite** — medido:
-cambiar su `|| die` por `|| cur_branch=""` sobrevive a los 156.
+**De las tres cosas que heredaba la tarea 7, dos están cerradas y una sigue
+abierta a propósito.** La guardia del HEAD desprendido, cerrada: frase corregida,
+test propio, y la mutación `|| cur_branch=""` que sobrevivía a los 156 mata hoy
+exactamente ese test. El lazo del `systemctl start`, cerrado donde se podía —
+medido que `--no-block` tira el resultado y que el sondeo no lo recupera, y el
+plan y la spec de la tarea 10 corregidos; **el código es de la tarea 10**, y esa
+es la línea que hay que respetar al implementarla. Y sigue abierta la tercera:
+`apply`, si pierde su guardia de apertura del lock, diría «hay una comprobacion
+en marcha» siendo falso — inalcanzable porque la guardia está, y anclado por el
+test de contrato.
+
+**Lo que la tarea 7 deja abierto, y no arregló porque no es suyo:** la guardia de
+árbol sucio de `apply` concluye «limpio» sobre un árbol que git no pudo leer
+entero. Reproducido con un subdirectorio en modo 000: `warning: could not open
+directory 'secreto/'`, **rc 0 y stdout vacío**, así que `apply` pasa de largo. Es
+el mismo defecto que `blockers_live` ya cerró en el lado del panel —con captura
+de stderr y fichero temporal— y que en `apply` sigue vivo. La tarea 7 sí cerró la
+mitad de al lado (un repositorio que no se abre), que era la que tenía dueño.
 
 **La tarea 11 hereda**: podar la cabecera de `blockers.sh`, marcar las casillas
 `- [ ]` de todas las tareas del plan a la vez, y **llevar a `updates/README.md`

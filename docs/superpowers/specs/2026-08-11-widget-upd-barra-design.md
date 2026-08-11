@@ -99,16 +99,45 @@ whatever a blocker says is what the user reads.
 
 A template unit with two instances, `@switch` and `@boot`, each a `oneshot`
 running as root and doing exactly one thing: `nh os switch` or `nh os boot`
-against `$REPO`. The plugin starts it with `systemctl start --no-block`.
+against `$REPO`. **The plugin starts it with a plain, blocking `systemctl
+start` and reads the exit status.** That sentence said `--no-block` until Task
+7 measured what the two forms actually report:
+
+| | blocking `systemctl start` | `systemctl start --no-block` |
+|---|---|---|
+| unit fails | exit 1, `Job for … failed because the control process exited with error code` | exit 0 |
+| unit succeeds | exit 0, after it finished | exit 0, before it started |
+
+And polling `ActiveState`/`Result` afterwards does not recover the difference:
+a oneshot that **has never run** and one that **finished successfully** both
+report `inactive`/`success`. Only failure is legible that way, and only if the
+poll lands after the job started — so a watcher that treats `inactive` +
+`success` as proof of a finished apply is reading the same two words it would
+have read had nothing happened at all. That is this project's own failure
+shape, an incomplete run rendering identically to a clean one, reintroduced at
+the last step.
+
+`systemctl start` is asynchronous *to the panel* regardless: it runs in a
+`Process`, not on the UI thread, so blocking costs nothing and buys the answer.
 
 **The git fast-forward does not go in this unit.** It stays in `upd apply
 --ff-only`, running as daf3r before the unit is started. If root performed the
 merge, `.git` would end up with root-owned objects and daf3r's next commit would
 fail.
 
+**Root cannot read daf3r's repository without being told to.** `nix` resolves a
+bare path to a `git+file://` flakeref, and its libgit2 refuses a repository
+whose owner is not the calling euid — which is why `sudo nh os switch` works
+(libgit2 accepts `$SUDO_UID`) and a systemd unit does not. The unit therefore
+carries an `XDG_CONFIG_HOME` of its own holding one `safe.directory` line.
+Measured in Task 7; `GIT_CONFIG_GLOBAL` is not an alternative, libgit2 ignores
+it.
+
 Running the switch under systemd rather than as a child of the shell is what
 makes `dms restart` mid-apply survivable: the unit keeps going, and its state is
-still queryable afterwards.
+still queryable afterwards. What a restart loses is the *notification*, not the
+apply — with the blocking start, the panel's answer dies with the process, and
+recovering it after a restart is the one job `systemctl show` is still good for.
 
 ### 3. The plugin — `updates/dms-plugin/`
 
@@ -166,11 +195,15 @@ Everything already in the file — `state`, `checked_at`, `warnings`, `unmanaged
    It stops there and touches nothing else.
 3. On failure the panel shows the engine's message **verbatim** — no rewording,
    no summarising.
-4. On success: `systemctl start --no-block nixos-upd-apply@switch.service`, or
-   `@boot`.
+4. On success: `systemctl start nixos-upd-apply@switch.service`, or `@boot`.
 5. polkit raises the DMS modal and asks for the password.
-6. The daemon follows the unit with `systemctl show -p ActiveState,Result` and
-   notifies on completion.
+6. That command returns when the unit has finished, and its exit status is the
+   outcome: 0 the apply succeeded, non-zero it failed or the prompt was
+   cancelled, with stderr shown verbatim like every other refusal here. Only
+   after a `dms restart` mid-apply, where that answer was lost with the
+   process, does the daemon fall back to `systemctl show -p ActiveState,Result`
+   — and there `inactive`/`success` has to be read as "not running", never as
+   "succeeded".
 7. After a `@boot` apply the panel offers to reboot. It never reboots on its own.
 
 ### polkit, at two levels
