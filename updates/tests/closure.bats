@@ -7,6 +7,7 @@ setup() {
   # inherit shell functions, so it has to be exported -- same as brave.bats
   # and t3code.bats.
   export -f closure_parse
+  export -f closure_reboot
   FIX="${BATS_TEST_DIRNAME}/fixtures/diff-closures.txt"
 }
 
@@ -210,4 +211,59 @@ setup() {
 @test "closure_parse on empty input is an empty diff, not an error" {
   run bash -c ": | closure_parse | jq -e '.added == [] and .removed == [] and .changed == [] and .size_delta_mb == 0'"
   [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot flags an nvidia driver change" {
+  # The 2026-08-11 prepared update: same kernel, nvidia-open 595.84 → 595.91.07.
+  # Applying that with `switch` leaves the loaded module out of step with the
+  # new userspace libraries until reboot.
+  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-open\",\"from\":\"595.84-7.1.6\",\"to\":\"595.91.07-7.1.6\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true and (.reboot_reason | index(\"nvidia-open\"))'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot flags a kernel change" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"linux-xanmod\",\"from\":\"6.17.12\",\"to\":\"7.1.6\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot flags mesa" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"mesa\",\"from\":\"25.3.1\",\"to\":\"26.2.0\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot does not flag ordinary userspace" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"samba\",\"from\":\"4.23.8\",\"to\":\"4.23.10\"},{\"name\":\"kitty\",\"from\":\"\",\"to\":\"\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false and (.reboot_reason == [])'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot does not match a package that merely contains a keyword" {
+  # `nvidia-settings` is a GUI tool and moves with the driver, but on its own it
+  # is not a reason to reboot. Matching on substrings alone would make almost
+  # every nvidia update a reboot, and a recommendation that fires every time
+  # stops being read.
+  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-settings\",\"from\":\"595.84\",\"to\":\"595.91.07\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot refuses empty input instead of staying silent" {
+  # Empty stdin makes jq produce no output at all and exit 0. A caller reading
+  # a closure_diff that was never written -- the file missing on a first run,
+  # or truncated -- would get an empty string and a clean status, and whatever
+  # read `.reboot_recommended` out of it would see nothing and carry on. That
+  # silence reads as "no reboot needed", which is the direction that hurts:
+  # the panel would offer the hot apply for a driver change.
+  run bash -c ": | closure_reboot 2> '$BATS_TMPDIR/empty-err.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'closure_reboot' "$BATS_TMPDIR/empty-err.txt"
+}
+
+@test "closure_reboot refuses input that is not a closure_diff object" {
+  # `null` is the other quiet one: every field lookup on it yields null, the
+  # `// []` defaults turn that into empty lists, and the answer comes back as
+  # a confident `reboot_recommended: false`. Status is jq's own error code
+  # rather than 1, which is why this asserts non-zero and not a number.
+  run bash -c "echo null | closure_reboot 2>/dev/null"
+  [ "$status" -ne 0 ]
+  [ -z "$output" ]
 }
