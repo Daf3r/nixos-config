@@ -76,7 +76,7 @@ is computed live and never written to disk.
 | `wrong_branch` | `$REPO` is not on `$BRANCH` |
 | `engine_running` | the engine holds its lock right now |
 | `clone_unusable` | `$WT` fails one of the four integrity checks `apply` already makes |
-| `pending_reboot` | `/nix/var/nix/profiles/system` and `/run/current-system` resolve to different store paths — something was applied with `boot` and has not been rebooted into |
+| `pending_reboot` | `/nix/var/nix/profiles/system` and `/run/current-system` resolve to different store paths — the profile and the running system are not the same generation. **In either direction**: an apply that has not been rebooted into leaves the profile ahead, and a `nixos-rebuild test` / `nh os test`, which activates without writing the profile, leaves it behind. Blocking is right for both, so the message names the disagreement and not a direction |
 
 Each carries the same literal message `upd apply` would have printed. The panel
 displays it verbatim.
