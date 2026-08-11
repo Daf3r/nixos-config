@@ -93,6 +93,79 @@ let
 
   entryPoints = [ "nixos-upd" "upd" "bump-brave-origin" "bump-t3code-app" "check-brave-vaapi" ];
 
+  # A git configuration whose entire content is "${repo} may be opened by
+  # whoever is reading this". It exists for the apply unit below and for nothing
+  # else, which is why it is a directory handed to that one unit through
+  # XDG_CONFIG_HOME rather than a line in /etc/gitconfig: the exemption is
+  # narrow, it is attached to the one process that needs it, and no other user
+  # or service on this machine inherits it.
+  #
+  # Why it is needed at all, measured on 2026-08-11 rather than assumed:
+  #
+  #   `nix` resolves a bare path to a git flakeref. `nix flake metadata
+  #   ${repo}` reports `git+file://${repo}`, so the apply reads the repository
+  #   through nix's git fetcher, not as a plain directory.
+  #
+  #   That fetcher is libgit2 (nix 2.34.8 links libgit2 1.9.4), and libgit2
+  #   refuses to open a repository whose owner is not the calling euid. The
+  #   binary imports `git_libgit2_init` and *not* `git_libgit2_opts`, so nix
+  #   cannot be turning that validation off.
+  #
+  #   Reproduced end to end: `nix flake metadata` on a root-owned repository,
+  #   run as daf3r, fails with `repository path '...' is not owned by current
+  #   user (libgit2 error code = 7)`. The unit is the same mismatch with the
+  #   sides swapped -- root reading a repository owned by ${user}.
+  #
+  #   The reason nobody meets this by hand is `sudo`: libgit2 accepts a
+  #   repository owned by $SUDO_UID, so `sudo nh os switch ~/nixos-config`
+  #   works. A systemd unit has no SUDO_UID, so it does not.
+  #
+  # And the shape of the fix was measured too, because the obvious one is
+  # wrong: `GIT_CONFIG_GLOBAL` pointing at the same file changes nothing, since
+  # that variable is git(1)'s and libgit2 does not read it. `HOME` and
+  # `XDG_CONFIG_HOME` both work; XDG_CONFIG_HOME is the one used here because
+  # moving root's HOME into the store would also move its cache and state
+  # directories into a read-only path.
+  applyGitConfig = pkgs.writeTextFile {
+    name = "nixos-upd-apply-gitconfig";
+    destination = "/git/config";
+    text = ''
+      [safe]
+      directory = ${repo}
+    '';
+  };
+
+  # The root half of an apply. It does one thing: activate. The git
+  # fast-forward has already happened, as ${user}, via `upd apply --ff-only` --
+  # if root did the merge, .git would end up with root-owned objects and the
+  # user's next commit would fail.
+  #
+  # A unit rather than a child of the shell, so a `dms restart` in the middle of
+  # a twenty-minute switch does not orphan it and its result stays queryable
+  # afterwards. Instance name is the nh verb, and nothing else is accepted.
+  #
+  # The mode is checked here rather than trusted, because the polkit rules
+  # below are not the only way in: root can start any instance of a template,
+  # and `%i` is whatever was typed. Defaulted with `:-` so an empty instance
+  # gets this script's own sentence rather than bash's `unbound variable`, and
+  # printed with `%q` so that sentence *names* the empty string instead of
+  # trailing off -- `upd apply ""` taught that lesson in Task 6, where an empty
+  # mode sailed through as `switch`.
+  #
+  # No TimeoutStartSec. Checked rather than assumed, because a twenty-minute
+  # activation under the manager's 90-second default would be killed halfway:
+  # `Type=oneshot` disables the start timeout, and every oneshot on this machine
+  # that does not set one reports `TimeoutStartUSec=infinity`.
+  applyScript = pkgs.writeShellScript "nixos-upd-apply" ''
+    set -euo pipefail
+    mode="''${1:-}"
+    case "$mode" in
+      switch|boot) ;;
+      *) printf 'nixos-upd-apply: unknown mode %q\n' "$mode" >&2; exit 1 ;;
+    esac
+    exec ${pkgs.nh}/bin/nh os "$mode" ${lib.escapeShellArg repo}
+  '';
+
   nixos-upd = pkgs.stdenvNoCC.mkDerivation {
     pname = "nixos-upd";
     version = "1";
@@ -278,6 +351,67 @@ in
       TimeoutStartSec = "3h";
     };
   };
+
+  # The activation half of an apply, as its own unit. The repository half --
+  # the fast-forward -- is `upd apply --ff-only`, run as ${user} before this is
+  # started, and the split exists so each half runs as whoever it has to be.
+  #
+  # Whoever starts this has to look at the result. `systemctl start` on a
+  # oneshot blocks until it finishes and exits non-zero when it failed
+  # (measured: exit 1, `Job for ... failed because the control process exited
+  # with error code`), so a person at a terminal is told. `systemctl start
+  # --no-block` returns 0 immediately and tells nobody anything, and polling
+  # ActiveState/Result afterwards does not recover it: a unit that has never
+  # run and a unit that finished successfully both report
+  # `inactive`/`success`, so only the failure is legible and only if the poll
+  # happens to land after the job started. Measured with a throwaway user unit
+  # -- see the Task 7 report. The bar plugin therefore starts this *blocking*,
+  # off the UI thread, and reports the exit status; the spec's earlier
+  # `--no-block` was corrected in the same commit as this unit.
+  systemd.services."nixos-upd-apply@" = {
+    description = "Apply the prepared system update (%i)";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${applyScript} %i";
+      Environment = [
+        # nh shells out to nix, which needs these on a system unit's minimal PATH.
+        "PATH=/run/current-system/sw/bin:/run/wrappers/bin"
+        # The safe.directory exemption, and the only reason this unit needs any
+        # git configuration at all. Without it the activation dies before it
+        # starts, with libgit2 refusing to open a repository root does not own.
+        # See applyGitConfig above for the measurements.
+        "XDG_CONFIG_HOME=${applyGitConfig}"
+      ];
+    };
+  };
+
+  # Two levels on purpose.
+  #
+  # The check only builds -- it can never change the running system -- so
+  # demanding a password for it is friction with nothing bought. The apply gets
+  # auth_admin every time, and deliberately NOT auth_admin_keep: a five-minute
+  # grace period on the one action that changes the system is exactly what we do
+  # not want.
+  #
+  # `return undefined` rather than a bare fallthrough on every path that is not
+  # ours, so this rule never becomes the answer for an action it was not written
+  # about -- gaming.nix registers a rule too, and polkit stops at the first one
+  # that returns a value.
+  #
+  # A polkit rule can be syntactically fine and silently authorise nothing --
+  # that already happened on this machine with gamemode. The acceptance test is
+  # starting the unit and seeing the prompt, not reading this block.
+  security.polkit.extraConfig = ''
+    polkit.addRule(function(action, subject) {
+      if (action.id != "org.freedesktop.systemd1.manage-units") return undefined;
+      if (subject.user != "${user}") return undefined;
+      var unit = action.lookup("unit");
+      if (unit == "nixos-upd.service") return polkit.Result.YES;
+      if (unit == "nixos-upd-apply@switch.service" ||
+          unit == "nixos-upd-apply@boot.service") return polkit.Result.AUTH_ADMIN;
+      return undefined;
+    });
+  '';
 
   systemd.timers.nixos-upd = {
     description = "Daily prepared-update check";
