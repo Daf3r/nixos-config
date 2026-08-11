@@ -218,18 +218,23 @@ case "$cmd" in
         # activates in place, and a kernel or NVIDIA module that moved leaves
         # the loaded module out of step with the new userspace until a reboot.
         #
-        # It does NOT say "aplicar con `upd apply --boot`", which is what the
-        # plan wrote here: that flag does not exist yet, and measured today
-        # `upd apply --boot` fast-forwards and runs `nh os switch` all the same
-        # -- the hot activation the advice is trying to avoid. Pointing a user
-        # at a flag that silently does the opposite is worse than no advice.
-        # When Task 6 splits apply into switch and boot, this is where the
-        # wording changes.
+        # This wording has now been wrong in both directions, which is why it
+        # says what it says. It pointed at `upd apply --boot` before that flag
+        # existed, and `apply` accepted it, ignored it and activated hot -- the
+        # advice sending the user into precisely what it was warning about. So
+        # Task 4 removed the flag from the advice. Task 6 makes the flag real,
+        # and leaving the advice as it was would be the same defect inverted:
+        # telling someone to activate hot and reboot afterwards when a mode
+        # that avoids the hot activation is one word away. The rule behind both
+        # rounds: advice may name a flag exactly as long as the flag behaves,
+        # and the two move in the same commit.
         if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
           echo
           echo "  ESTO PIDE REINICIO: $(jq -r '(.reboot_reason // []) | join(", ")' "$STATUS")"
-          echo "  \`upd apply\` activa en caliente y el modulo ya cargado deja de cuadrar"
-          echo "  con las librerias nuevas: reinicia en cuanto lo apliques."
+          echo "  aplicalo con \`upd apply --boot\`: deja la generacion lista para el"
+          echo "  proximo arranque en vez de activarla en caliente, que es lo que deja"
+          echo "  el modulo ya cargado sin cuadrar con las librerias nuevas."
+          echo "  Despues, reinicia cuando te venga bien."
         fi
         print_unmanaged
         ;;
@@ -265,7 +270,17 @@ case "$cmd" in
         echo "  hay $nwarn aviso(s): algo no se comprobo o no se pudo actualizar."
         echo "  la actualizacion se puede aplicar igual, pero leelos antes."
       fi
-      echo "  aplicar:  upd apply"
+      # The footer has to agree with the reboot advice above it, or the same
+      # screen gives two different instructions and the one at the bottom wins
+      # by being last. Measured live the moment `--boot` landed: the advisory
+      # said `upd apply --boot` and four lines below it this printed
+      # `aplicar: upd apply`, which is the hot activation the advisory exists
+      # to avoid.
+      if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
+        echo "  aplicar:  upd apply --boot   (por lo de arriba)"
+      else
+        echo "  aplicar:  upd apply"
+      fi
       echo "  ver todo: upd diff"
     fi
 
@@ -365,15 +380,35 @@ case "$cmd" in
     # ran `nh os switch` with the flag ignored, so someone following advice
     # written for the split that Task 6 has not landed yet would get the hot
     # activation they were told to avoid, and nothing anywhere would say so.
-    if [ "$#" -gt 1 ]; then
-      die "\`upd apply\` todavia no acepta argumentos y he recibido: ${*:2}. No aplico: hoy solo hay activacion en caliente, asi que si el aviso pide reinicio, aplica con \`upd apply\` a secas y reinicia despues"
+    #
+    # Widening it to take a flag must not widen it to take anything: one
+    # argument, from a closed list. `--ff` is not `--ff-only`, and `--boot
+    # --ff-only` is neither of the two things they mean.
+    if [ "$#" -gt 2 ]; then
+      die "uso: upd apply [--boot|--ff-only]: un modo como mucho, y he recibido: ${*:2}"
     fi
+    mode="switch"
+    case "${2:-}" in
+      "")        mode="switch" ;;
+      --boot)    mode="boot" ;;
+      --ff-only) mode="ff-only" ;;
+      *)         die "uso: upd apply [--boot|--ff-only]; no entiendo: ${*:2}" ;;
+    esac
 
     # Preflight the tools *before* touching $REPO. Discovering that `nh` is
     # missing after the fast-forward leaves the repository moved and the system
     # not switched, which is the one half-applied state worth avoiding.
+    #
+    # Except under --ff-only, where that "half-applied state" is the entire
+    # point: it moves the repository and stops. Demanding a tool it will never
+    # run would be a requirement invented out of symmetry, and it would bite
+    # exactly where this mode is meant to be used -- the bar plugin, whose half
+    # of the work is the repository one and which has no reason to carry `nh`
+    # on its PATH.
     command -v git >/dev/null 2>&1 || die "git no esta en el PATH; no aplico"
-    command -v nh  >/dev/null 2>&1 || die "nh no esta en el PATH; no aplico"
+    if [ "$mode" != "ff-only" ]; then
+      command -v nh >/dev/null 2>&1 || die "nh no esta en el PATH; no aplico"
+    fi
     command -v flock >/dev/null 2>&1 || die "flock no esta en el PATH; no puedo descartar que el motor este corriendo ahora mismo"
 
     [ -f "$STATUS" ] || die "no hay nada preparado"
@@ -397,7 +432,25 @@ case "$cmd" in
     # Re-read only now that the lock is held: whatever was on disk a moment ago
     # may have been mid-rewrite.
     require_readable_status
-    state="$(jq -r '.state // "ausente"' "$STATUS")"
+    # The one assignment in this arm that used to have no guard, while the six
+    # below it do. It is at the top level, where errexit *does* act -- unlike
+    # inside the command substitutions lib/blockers.sh is called from -- so a
+    # failing jq here killed apply with jq's own status and jq's own message.
+    # Measured with a jq that fails only on `.state`: exit 5, and the only line
+    # printed was jq's.
+    #
+    # Not `|| state=""`, which is what the six below do: that would fall into
+    # the branch under it and say "no hay ninguna actualizacion lista (estado:
+    # )", which names the wrong problem. And not left alone either -- the
+    # tempting argument is that require_readable_status just ran two jq calls
+    # on this same file with the lock held, so a third cannot fail. That covers
+    # a broken or missing jq (it dies there, with a sentence) but not an
+    # environmental failure of one invocation: ENOMEM or an ulimit hits the
+    # third call as easily as the first. And `--ff-only` now has a machine
+    # consumer, so an opaque exit code is the same defect this file already
+    # closed once in `status --json`.
+    state="$(jq -r '.state // "ausente"' "$STATUS")" \
+      || die "no pude leer el estado de $STATUS aunque el fichero es legible; no aplico a ciegas"
     if [ "$state" != "ready" ]; then
       die "no hay ninguna actualizacion lista (estado: $state); mira \`upd\`"
     fi
@@ -515,7 +568,25 @@ case "$cmd" in
     echo "  closure preparado: ${closure:-desconocido, se reconstruira}"
 
     git -C "$REPO" merge --ff-only "$target"
-    nh os switch "$REPO"
+
+    # --ff-only stops here, and the split exists for the bar plugin: the
+    # repository half has to run as daf3r, because a merge done as root leaves
+    # root-owned objects in .git and breaks the next commit made by hand, while
+    # the activation half is a root systemd unit started separately. Splitting
+    # them at this line is what lets each run as whoever it has to be.
+    #
+    # It says what it did and what it did not do. A command that quietly
+    # performs half of what its name suggests is the shape of failure the rest
+    # of this file exists to remove.
+    if [ "$mode" = "ff-only" ]; then
+      echo "fast-forward hecho; no activo nada (--ff-only)"
+      exit 0
+    fi
+
+    # `switch` or `boot`, and the difference is the whole reason `--boot`
+    # exists: `switch` activates in place, `boot` writes the profile and leaves
+    # /run/current-system alone. The reboot advice in `show` points here.
+    nh os "$mode" "$REPO"
     ;;
 
   check)
@@ -549,6 +620,9 @@ uso: upd [show|status|diff|apply|check]
           es lo que lee el widget de la barra
   diff    el diff de closures guardado
   apply   aplica lo preparado: fast-forward y `nh os switch`
+          --boot     igual, pero para el proximo arranque (`nh os boot`), que
+                     es lo que pide el aviso de reinicio
+          --ff-only  solo el fast-forward, sin activar nada
   check   lanza una comprobacion ahora, en primer plano
 EOF
     exit 1

@@ -292,11 +292,34 @@ upd_status() { # $@ the arguments after `status`
   [[ "$output" == *"nvidia-open"* ]]
   [[ "$output" == *"nvidia-x11"* ]]
   [[ "$output" == *"REINICIO"* ]]
-  # And it must say what to do about it, or the flag is trivia. Deliberately
-  # not `upd apply --boot`, which the plan wrote here: that flag does not
-  # exist, and `upd apply --boot` was measured doing a hot `nh os switch` with
-  # the flag ignored -- advice that does the opposite of what it says.
+  # And it must say what to do about it, or the flag is trivia. This assertion
+  # was the inverse until Task 6: the advice deliberately avoided naming
+  # `upd apply --boot`, because that flag was accepted, ignored, and answered
+  # with a hot `nh os switch` -- advice that did the opposite of what it said.
+  # Now the flag does what its name says, so the advice names it. The two moved
+  # together on purpose; naming a flag is only safe while it behaves.
+  # Anchored to the advisory's own sentence, not to `--boot` appearing anywhere
+  # in the output. It was the looser form until the footer below started naming
+  # `--boot` too, at which point deleting the flag from *this* line left the
+  # test green -- caught by mutation, not by reading. Two places that can
+  # satisfy one assertion means the assertion covers neither.
+  [[ "$output" == *'aplicalo con `upd apply --boot`'* ]]
   [[ "$output" == *"reinicia"* ]]
+
+  # And the footer agrees with it. Measured live the day `--boot` landed: the
+  # advisory said `upd apply --boot` and four lines further down the footer
+  # said `aplicar: upd apply`, on the same screen -- the hot activation the
+  # advisory exists to avoid, printed last and therefore the one that sticks.
+  [[ "$output" != *"aplicar:  upd apply"$'\n'* ]]
+  [[ "$output" == *"aplicar:  upd apply --boot"* ]]
+
+  # The ordinary case keeps the plain footer: an update that needs no reboot
+  # must not be pushed through `--boot`, which would leave the system running
+  # the old generation until someone reboots for no reason.
+  ready_status
+  run upd
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aplicar:  upd apply"* ]]
   [[ "$output" != *"--boot"* ]]
 }
 
@@ -645,6 +668,16 @@ upd_status() { # $@ the arguments after `status`
   [[ "$output" == *"--frobnicate"* ]]
 }
 
+@test "the usage text announces the apply modes" {
+  # Same reason as the one below: a mode nothing mentions is a mode nobody
+  # finds. And `--boot` in particular is what the reboot advice tells people to
+  # type, so the two texts have to agree.
+  run upd frobnicate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--boot"* ]]
+  [[ "$output" == *"--ff-only"* ]]
+}
+
 @test "the usage text announces status" {
   # An entry point nothing mentions is one nobody finds, and this is the only
   # one the panel will ever call.
@@ -657,28 +690,154 @@ upd_status() { # $@ the arguments after `status`
 # --- apply ------------------------------------------------------------------
 
 @test "apply refuses an argument it does not know instead of ignoring it" {
-  # Measured before the guard: `upd apply --boot` fast-forwarded the repository
-  # and ran `nh os switch` -- the flag accepted, ignored, and the hot
-  # activation done anyway. An option that silently does the opposite of its
-  # name is worse than no option, and `--boot` is exactly the flag a reader of
-  # the reboot advice would reach for before Task 6 lands it.
+  # This is the inversion the previous version of this test announced. `--boot`
+  # used to be here as the *illegal* flag -- measured accepted and ignored, with
+  # `nh os switch` run anyway -- and it is now a real option, so its case moved
+  # to "apply --boot calls nh os boot". What stayed is the flag chosen back then
+  # precisely because it will never become legal, and it is what keeps the guard
+  # covered across that inversion.
   make_rig
-  run upd apply --boot
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"--boot"* ]]
-  [ ! -s "$NH_MARKER" ]
-  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
-  [ "$(cat "$REPO/flake.lock")" = "v1" ]
-
-  # A second flag, chosen because it will never become legal. Task 6 turns
-  # `--boot` into a real option, and that day the case above has to be inverted
-  # -- taking the only cover for "an unknown argument is refused" with it
-  # unless something else is holding the guard down. This is that something.
   run upd apply --frobnicate
   [ "$status" -eq 1 ]
   [[ "$output" == *"--frobnicate"* ]]
   [ ! -s "$NH_MARKER" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
   [ "$(cat "$REPO/flake.lock")" = "v1" ]
+
+  # A flag that *looks* like the new ones, because "starts with --" is not the
+  # test and a guard written as one would let this through.
+  run upd apply --ff
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--ff"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+
+  # And two legal flags at once, which is neither of the two things they mean.
+  # The old guard was `[ "$#" -gt 1 ]`: widening it to accept one argument must
+  # not widen it to accept any number of them.
+  run upd apply --boot --ff-only
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+}
+
+@test "apply --ff-only fast-forwards and stops before activating" {
+  # The half the bar plugin drives. The repository half has to run as daf3r --
+  # a merge done as root leaves root-owned objects in .git and breaks the next
+  # commit made by hand -- and the activation half is a systemd unit started
+  # separately, so this exists to be the first of the two.
+  make_rig
+  prepared="$(git -C "$STATE/wt" rev-parse auto/update)"
+  run upd apply --ff-only
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$prepared" ]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+  # The whole point: the repository moved and nothing was activated.
+  [ ! -s "$NH_MARKER" ]
+  # And it says so, because a command that silently does half of what its name
+  # suggests is the failure mode this subcommand keeps closing.
+  [[ "$output" == *"--ff-only"* ]]
+}
+
+@test "apply --ff-only runs the same guards as a full apply" {
+  # "Every guard the current apply runs" is the contract, and the risk of a
+  # mode flag is that it grows a shortcut past them. Two are checked, one from
+  # each end of the sequence: the dirty tree, which refuses before anything is
+  # written, and the `ready` gate, which refuses after the lock is taken.
+  make_rig
+  touch "$REPO/scratch.txt"
+  run upd apply --ff-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cambios sin commitear"* ]]
+  [ ! -f "$REPO/.git/FETCH_HEAD" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+  rm "$REPO/scratch.txt"
+
+  status_json '{"schema":2,"checked_at":"x","state":"build_failed","warnings":[]}'
+  run upd apply --ff-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no hay ninguna actualizacion lista"* ]]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+}
+
+@test "apply --ff-only does not require nh, and the other modes still do" {
+  # The preflight refuses when `nh` is missing so that a fast-forward is never
+  # left without its activation. Under --ff-only that state is the goal, and
+  # the mode exists for the bar plugin, which has no reason to carry `nh` on
+  # its PATH -- so the check would be refusing over a tool the run will not use.
+  #
+  # A PATH containing everything apply uses *except* `nh`, and emphatically not
+  # `rm "$WORK/bin/nh"`: removing the stub only uncovers the real `nh` further
+  # down $PATH. Measured -- the first version of this test fast-forwarded the
+  # throwaway repository and then ran the machine's actual `nh os switch` on it,
+  # getting as far as nh refusing for want of a flake.nix. A stub cannot hide a
+  # binary that exists; only a PATH without it can.
+  make_rig
+  mkdir -p "$WORK/minbin"
+  for t in bash git jq flock readlink sed dirname mktemp cat rm tr head; do
+    ln -s "$(command -v "$t")" "$WORK/minbin/$t"
+  done
+  # The premise, asserted: on a machine where `nh` lived somewhere inside that
+  # list this test would quietly prove nothing.
+  run env PATH="$WORK/minbin" bash -c 'command -v nh'
+  [ "$status" -ne 0 ]
+
+  # The mode that does need it still refuses, and still refuses *before*
+  # touching the repository, which is why that check is a preflight and not an
+  # afterthought.
+  run env PATH="$WORK/minbin" REPO="$REPO" STATE_DIR="$STATE" bash "$UPD" apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"nh no esta en el PATH"* ]]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+  [ ! -f "$REPO/.git/FETCH_HEAD" ]
+
+  run env PATH="$WORK/minbin" REPO="$REPO" STATE_DIR="$STATE" bash "$UPD" apply --ff-only
+  [ "$status" -eq 0 ]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+}
+
+@test "apply refuses with its own words when jq fails after the status was read" {
+  # The only assignment in the arm that had no guard. It sits at the top level,
+  # where errexit acts, so a jq failure took apply down with jq's exit code and
+  # jq's message -- measured at exit 5. require_readable_status ran two jq calls
+  # on this same file a moment earlier, which is why the failure has to be
+  # injected per-query here: a jq that is simply missing dies further up with a
+  # sentence of its own, but one invocation failing on its own (ENOMEM, an
+  # ulimit) is not covered by the two that succeeded.
+  #
+  # Stubbed through PATH, the mechanism this file already uses for `nh`.
+  make_rig
+  { printf '#!%s\n' "$BASH"; cat <<EOF
+for a in "\$@"; do
+  case "\$a" in
+    *.state*) echo "jq: fallo simulado" >&2; exit 5 ;;
+  esac
+done
+exec $(command -v jq) "\$@"
+EOF
+  } > "$WORK/bin/jq"
+  chmod +x "$WORK/bin/jq"
+
+  run upd apply
+  # 1, not 5: the documented refusal, not whatever the failing tool returned.
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no pude leer el estado"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+}
+
+@test "apply --boot activates for the next boot instead of in place" {
+  # The mode the reboot advice points at. `nh os boot` writes the profile and
+  # leaves /run/current-system alone, which is exactly the state `status --json`
+  # reports as `pending_reboot` afterwards.
+  make_rig
+  prepared="$(git -C "$STATE/wt" rev-parse auto/update)"
+  run upd apply --boot
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$prepared" ]
+  # `os boot`, and emphatically not `os switch`: the two differ by exactly the
+  # hot activation the advice exists to avoid.
+  [ "$(cat "$NH_MARKER")" = "os boot $REPO" ]
 }
 
 @test "apply refuses a dirty target tree, prints it, and fetches nothing" {

@@ -852,86 +852,39 @@ Two smaller things from the same round: `tr … | head -c 200` was a race under 
 
 ---
 
-### Task 6: Split `apply` into its two halves
+### Task 6: Split `apply` into its two halves — done
+
+> Rewritten after the fact, like Task 5's section above it, and for the same
+> reason: the source of truth is the tree, and a copy of the code in this file
+> is a copy that goes stale. What follows is the shape of what landed and the
+> decisions that are not visible in a diff. `updates/upd.sh`, the `apply)` arm.
 
 **Files:**
-- Modify: `updates/upd.sh` (the `apply)` arm)
-- Modify: `updates/tests/upd.bats`
+- Modified: `updates/upd.sh` — the `apply)` arm, **and the `ready)` advisory and its footer in `show`**, which the brief did not list. See below.
+- Modified: `updates/tests/upd.bats`
 
 **Interfaces:**
-- Produces: `upd apply --ff-only` — every guard the current `apply` runs, plus the fast-forward, and then stops without calling `nh`. Bare `upd apply` keeps its current behaviour exactly: guards, fast-forward, `nh os switch`. New `upd apply --boot` does the same with `nh os boot`.
+- `upd apply` — unchanged: guards, fast-forward, `nh os switch`.
+- `upd apply --boot` — the same with `nh os boot`, which writes the profile and leaves `/run/current-system` alone. This is what the reboot advisory now tells people to type, and what `status --json` reports as `pending_reboot` afterwards.
+- `upd apply --ff-only` — every guard, plus the fast-forward, and then stops without calling `nh`. Exit 0 and a line saying what it did and did not do.
+- One mode at a time, from a closed list. `--ff`, `--frobnicate` and `--boot --ff-only` are all refused, naming what arrived.
 
-- [ ] **Step 1: Write the failing tests**
+**Why `--ff-only` exists at all:** the bar plugin's work is split by *who runs it*. The repository half must run as daf3r — a merge done as root leaves root-owned objects in `.git` and breaks the next commit made by hand — and the activation half is a root systemd unit started separately. `--ff-only` is the first of those two, and it is the reason the `nh` preflight is skipped in that mode: demanding a tool the run will never invoke would refuse exactly where the mode is meant to be used.
 
-```bash
-@test "upd apply --ff-only fast-forwards and does not switch" {
-  run upd_main apply --ff-only
-  [ "$status" -eq 0 ]
-  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$WT" rev-parse auto/update)" ]
-  [ ! -f "$BATS_TMPDIR/nh-was-called" ]
-}
+**Three things the brief did not have**
 
-@test "upd apply --ff-only refuses a dirty tree exactly like apply does" {
-  touch "$REPO/scratch.txt"
-  run upd_main apply --ff-only
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"sin commitear"* ]]
-}
+1. **The `ready)` advisory had to move back to `--boot`, in this same commit.** Task 4 removed the flag from that advice *because* it did not exist: `apply` accepted `--boot`, ignored it, and activated hot, so the warning against hot activation was sending people into it. Leaving the advice as it was now that the flag works would be the same defect inverted. The rule both rounds are instances of: **advice may name a flag exactly as long as the flag behaves, and the two move in the same commit.**
+2. **The footer under it had to move too**, which only showed up by running the thing: the advisory said `upd apply --boot` and four lines below `aplicar: upd apply` printed on the same screen — two instructions, the contradictory one last. It is now conditional on the same `reboot_recommended` the advisory reads.
+3. **`state="$(jq -r '.state …')"` had no `|| …` guard** while the six assignments below it do. At the top level errexit *does* act, so a failing jq killed `apply` with jq's status and jq's message — measured at exit 5, with no line of upd.sh's own. It now `die`s. Not `|| state=""` like its neighbours: that falls into the branch below and says "no hay ninguna actualizacion lista (estado: )", which names the wrong problem.
 
-@test "upd apply --boot calls nh os boot, not switch" {
-  run upd_main apply --boot
-  [ "$status" -eq 0 ]
-  [[ "$(cat "$BATS_TMPDIR/nh-was-called")" == *"boot"* ]]
-}
-```
+**Testing notes**
 
-The existing `upd.bats` already stubs `nh` — reuse that stub and have it record its arguments to `$BATS_TMPDIR/nh-was-called`. Read the file first; do not add a second stubbing mechanism.
+- The suite already stubs `nh` through `$NH_MARKER`; the brief's `$BATS_TMPDIR/nh-was-called` would have been a second mechanism, and the brief itself says not to add one.
+- **Two existing tests were inverted**, both of which had predicted their own inversion in a comment: the `--boot` half of "apply refuses an argument it does not know" (its `--frobnicate` half stays, and is what keeps the guard covered across the change), and the `!= "--boot"` assertion in the reboot advisory test.
+- A test that asserts a tool is missing **cannot get there by deleting the stub**: removing `$WORK/bin/nh` only uncovers the machine's real `nh` further down `$PATH`. Measured — the first version of that test fast-forwarded the throwaway repository and then ran the real `nh os switch` on it. It now builds a `$PATH` containing everything `apply` uses except `nh`, and asserts that premise before relying on it.
+- 17 mutations, 17 killed. **One survived first**: with the footer also naming `--boot`, deleting the flag from the advisory left the advisory's test green, because the assertion looked for `--boot` anywhere in the output. Two places that can satisfy one assertion means it covers neither; it is now anchored to the advisory's own sentence.
 
-- [ ] **Step 2: Run and watch them fail**
-
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: the three new tests fail; `--ff-only` and `--boot` are treated as an unknown command.
-
-- [ ] **Step 3: Implement**
-
-In the `apply)` arm, parse the mode at the top and gate only the last two lines:
-
-```bash
-  apply)
-    mode="switch"
-    case "${2:-}" in
-      --ff-only) mode="ff-only" ;;
-      --boot)    mode="boot" ;;
-      "")        mode="switch" ;;
-      *)         die "uso: upd apply [--boot|--ff-only]" ;;
-    esac
-```
-
-Everything from the tool preflight down to `git -C "$REPO" merge --ff-only "$target"` is unchanged. Replace the final `nh os switch "$REPO"` with:
-
-```bash
-    # --ff-only exists for the bar plugin: the repository half runs as daf3r,
-    # and the root half is a systemd unit started separately. Doing the merge as
-    # root would leave root-owned objects in .git and break the next commit made
-    # by hand.
-    if [ "$mode" = "ff-only" ]; then
-      echo "fast-forward hecho; no aplico (--ff-only)"
-      exit 0
-    fi
-    nh os "$mode" "$REPO"
-```
-
-- [ ] **Step 4: Run the tests**
-
-Run: `nix run nixpkgs#bats -- updates/tests/`
-Expected: PASS, including every pre-existing apply guard test — those are the regression surface for this change.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add updates/upd.sh updates/tests/upd.bats
-git commit -m "upd: apply --ff-only y apply --boot"
-```
+**What Task 7 inherits:** `upd apply --ff-only`, which is the repository half of what the root unit will complete, and an `apply` whose mode is parsed once at the top and used in exactly one place at the bottom.
 
 ---
 
