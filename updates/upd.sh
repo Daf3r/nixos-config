@@ -559,11 +559,22 @@ case "$cmd" in
     # failures and in the same order; this is that guard on the terminal side,
     # which is what makes the two surfaces say compatible things about an
     # unreadable repository instead of one naming it and the other blaming the
-    # HEAD. `--is-inside-work-tree` rather than `--git-dir`: a bare repository
-    # has a git dir and no work tree, and there is nothing to fast-forward in
-    # one.
-    git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
-      || die "no puedo leer $REPO como repositorio git; sin eso no se si el arbol esta limpio ni en que rama esta, y no aplico a ciegas"
+    # HEAD.
+    #
+    # The answer is *compared*, not merely awaited, and that is the whole point
+    # of the line. `--is-inside-work-tree` reports by printing, not by failing:
+    # in a bare repository it prints `false` and **exits 0**. A first version of
+    # this guard threw stdout away and only looked at the exit status, so a bare
+    # $REPO sailed straight past it into the dirty-tree check -- where
+    # `git status` exits 128 with `fatal: this operation must be run in a work
+    # tree` on stderr and nothing on stdout, and the guard announces a clean
+    # tree. The exact false conclusion this block exists to prevent, reached
+    # through the block itself. Measured on git 2.55.0, and the mutation
+    # `--is-inside-work-tree` -> `--git-dir` survived the whole suite while it
+    # was written that way.
+    if [ "$(git -C "$REPO" rev-parse --is-inside-work-tree 2>/dev/null)" != "true" ]; then
+      die "no puedo leer $REPO como repositorio git con arbol de trabajo; sin eso no se si el arbol esta limpio ni en que rama esta, y no aplico a ciegas"
+    fi
 
     # --- never discard uncommitted work -------------------------------------
     # Before any fetch, and before anything at all is written into $REPO.

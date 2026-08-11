@@ -952,6 +952,37 @@ EOF
   [ ! -s "$NH_MARKER" ]
 }
 
+@test "apply refuses a bare repository instead of calling its tree clean" {
+  # The guard above reports by printing, not by failing: `rev-parse
+  # --is-inside-work-tree` in a bare repository prints `false` and exits 0. A
+  # version of it that only looked at the exit status let a bare $REPO through,
+  # and then `git status` exited 128 with an empty stdout and the dirty-tree
+  # guard announced a clean tree -- the false conclusion the whole block exists
+  # to prevent, reached through the block itself.
+  #
+  # The panel is not wrong here today, but it gets there by another road: its
+  # opening check has the same blind spot, and what saves it is the stderr and
+  # exit-status capture around its `git status`, which turns the same bare
+  # repository into `repo_uncheckable` with git's own sentence in the detail.
+  # Both halves are asserted so that road stays open too.
+  make_rig
+  rm -rf "$REPO"
+  git init -q --bare "$REPO"
+
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("repo_uncheckable")'
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no puedo leer $REPO como repositorio git con arbol de trabajo"* ]]
+  # Never the two sentences that would mean it had believed the bare repository:
+  # a clean tree, or a branch verdict about one.
+  [[ "$output" != *"HEAD desprendido"* ]]
+  [[ "$output" != *"esta en la rama"* ]]
+  [ ! -s "$NH_MARKER" ]
+}
+
 @test "apply says a detached HEAD is a detached HEAD" {
   # The guard that prints this had no test of its own anywhere in the suite --
   # measured in Task 6 by mutating its `|| die` into `|| cur_branch=""` and
