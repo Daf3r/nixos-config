@@ -1,14 +1,15 @@
 # shellcheck shell=bash
 #
-# The engine's only output surface: `status.json`, read by `upd.sh` in a
-# terminal and polled by the DMS bar plugin that ships beside it. `schema` is
-# here so a reader can refuse a format it does not understand instead of
-# rendering nonsense. It has already earned that: schema 2 replaced the prose
-# `local_pkgs` array with the structured `changes[]`, `closure_diff` and
-# `reboot_recommended`, so a schema 1 reader let loose on a schema 2 file would
-# print an empty change list for an update that moves six flake inputs. Engine
-# and readers are installed together and cannot drift within a generation; a
-# stale `upd` earlier on $PATH can, and this is what stops it.
+# The engine's only output surface: `status.json`. Its one reader today is
+# `upd.sh` in a terminal; the DMS bar plugin meant to poll it is not written
+# yet. `schema` is here so a reader can refuse a format it does not understand
+# instead of rendering nonsense, and it has already earned that: schema 2
+# replaced the prose `local_pkgs` array with the structured `changes[]`,
+# `closure_diff` and `reboot_recommended`. The two share no field, so a schema 1
+# reader let loose on a schema 2 file would print an empty change list for an
+# update that moves six flake inputs. Engine and readers are installed together
+# and cannot drift within a generation; a stale `upd` earlier on $PATH can, and
+# this is what stops it.
 #
 # Written to a temp file *in the same directory as the target* and renamed,
 # because a reader polling this file must never catch it half-written. A
