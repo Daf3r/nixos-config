@@ -9,6 +9,7 @@ setup() {
   BEFORE="${BATS_TEST_DIRNAME}/fixtures/lock-before.json"
   AFTER="${BATS_TEST_DIRNAME}/fixtures/lock-after.json"
   FOLLOWS="${BATS_TEST_DIRNAME}/fixtures/lock-follows.json"
+  TYPECHANGE="${BATS_TEST_DIRNAME}/fixtures/lock-typechange.json"
 }
 
 @test "inputs_diff reports nothing when both sides are the same file" {
@@ -78,6 +79,47 @@ setup() {
   run bash -c "inputs_diff '$FOLLOWS' '$FOLLOWS' | grep -c null"
   [ "$status" -eq 1 ]
   [ "$output" = "0" ]
+}
+
+@test "inputs_diff skips an input that had a rev on one side and none on the other" {
+  # The case above is the harmless half -- revless on BOTH sides compares equal
+  # to itself and drops out for free, so it holds with the rev fallback deleted
+  # and with the empty-rev filter deleted. Measured: both mutations survive it.
+  #
+  # This is the half that bites, and it is one edit away in any flake: point an
+  # input at a local checkout and its type changes from git to path, which
+  # takes the rev with it. Both fixtures here are real `nix flake lock` output
+  # for exactly that pair of flakes, with only the file:// URLs shortened.
+  #
+  # There is no honest row to print. `from` is a rev and `to` is not a thing.
+  # Drop the `// ""` fallback and it prints `to: null`; drop the filter that
+  # rejects the empty side and it prints `to: ""`. Both were measured, and both
+  # are a plausible-looking input name in the panel with garbage beside it.
+  run bash -c "inputs_diff '$FOLLOWS' '$TYPECHANGE' | jq -e '. == []'"
+  [ "$status" -eq 0 ]
+  # And in reverse: the input gains a rev rather than losing one.
+  run bash -c "inputs_diff '$TYPECHANGE' '$FOLLOWS' | jq -e '. == []'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff skips an input that disappeared from the new side" {
+  # The mirror of the added case, and it fails differently: names are collected
+  # from the OLD lock, so an input missing from the new side is looked up there
+  # and comes back null. null is not equal to the old rev and null is not equal
+  # to "" either, so it sails through both filters and prints as moved, with
+  # `to` as a JSON null. Measured on this fixture pair.
+  #
+  # Real inputs do get removed -- `zen` was dropped from this very flake in
+  # ab10238 -- and a removal is not a move. Same reasoning as the added case:
+  # the panel is a list of what moved, and a half-empty row is worse than no
+  # row at all.
+  #
+  # A real move is forced alongside so the assertion is not one an
+  # always-empty function could pass: the mover has to be named and the two
+  # departed inputs have to not be.
+  jq '.nodes.nixpkgs_3.locked.rev = "4444444444444444444444444444444444444444"' "$BEFORE" > "$BATS_TMPDIR/moved-before.json"
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/moved-before.json' | jq -e 'map(.name) == [\"nixpkgs\"]'"
+  [ "$status" -eq 0 ]
 }
 
 @test "inputs_diff refuses a lock with no root inputs instead of reporting nothing moved" {

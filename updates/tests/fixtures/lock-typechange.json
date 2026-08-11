@@ -1,0 +1,74 @@
+{
+  "nodes": {
+    "a": {
+      "locked": {
+        "lastModified": 1786457404,
+        "narHash": "sha256-i2s3L4a0YcbqcoGsDNHHKd/EKHhueKj5T8kj8aghKkM=",
+        "ref": "refs/heads/main",
+        "rev": "e4910e78ffc174c6494a273b3969122ac89a0c5b",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///build/dep1"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///build/dep1"
+      }
+    },
+    "dep1": {
+      "locked": {
+        "lastModified": 1786457404,
+        "narHash": "sha256-5a+FONwMfZdtRnKmWrZKIo8wSKUTdUNIH5vKWCVQ/FI=",
+        "path": "/build/dep1",
+        "type": "path"
+      },
+      "original": {
+        "path": "/build/dep1",
+        "type": "path"
+      }
+    },
+    "dep2": {
+      "inputs": {
+        "a": "a"
+      },
+      "locked": {
+        "lastModified": 1786457404,
+        "narHash": "sha256-rqt6qDjg7NR64jdvlcKkOL4VK6sz4uUdf0hayjjfNcY=",
+        "ref": "refs/heads/main",
+        "rev": "4acbd69e9d8dae02b4307df6d0ef3157b99ca1f2",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///build/dep2"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///build/dep2"
+      }
+    },
+    "local": {
+      "locked": {
+        "lastModified": 1786457404,
+        "narHash": "sha256-5a+FONwMfZdtRnKmWrZKIo8wSKUTdUNIH5vKWCVQ/FI=",
+        "path": "/build/dep1",
+        "type": "path"
+      },
+      "original": {
+        "path": "/build/dep1",
+        "type": "path"
+      }
+    },
+    "root": {
+      "inputs": {
+        "deep": [
+          "dep2",
+          "a"
+        ],
+        "dep1": "dep1",
+        "dep2": "dep2",
+        "local": "local"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
