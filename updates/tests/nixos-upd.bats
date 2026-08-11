@@ -121,6 +121,57 @@ engine() {
   REPO="$REPO" BRANCH=main STATE_DIR="$STATE" FLAKE_ATTR=prueba bash "$ENGINE"
 }
 
+# A $LIB_DIR whose closure_reboot fails on its first $1 calls and is the real
+# one from then on.
+#
+# closure_reboot cannot be made to fail from the outside: whatever the engine
+# hands it is an object by construction -- closure_parse either returns one or
+# the engine substitutes the empty literal -- so the recovery branch after it
+# had no way of ever running under test, and stayed unexercised while the code
+# inside it was written twice. Injecting the failure through $LIB_DIR is the
+# same move this file already makes with `nix` and `curl`: the engine under test
+# is the real one, only the dependency it calls is stubbed. The other libraries
+# are copied across untouched, and so are the bump scripts' -- the engine passes
+# this same $LIB_DIR down to them.
+lib_with_failing_reboot() { # $1 how many calls fail
+  export REBOOT_STUB_FAILS="$1"
+  export REBOOT_STUB_COUNT="$WORK/reboot-calls"
+  : > "$REBOOT_STUB_COUNT"
+  mkdir -p "$WORK/lib"
+  cp "${BATS_TEST_DIRNAME}/../lib/"*.sh "$WORK/lib/"
+  { printf '# shellcheck shell=bash\n'
+    printf 'source "%s/../lib/closure.sh"\n' "$BATS_TEST_DIRNAME"
+    cat <<'EOF'
+# Keep the real one under another name rather than reimplementing it: the
+# second call in the engine's recovery branch has to be the genuine article or
+# the test proves nothing about what that branch produces.
+_real="$(declare -f closure_reboot)"
+eval "closure_reboot_real${_real#closure_reboot}"
+unset _real
+
+closure_reboot() {
+  local n=0
+  # `if`, not `[ -s ... ] && n=...`: the engine runs under `set -e`, and a
+  # trailing && that evaluates to false inside a function aborts the run.
+  if [ -s "$REBOOT_STUB_COUNT" ]; then n="$(cat "$REBOOT_STUB_COUNT")"; fi
+  n=$((n + 1))
+  printf '%s' "$n" > "$REBOOT_STUB_COUNT"
+  if [ "$n" -le "$REBOOT_STUB_FAILS" ]; then
+    cat > /dev/null
+    printf 'stub closure_reboot: fallo forzado en la llamada %s\n' "$n" >&2
+    return 5
+  fi
+  closure_reboot_real
+}
+EOF
+  } > "$WORK/lib/closure.sh"
+}
+
+engine_stubbed_lib() {
+  REPO="$REPO" BRANCH=main STATE_DIR="$STATE" FLAKE_ATTR=prueba \
+    LIB_DIR="$WORK/lib" bash "$ENGINE"
+}
+
 # --- the composed body ------------------------------------------------------
 
 @test "a ready run writes schema 2 with changes[], and local_pkgs is gone" {
@@ -256,4 +307,45 @@ engine() {
     "$STATE/status.json"
   # The other one still moved: one failing bump must not take the other with it.
   jq -e '.changes[] | select(.name == "t3code-app") | .to == "0.0.34"' "$STATE/status.json"
+}
+
+@test "a reboot check that fails still ends in a verdict, asked of closure_reboot itself" {
+  # The recovery branch nothing reached. It does not spell
+  # {"reboot_recommended":false,"reboot_reason":[]} out in the engine -- it asks
+  # closure_reboot what an empty diff means -- precisely so a rename in
+  # closure.sh cannot leave a stale literal behind, and that indirection is only
+  # worth anything if it runs. It never had.
+  lib_with_failing_reboot 1
+
+  run engine_stubbed_lib
+  [ "$status" -eq 0 ]
+  jq -e '.state == "ready"' "$STATE/status.json"
+  # The warning goes with the verdict, always: on its own, "no reboot needed" is
+  # exactly what a check that never ran also looks like.
+  jq -e '.warnings | map(.code) | index("reboot_check_failed") != null' "$STATE/status.json"
+  # And the verdict really came back with both keys. The fixture's diff moves
+  # nvidia-open, so an engine that fell through to the closure it just parsed
+  # would answer true here; false is the answer for the empty diff the fallback
+  # asks about, which is the whole point of asking.
+  jq -e '.reboot_recommended == false' "$STATE/status.json"
+  jq -e '.reboot_reason == []' "$STATE/status.json"
+  # Both calls were made, or the fallback did not run and `{}` would look the
+  # same as an honest false to every assertion above.
+  [ "$(cat "$REBOOT_STUB_COUNT")" = "2" ]
+}
+
+@test "a reboot check that fails twice leaves the keys out rather than inventing them" {
+  # The last resort under the fallback. `upd show` reads `.reboot_recommended //
+  # false`, so an absent key renders as "no notice" -- but next to the warning,
+  # which is what tells the two apart. Writing a confident `false` here would
+  # not.
+  lib_with_failing_reboot 2
+
+  run engine_stubbed_lib
+  [ "$status" -eq 0 ]
+  jq -e '.state == "ready"' "$STATE/status.json"
+  jq -e '.warnings | map(.code) | index("reboot_check_failed") != null' "$STATE/status.json"
+  jq -e 'has("reboot_recommended") | not' "$STATE/status.json"
+  jq -e 'has("reboot_reason") | not' "$STATE/status.json"
+  [ "$(cat "$REBOOT_STUB_COUNT")" = "2" ]
 }
