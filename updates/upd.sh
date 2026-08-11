@@ -540,6 +540,31 @@ case "$cmd" in
       closure=""
     fi
 
+    # --- is $REPO a repository at all ---------------------------------------
+    # This has to come before the two guards below, because both of them fail
+    # *silently* on a $REPO git cannot open, and both fail into a confident
+    # wrong answer rather than into an error:
+    #
+    #   `git status` prints its complaint on stderr and leaves stdout empty, so
+    #   the dirty-tree guard reads no porcelain lines and concludes the tree is
+    #   clean -- about a repository that was never opened.
+    #
+    #   `symbolic-ref` failing there is indistinguishable from a real detached
+    #   HEAD, so the guard under it blamed one. Measured with $REPO/.git
+    #   removed: `esta con el HEAD desprendido; ponlo en una rama antes de
+    #   aplicar`, which is advice for a repository that is not there, and the
+    #   only sentence apply gave for that situation.
+    #
+    # lib/blockers.sh opens with this same check, for this same pair of silent
+    # failures and in the same order; this is that guard on the terminal side,
+    # which is what makes the two surfaces say compatible things about an
+    # unreadable repository instead of one naming it and the other blaming the
+    # HEAD. `--is-inside-work-tree` rather than `--git-dir`: a bare repository
+    # has a git dir and no work tree, and there is nothing to fast-forward in
+    # one.
+    git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+      || die "no puedo leer $REPO como repositorio git; sin eso no se si el arbol esta limpio ni en que rama esta, y no aplico a ciegas"
+
     # --- never discard uncommitted work -------------------------------------
     # Before any fetch, and before anything at all is written into $REPO.
     # --porcelain covers untracked files too, which is the common case: a

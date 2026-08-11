@@ -932,6 +932,46 @@ EOF
   [ ! -s "$NH_MARKER" ]
 }
 
+@test "apply refuses a repository it cannot open, without blaming the HEAD" {
+  # Measured before the guard existed, with $REPO/.git removed: `git status`
+  # printed nothing on stdout, so the dirty-tree guard announced a clean tree,
+  # and `symbolic-ref` then failed exactly as it does on a real detached HEAD,
+  # so the only sentence apply gave was `esta con el HEAD desprendido; ponlo en
+  # una rama antes de aplicar` -- advice to `git switch` inside a repository
+  # that is not there. Two confident statements about a repository that was
+  # never opened.
+  make_rig
+  rm -rf "$REPO/.git"
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no puedo leer $REPO como repositorio git"* ]]
+  # The negative half is the point of the test: without it, the old wording
+  # satisfies "it refused" just as well as the new one.
+  [[ "$output" != *"HEAD desprendido"* ]]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "apply says a detached HEAD is a detached HEAD" {
+  # The guard that prints this had no test of its own anywhere in the suite --
+  # measured in Task 6 by mutating its `|| die` into `|| cur_branch=""` and
+  # running everything: all green, because the branch guard below it refuses
+  # anyway, with `esta en la rama ''`, empty quotes where a name should be. So
+  # the sentence is pinned here, on a repository that really is detached, which
+  # is the one situation where it is the right thing to say.
+  make_rig
+  git -C "$REPO" checkout -q --detach HEAD
+
+  run upd apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"* ]]
+  # Not the branch guard wearing empty quotes, which is what speaks when this
+  # one is weakened rather than removed.
+  [[ "$output" != *"esta en la rama ''"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ ! -f "$REPO/.git/FETCH_HEAD" ]
+}
+
 @test "apply refuses to fast-forward a branch that is not the engine's" {
   # Reproduced before the fix: with $REPO on `experimento`, an ancestor of main
   # with no commits of its own, apply moved *experimento* onto the prepared
@@ -1065,14 +1105,17 @@ EOF
 # in the task report rather than encoded here.
 #
 # Each of these also pins *which* refusal `apply` gives, and not merely that it
-# gave one. Four of the five refuse for the reason their name says, so the
-# sentence is anchored here; measured, without it a guard can be deleted and
-# the test stays green because a later guard stops the run for an unrelated
-# reason -- "it refused" is satisfied by any of six exits. The fifth, the
-# unreadable repository, is the exception and stays unanchored on purpose: it
-# reaches the detached-HEAD guard and blames that, so anchoring the wording
-# would mean fixing `apply`, which is Task 7's. The rule this leaves behind:
-# anchor the message where it is right today, and write down where it is not.
+# gave one. Measured: without that, a guard can be deleted and the test stays
+# green because a later guard stops the run for an unrelated reason -- "it
+# refused" is satisfied by any of six exits.
+#
+# All five are anchored now. The fifth, the unreadable repository, was left
+# unanchored through Task 6 on purpose and the rule it left behind was "anchor
+# the message where it is right today, and write down where it is not": there
+# `apply` reached its detached-HEAD guard and blamed that, so pinning the
+# wording would have fixed a false sentence in place. Task 7 gave `apply` the
+# repository check `blockers_live` already opened with, which is what made the
+# fifth anchorable.
 
 @test "contrato: un arbol sucio bloquea el panel y frena el terminal" {
   make_rig
@@ -1145,11 +1188,13 @@ EOF
 
   run upd apply
   [ "$status" -eq 1 ]
+  # The fifth pair, anchored at last. It stayed unanchored through Task 6 for a
+  # stated reason -- `apply` reached its detached-HEAD guard and blamed that,
+  # and pinning a false sentence would have fixed the defect in place. Task 7
+  # gave `apply` the same repository check `blockers_live` opens with, so the
+  # two surfaces now name the same thing and the agreement can be held down.
+  [[ "$output" == *"no puedo leer $REPO como repositorio git"* ]]
   [ ! -s "$NH_MARKER" ]
-  # The two refuse for the same reason and say different things: the panel
-  # names the repository, `apply` reaches its detached-HEAD guard and blames
-  # that. Both stop, which is what this pins; the wording is noted in the task
-  # report as something for whoever touches `apply` next, not papered over here.
 }
 
 @test "contrato: un lock inabrible bloquea el panel y frena el terminal" {
