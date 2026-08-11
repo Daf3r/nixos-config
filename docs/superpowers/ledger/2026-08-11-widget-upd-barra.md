@@ -8,18 +8,21 @@ Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 7 de 11 hechas**, más 
 tarea 5b que no estaba en el plan. Cada una con revisión y **todas sus rondas de
 arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
 
-**158 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
-corriendo dentro de la derivación.
+**159 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
+corriendo dentro de la derivación y con el chequeo de la unidad de apply también
+dentro.
 
-**La tarea 7 tiene un paso que no puede darse sin root y no está dado**: ver el
-modal de polkit. Hasta entonces la tarea está escrita y construida, no aceptada
-— y una regla polkit que no autoriza nada en silencio ya pasó aquí con gamemode.
+**La tarea 7 dio su prueba de aceptación, falló, y está arreglada.** Lo de polkit
+pasó —el modal salió— y lo de `nh` no: la unidad murió en 48 ms porque `nh` se
+niega a correr como root. Ver «Ronda 1» abajo. **Lo que queda es volver a
+arrancarla** y ver que esta vez activa.
 
 ## Dónde se paró exactamente
 
-HEAD en **`8585c61`**, árbol limpio salvo la spec del `.deb` de ChatGPT, que es
-de otra sesión. La tarea 7 está implementada y construida; **falta su prueba de
-aceptación**, que es de daf3r (más abajo, «Lo que hace falta de daf3r»).
+HEAD en la ronda 1 de la tarea 7, sobre `af6552c`. Árbol limpio salvo la spec del
+`.deb` de ChatGPT, que es de otra sesión. La tarea 7 está implementada,
+construida y **con su primera prueba de aceptación ya corrida** — falló, se
+arregló, y falta volver a correrla (más abajo, «Lo que hace falta de daf3r»).
 
 Qué entró en la tarea 7:
 
@@ -33,13 +36,54 @@ Qué entró en la tarea 7:
 4. **El `--no-block` de la tarea 10 corregido contra medición**, en el plan y en
    la spec.
 
-Qué entró, y qué dejó medido cada punto:
+### Ronda 1: la unidad murió en la máquina, y por qué no lo vio nadie
 
-1. **El mensaje de `apply` anclado en los cuatro contratos donde hoy ya es
+La primera versión **falló en la prueba de aceptación**, en 48 ms:
+
+```
+nixos-upd-apply[…]: 0: Don't run nh os as root. It will escalate its
+                       privileges internally as needed.
+nixos-upd-apply@boot.service: Main process exited, code=exited, status=1
+```
+
+`nh` **se niega a ser root a propósito**, porque espera que lo lance un usuario y
+elevarse él. En la unidad ya es root y no hay nada que elevar, que es exactamente
+lo que dice `--elevation-strategy none`. Es el arreglo, y no
+`--bypass-root-check`: ése también pasa la negativa —medido, con un aviso
+`! Bypassing root check; running nix as root`— pero deja la estrategia en `auto`,
+así que `nh` seguiría buscando doas/sudo/run0/pkexec siendo ya root y sin TTY.
+Uno describe la situación; el otro solo calla la queja.
+
+**La parte de polkit sí funcionó** y no hay que rehacerla: entre el
+`systemctl start` y el arranque de la unidad pasaron ~55 s, que es el modal
+esperando autenticación. Un arranque no autenticado es instantáneo.
+
+**Y `--elevation-strategy none` hace el `safe.directory` más necesario, no menos**
+—comprobado, no supuesto—: sin elevación `nh` ya no pasa por `sudo`, que era lo
+que ponía `$SUDO_UID` y lo único que dejaba contento a libgit2 por accidente.
+Medido a través de `nh` mismo, con euid 0 y un repositorio de otro dueño: sin la
+exención muere con `is not owned by current user`; con ella pasa del fetch.
+
+**Nada de la suite podía atrapar esto**, y ése es el hallazgo que queda: bats
+stubbea `nh`, y un stub acepta lo que le den. Lo único que sabe que `nh` rechaza
+esa línea de comandos es `nh`. Ahora hay un **chequeo en tiempo de build** que lo
+corre de verdad —`updates.nix`, `applyCommand`— sin root, sin daemon y sin
+activar nada: `unshare -Ur` da euid 0 dentro de un espacio de nombres de usuario,
+que es lo único que mira `nh`, y **los espacios de nombres sin privilegios anidan
+dentro del sandbox de nix** (verificado). La ruta del repositorio no existe
+dentro del sandbox, así que la ejecución muere en la resolución del flake, que es
+*después* del chequeo de root — y esa diferencia es la que distingue los dos
+casos. El script comprobado **es** el que ejecuta la unidad: no hay forma de
+meterlo en el sistema sin que el chequeo haya pasado.
+
+### Lo que había dejado la ronda 3 de la tarea 6, y qué queda de ello
+
+1. **El mensaje de `apply` anclado en los cuatro contratos donde entonces ya era
    correcto** (árbol sucio, rama, motor en marcha, lock inabrible), una aserción
-   por test. La quinta pareja, la del repo ilegible, **sigue sin anclar** y con
-   la razón escrita en el bloque: ahí `apply` culpa a un HEAD desprendido, y
-   anclar esa redacción exigiría arreglar `apply`, que es de la tarea 7.
+   por test. La quinta, la del repo ilegible, quedó sin anclar con la razón
+   escrita en el bloque: `apply` culpaba a un HEAD desprendido, y anclar esa
+   redacción habría fijado el defecto. **La tarea 7 la arregló y la ancló**, así
+   que las cinco están.
    Las cuatro se mataron mutando; **una de esas mutaciones es el mutante C10 que
    sobrevivió en la ronda 2** —borrar la guardia `exec 9>`—, así que ese hueco
    queda cerrado.
@@ -83,41 +127,39 @@ con el mismo nixpkgs fijado y solo activa el motor nuevo.
 prueban con igualdad exacta que se invoca como `os boot` y no como `os switch`,
 pero la primera ejecución real será en esta máquina.
 
-### La prueba de aceptación de la tarea 7
+### La prueba de aceptación de la tarea 7, ronda 2
 
-Es el paso que decide si las reglas polkit sirven, y **no puede darlo nadie más**.
-Después del switch de arriba, con la sesión gráfica en marcha:
-
-```
-systemctl start nixos-upd.service
-```
-
-Debe correr **sin pedir contraseña**. Se comprueba con
-`systemctl show nixos-upd.service -p Result -p ExecMainStatus`.
+Lo de polkit **ya está validado** en la ronda 1 y no hay que repetirlo: el modal
+salió y esperó ~55 s a que se autenticara. Lo que falta es que la unidad, ya con
+`--elevation-strategy none`, llegue a activar.
 
 ```
+nh os switch ~/nixos-config
+```
+
+Pide contraseña (es `nh` como root, por la vía normal).
+
+```
+systemctl reset-failed nixos-upd-apply@boot.service
 systemctl start nixos-upd-apply@boot.service
 ```
 
-Debe **salir el modal de DMS** pidiendo contraseña. Se cancela. Después,
-`systemctl is-active nixos-upd-apply@boot.service` debe decir `inactive` y
-`readlink /nix/var/nix/profiles/system` debe seguir apuntando a lo mismo que
-antes.
-
-Si no aparece modal, la regla no surtió efecto: `journalctl -u polkit -b`, y **no
-se empieza la tarea 8**. Una regla polkit sintácticamente correcta que autoriza
-cero en silencio ya pasó en esta máquina con gamemode.
-
-Y hay un tercer comando que solo la primera ejecución real puede validar, el que
-prueba que root puede leer el repositorio de daf3r:
+Sale el modal, se **mete la contraseña** esta vez. Y después:
 
 ```
-systemctl start nixos-upd-apply@boot.service   # esta vez con la contraseña
-journalctl -u nixos-upd-apply@boot.service -b --no-pager | tail -20
+systemctl show nixos-upd-apply@boot.service -p Result -p ExecMainStatus
+journalctl -u nixos-upd-apply@boot.service -b --no-pager | tail -30
 ```
 
-Lo que **no** debe aparecer ahí es `is not owned by current user`. Si aparece, la
-línea `safe.directory` de la unidad no está llegando a libgit2.
+Demuestra que funcionó: `Result=success`, `ExecMainStatus=0`, y en el journal
+**ninguna** de estas dos líneas —
+
+- `Don't run nh os as root` → el arreglo de la ronda 1 no llegó
+- `is not owned by current user` → el `safe.directory` no llega a libgit2
+
+— sino `nh` construyendo y dejando la generación lista para el próximo arranque.
+Se confirma con `readlink /nix/var/nix/profiles/system`, que **debe haber
+cambiado** (es `boot`: escribe el perfil y no toca `/run/current-system`).
 
 ## Qué hay hecho
 
@@ -301,6 +343,21 @@ de producción que el test dice cubrir y confirmar que el test cae.
 - **Dos `Environment=PATH=` en la misma unidad: gana la última.** NixOS pone la
   suya siempre, así que la de uno va después y la sustituye. Comprobado con una
   unidad de usuario de usar y tirar, no deducido del manual.
+- **`nh` se niega a correr como root** y hay dos escapes que **no** son
+  equivalentes: `--elevation-strategy none` le dice que no hay nada que elevar y
+  retorna antes del chequeo; `--bypass-root-check` solo salta el `bail!` y deja
+  la estrategia en `auto`, con un aviso `! Bypassing root check`. Comprobado
+  contra el binario de 4.4.2, no solo contra el fuente.
+- **`git rev-parse --is-inside-work-tree` en un repo bare imprime `false` y sale
+  con 0.** Una guardia que solo mire el código de salida **no salta**, y detrás
+  `git status` sale 128 con stdout vacío, así que la guardia siguiente anuncia
+  «limpio». Hay que **comparar la salida**, no esperar un fallo.
+- **Los espacios de nombres de usuario sin privilegios anidan dentro del sandbox
+  de nix**: `unshare -Ur id -u` da 0 en un `runCommand`. Es lo que hace posible
+  probar en tiempo de build un binario que se comporta distinto siendo root.
+  Coste: `nh` sondea `nix --version` y `nix config show experimental-features`
+  antes de mirar el uid, así que el chequeo necesita `nix` en el PATH y
+  `NIX_CONFIG = "experimental-features = nix-command flakes"`.
 
 ## Decisiones tomadas, con su porqué
 
@@ -419,9 +476,29 @@ el mismo defecto que `blockers_live` ya cerró en el lado del panel —con captu
 de stderr y fichero temporal— y que en `apply` sigue vivo. La tarea 7 sí cerró la
 mitad de al lado (un repositorio que no se abre), que era la que tenía dueño.
 
-**La tarea 11 hereda**: podar la cabecera de `blockers.sh`, marcar las casillas
-`- [ ]` de todas las tareas del plan a la vez, y **llevar a `updates/README.md`
-la comparación con `system.autoUpgrade`** que está más arriba en este fichero.
+**La tarea 11 hereda**: **el reenganche tras un `dms restart` a mitad de apply**
+(paso 0 de su sección en el plan), podar la cabecera de `blockers.sh`, marcar las
+casillas `- [ ]` de todas las tareas del plan a la vez, y **llevar a
+`updates/README.md` la comparación con `system.autoUpgrade`** que está más arriba
+en este fichero.
+
+Lo del reenganche se nombra aquí porque durante una ronda **no fue de nadie**: la
+tarea 7 lo sacó de la tarea 10 diciendo que era de la 11, la spec siguió
+prometiéndolo, y ni los pasos de la 11 ni esta lista lo mencionaban. Un
+comportamiento diseñado sin dueño es como la spec y el árbol se separan. **La
+regla de lectura, medida y no negociable**: `inactive` + `success` significa «no
+está corriendo», nunca «salió bien» — una unidad que jamás ha corrido dice
+exactamente lo mismo que una que terminó hace una hora.
+
+**Anotado, no arreglado, y con dueño pendiente:** el mismo punto ciego del repo
+bare que se arregló en `apply` sigue en `lib/blockers.sh:112` — ahí
+`--is-inside-work-tree` tampoco se compara con nada. La diferencia es que el
+panel **acaba acertando por otro camino**: su captura de stderr y del código de
+salida alrededor de `git status` convierte el repo bare en `repo_uncheckable`
+con la frase de git dentro (`fatal: this operation must be run in a work tree`).
+Medido. Por eso no se tocó `blockers.sh` —además de que la sesión del `.deb` de
+ChatGPT trabaja en `updates/lib/`—, pero el test nuevo del repo bare **fija las
+dos mitades**, así que si ese camino de repuesto se rompe, se entera alguien.
 
 Otra sesión de Claude Code espera a que esta rama se integre para empezar el
 trabajo del `.deb` oficial de ChatGPT: su spec está en

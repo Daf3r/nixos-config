@@ -1622,8 +1622,40 @@ git commit -m "plugin: el panel, con el boton que aplica"
 ### Task 11: Close the loop
 
 **Files:**
+- Modify: `updates/dms-plugin/Daemon.qml` — the reattach path (Step 0 below)
 - Modify: `docs/superpowers/specs/2026-08-09-actualizacion-automatica-design.md` (its Phase 2 section)
 - Modify: `README.md` and `README.es.md` if they describe `upd`'s subcommands
+
+- [ ] **Step 0: The reattach after a `dms restart` mid-apply**
+
+Assigned here explicitly, because for one round it was assigned to nobody: Task
+7 took the `ActiveState`/`Result` watcher out of Task 10 saying it "belongs in
+Task 11", and then neither this task's steps nor the ledger's inheritance list
+mentioned it. The spec kept promising the behaviour (§2, and step 6 of the
+flow), so it was a designed behaviour with no owner — which is how a spec and a
+tree drift apart.
+
+The behaviour: with the blocking `systemctl start`, the apply's outcome lives in
+that process. A `dms restart` while a switch is running kills the panel's
+knowledge of it, not the switch — the unit survives, which is why it is a unit.
+On startup, then, the daemon has to ask whether an apply is in flight:
+
+```
+systemctl show -p ActiveState -p Result nixos-upd-apply@switch.service
+systemctl show -p ActiveState -p Result nixos-upd-apply@boot.service
+```
+
+**The one reading rule, measured in Task 7 and not negotiable:** `activating`
+means an apply is running and the panel should show it; `failed` means it
+failed; and `inactive` + `success` means **not running** — never "succeeded". A
+unit that has never run in this boot reports exactly the same pair as one that
+finished an hour ago, so treating it as success is how the panel would announce
+an apply that never happened.
+
+What "not running" should make the panel do is poll `upd status --json` and
+render whatever it says, which is the same thing it does at every other startup.
+So the reattach is a *resume of the running case*, and there is deliberately no
+attempt to reconstruct the outcome of an apply that already ended.
 
 - [ ] **Step 1: Retire the Phase 2 section**
 

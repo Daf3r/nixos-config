@@ -138,6 +138,8 @@ makes `dms restart` mid-apply survivable: the unit keeps going, and its state is
 still queryable afterwards. What a restart loses is the *notification*, not the
 apply — with the blocking start, the panel's answer dies with the process, and
 recovering it after a restart is the one job `systemctl show` is still good for.
+**That reattach is Task 11, Step 0**, named there rather than left implied: it
+was briefly a behaviour this spec promised and no task owned.
 
 ### 3. The plugin — `updates/dms-plugin/`
 
@@ -203,7 +205,8 @@ Everything already in the file — `state`, `checked_at`, `warnings`, `unmanaged
    after a `dms restart` mid-apply, where that answer was lost with the
    process, does the daemon fall back to `systemctl show -p ActiveState,Result`
    — and there `inactive`/`success` has to be read as "not running", never as
-   "succeeded".
+   "succeeded". That fallback is **Task 11, Step 0**; it is not part of the
+   normal path and nothing else should reach for `systemctl show`.
 7. After a `@boot` apply the panel offers to reboot. It never reboots on its own.
 
 ### polkit, at two levels
