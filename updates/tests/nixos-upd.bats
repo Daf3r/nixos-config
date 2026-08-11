@@ -148,6 +148,15 @@ engine() {
          | .from == "1.0.0" and .to == "0.0.34"' "$STATE/status.json"
   jq -e '.changes[] | select(.name == "brave-origin")
          | .from == "1.0.0" and .to == "1.93.134"' "$STATE/status.json"
+
+  # The exact set, not "no warnings" and not "at least these". Every step of
+  # this run that can fail quietly ends in `|| warn`, so a future change that
+  # calls out to nix differently would raise an extra one and nothing here
+  # would notice. The one that is expected comes from the empty closure the
+  # nix-store stub returns: no brave binary to inspect, so the VA-API check
+  # could not run -- and an unrun check saying so is the behaviour, not a gap.
+  jq -e '.warnings | map(.code) | sort == ["brave_vaapi_check_skipped"]' \
+    "$STATE/status.json"
 }
 
 @test "a ready run carries the parsed closure diff and the reboot verdict" {

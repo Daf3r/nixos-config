@@ -354,10 +354,15 @@ git -C "$WT" checkout -q -B auto/update FETCH_HEAD >>"$LOG" 2>&1 \
 # the same one: the `warnings` entry is what a reader gates on (a clean `ready`
 # used to hide a package quietly staying at its old version), and the fallback
 # object is what keeps `changes[]` uniform so a reader never has to cope with a
-# missing element. Empty `from`/`to` mean "did not move" to every consumer,
-# which is true here -- it did not -- and the `error` key says why. Same class
-# as the VA-API check above: the check not running has to look different from
-# the check passing.
+# missing element. `from` and `to` are empty because there is nothing
+# trustworthy to put in them, which is not the same as the package being known
+# to have stayed put: the bump scripts call nixpin_set *before* they print
+# their JSON, so a failure between those two leaves the pin rewritten -- and
+# then committed by the staging further down -- while this entry says nothing
+# moved. Nothing here can tell those apart, and the `warnings` entry is what
+# covers it. That is the other half of why both signals exist rather than one.
+# Same class as the VA-API check above: the check not running has to look
+# different from the check passing.
 if ! brave_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
   brave_json='{"name":"brave-origin","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
   warn local_bump_failed "brave-origin could not be bumped; it stays at the version pinned in pkgs/brave-origin.nix (see $LOG)"
@@ -564,13 +569,22 @@ fi
 # Not a bare assignment. closure_reboot lets jq's own status through (5 on
 # input that is not an object) rather than mapping everything onto 1, so under
 # `set -e` an unguarded call would take this run down after the build, with no
-# status written at all. The default is `false` and it is deliberately paired
-# with a warning: on its own, "no reboot needed" is exactly what a reboot check
-# that never ran also looks like.
-reboot_json='{"reboot_recommended":false,"reboot_reason":[]}'
+# status written at all. Whatever it answers, the warning goes with it: on its
+# own, "no reboot needed" is exactly what a reboot check that never ran also
+# looks like.
+#
+# The fallback asks closure_reboot itself what an empty diff means instead of
+# spelling `{"reboot_recommended":false,"reboot_reason":[]}` out here. A
+# literal would be a second place that knows those two key names, and a rename
+# in closure.sh would walk straight past it without a sound -- the exact
+# duplication the `+ $reboot` merge below exists to avoid. If even that call
+# fails, the keys are left out rather than invented: `upd show` already reads
+# `.reboot_recommended // false`, and an absent key sitting next to a warning
+# says strictly more than a confident `false` sitting next to one.
 if ! reboot_json="$(printf '%s' "$closure_json" | closure_reboot 2>>"$LOG")"; then
-  reboot_json='{"reboot_recommended":false,"reboot_reason":[]}'
   warn reboot_check_failed "could not decide whether this update needs a reboot; treat \`upd apply\` as if it might (see $LOG)"
+  reboot_json="$(printf '%s' '{"added":[],"removed":[],"changed":[]}' | closure_reboot 2>>"$LOG")" \
+    || reboot_json='{}'
 fi
 
 # Which flake inputs moved. Absent lock.before means the snapshot above already

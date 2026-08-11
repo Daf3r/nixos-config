@@ -62,7 +62,35 @@ require_readable_status() {
   local schema
   schema="$(jq -r '.schema // "ausente"' "$STATUS")"
   if [ "$schema" != "$SCHEMA" ]; then
-    die "status.json declara schema $schema y este lector solo entiende $SCHEMA; actualiza el sistema para tener un upd al dia"
+    # Which side is stale decides the advice, and until schema 2 there was only
+    # one side it could be: with SCHEMA=1 nothing older than 1 existed, so a
+    # mismatch always meant the file was newer and "update the system" was
+    # always right. Schema 2 opens the other direction, and it is not the
+    # exotic one -- the nightly timer runs the *installed* engine, so a system
+    # that has not been switched yet keeps rewriting status.json in schema 1,
+    # and the switch that follows leaves this reader looking at an old file on
+    # an up-to-date system. Telling that user to update the system sends them
+    # to do nothing; what rewrites the file is `upd check`. Same rule as the
+    # reboot advice below: pointing someone at something that does not do what
+    # it says is worse than saying nothing.
+    #
+    # The numeric comparison is guarded because `$schema` is whatever was in
+    # the file, including the string "ausente" this very line puts there when
+    # the key is missing. `[ ausente -lt 2 ]` is not false, it is a bash error
+    # on stderr and a status of 2, so an unguarded version would answer the
+    # hand-edited case with a line about test operators.
+    local advice
+    case "$schema" in
+      '' | *[!0-9]*)
+        advice="y eso no es un numero de schema: el fichero esta corrupto o editado a mano, miralo tu" ;;
+      *)
+        if [ "$schema" -lt "$SCHEMA" ]; then
+          advice="el viejo es el fichero, no este lector: lanza \`upd check\` para que el motor lo reescriba"
+        else
+          advice="el viejo es este lector: actualiza el sistema para tener un upd al dia"
+        fi ;;
+    esac
+    die "status.json declara schema $schema y este lector solo entiende $SCHEMA; $advice"
   fi
 }
 

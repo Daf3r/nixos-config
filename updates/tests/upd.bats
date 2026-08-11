@@ -53,7 +53,9 @@ ready_status() {
       {"name":"t3code-app","kind":"local_pkg","from":"0.0.32","to":"0.0.33"}],
     "closure_diff":{"added":[{"name":"libnew","to":"1.0"}],
       "removed":[{"name":"libold","from":"0.9"},{"name":"libgone","from":"0.1"}],
-      "changed":[{"name":"gcc","from":"16.1.0","to":"16.2.0"}],
+      "changed":[{"name":"gcc","from":"16.1.0","to":"16.2.0"},
+        {"name":"samba","from":"4.23.8","to":"4.23.10"},
+        {"name":"libxmp","from":"4.7.1","to":"4.7.2"}],
       "size_delta_mb":8.88},
     "reboot_recommended":false,"reboot_reason":[],
     "warnings":'"${1:-[]}"',"unmanaged":[],
@@ -97,23 +99,51 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" == *"no es un objeto JSON legible"* ]]
 }
 
-@test "show refuses a schema from the future" {
+@test "show refuses a schema from the future and says the reader is the old side" {
+  # A file newer than this reader: the engine that wrote it is not the one
+  # packaged next to this script, so the system is what needs updating.
   status_json '{"schema":3,"checked_at":"x","state":"ready","warnings":[]}'
   run upd
   [ "$status" -eq 1 ]
   [[ "$output" == *"schema 3"* ]]
+  [[ "$output" == *"actualiza el sistema"* ]]
+  [[ "$output" != *"upd check"* ]]
 }
 
-@test "show refuses a schema 1 status file" {
-  # The reader and the engine ship in the same derivation, so the only way
-  # these disagree is a stale upd earlier on $PATH. It must say so rather than
-  # render a file whose fields it is about to misread: a schema 1 body carries
-  # `local_pkgs` and no `changes`, so a reader that went ahead would print an
-  # empty change list for an update that moves six inputs.
+@test "show refuses a schema 1 status file and points at the fix that actually works" {
+  # The direction schema 2 opened up, and the one daf3r will hit: the nightly
+  # timer runs the *installed* engine, so a system still on schema 1 rewrites
+  # status.json in schema 1, and the switch that follows leaves a schema 2
+  # reader looking at it. Advising "actualiza el sistema" there points at a
+  # no-op -- the system is already up to date, and what rewrites the file is
+  # `upd check`. Same rule as the `--boot` advice: pointing someone at
+  # something that does nothing is worse than not advising at all.
   status_json '{"schema":1,"state":"ready","checked_at":"x","warnings":[]}'
   run upd
   [ "$status" -eq 1 ]
   [[ "$output" == *"schema 1"* ]]
+  [[ "$output" == *"upd check"* ]]
+  [[ "$output" != *"actualiza el sistema"* ]]
+}
+
+@test "show refuses a schema that is not a number without leaking a shell error" {
+  # Both refusals above compare numerically, and `[ ausente -lt 2 ]` is a bash
+  # error, not a false: it prints "integer expression expected" to stderr and
+  # returns 2. A user who hand-edited the file must get this reader's own
+  # diagnostic, not a line about test operators.
+  status_json '{"schema":"dos","state":"ready","checked_at":"x","warnings":[]}'
+  run upd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema dos"* ]]
+  [[ "$output" != *"integer expression"* ]]
+
+  # And the same when there is no schema key at all, which is what
+  # `.schema // "ausente"` produces.
+  status_json '{"state":"ready","checked_at":"x","warnings":[]}'
+  run upd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"ausente"* ]]
+  [[ "$output" != *"integer expression"* ]]
 }
 
 @test "an unrecognised state is loud and exits non-zero" {
@@ -158,10 +188,16 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 @test "show summarises the closure diff with its three counts and the size" {
   # Without this the entire closure_diff block can be deleted from the reader
   # with every other test still green: nothing else in this file reads it.
+  #
+  # The three cardinals in the fixture are deliberately all different -- 3, 1
+  # and 2. With `changed` and `added` both at one, swapping the two in the
+  # reader produced byte-identical output and the mutant survived; a test whose
+  # fixture cannot tell two fields apart is not testing that they are the right
+  # two.
   ready_status
   run upd
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 paquetes cambian"* ]]
+  [[ "$output" == *"3 paquetes cambian"* ]]
   [[ "$output" == *"1 entran"* ]]
   [[ "$output" == *"2 salen"* ]]
   [[ "$output" == *"8.88 MB"* ]]
@@ -299,6 +335,16 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" == *"--boot"* ]]
   [ ! -s "$NH_MARKER" ]
   [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+
+  # A second flag, chosen because it will never become legal. Task 6 turns
+  # `--boot` into a real option, and that day the case above has to be inverted
+  # -- taking the only cover for "an unknown argument is refused" with it
+  # unless something else is holding the guard down. This is that something.
+  run upd apply --frobnicate
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--frobnicate"* ]]
+  [ ! -s "$NH_MARKER" ]
   [ "$(cat "$REPO/flake.lock")" = "v1" ]
 }
 
