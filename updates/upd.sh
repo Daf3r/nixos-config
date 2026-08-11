@@ -174,6 +174,10 @@ case "$cmd" in
     fi
 
     rc=0
+    # Only the `ready` arm sets this, and only the `ready` footer reads it, but
+    # it is declared here so the read below cannot become an unset one under
+    # `set -u` if either of those two ever moves.
+    reboot_rec=false
     case "$state" in
       current)
         echo "todo al dia"
@@ -192,6 +196,18 @@ case "$cmd" in
         echo "la comprobacion fallo: $(jq -r '.error // "sin detalle"' "$STATUS")"
         ;;
       ready)
+        # Read once, used twice: the advisory below and the footer under it,
+        # which have to agree about whether this update wants a reboot. They
+        # cannot disagree at runtime even with two reads of the same expression
+        # -- but the bug this pairing just fixed *was* two sources for one
+        # screen, and one read is the cheapest way to keep it that way. It also
+        # saves a jq on the state `show` spends most of its mornings in.
+        #
+        # No `|| reboot_rec=false`: this is the behaviour the two reads already
+        # had, and swallowing a jq failure here would silently drop the reboot
+        # advisory, which is the one line on this screen that changes what the
+        # user types.
+        reboot_rec="$(jq -r '.reboot_recommended // false' "$STATUS")"
         echo "hay una actualizacion preparada en la rama $(jq -r '.branch // "auto/update"' "$STATUS")"
         # `changes[]` carries every input and every hand-packaged app the run
         # looked at, moved or not, so the "did not move" rows are filtered out
@@ -228,7 +244,7 @@ case "$cmd" in
         # that avoids the hot activation is one word away. The rule behind both
         # rounds: advice may name a flag exactly as long as the flag behaves,
         # and the two move in the same commit.
-        if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
+        if [ "$reboot_rec" = "true" ]; then
           echo
           echo "  ESTO PIDE REINICIO: $(jq -r '(.reboot_reason // []) | join(", ")' "$STATUS")"
           echo "  aplicalo con \`upd apply --boot\`: deja la generacion lista para el"
@@ -276,7 +292,7 @@ case "$cmd" in
       # said `upd apply --boot` and four lines below it this printed
       # `aplicar: upd apply`, which is the hot activation the advisory exists
       # to avoid.
-      if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
+      if [ "$reboot_rec" = "true" ]; then
         echo "  aplicar:  upd apply --boot   (por lo de arriba)"
       else
         echo "  aplicar:  upd apply"
@@ -384,16 +400,27 @@ case "$cmd" in
     # Widening it to take a flag must not widen it to take anything: one
     # argument, from a closed list. `--ff` is not `--ff-only`, and `--boot
     # --ff-only` is neither of the two things they mean.
+    # Each argument is quoted in the refusals below, and the count is named.
+    # `${*:2}` renders an empty argument as nothing at all, so `upd apply --boot
+    # ""` used to be refused with "he recibido: --boot" -- telling the user they
+    # were rejected for something that on its own is legal.
     if [ "$#" -gt 2 ]; then
-      die "uso: upd apply [--boot|--ff-only]: un modo como mucho, y he recibido: ${*:2}"
+      die "uso: upd apply [--boot|--ff-only]: un modo como mucho, y he recibido $(($# - 1)): $(printf "'%s' " "${@:2}")"
     fi
+    # `$#` decides whether a mode was given, and `$2` decides which one. Not
+    # `${2:-}` alone with an empty branch: that reads "no argument" and "an
+    # empty argument" as the same thing, so `upd apply "$FLAG"` with an unset
+    # FLAG activated hot in silence -- measured, it went straight past the guard
+    # into `switch`. An empty string is not a mode; it is a variable somebody
+    # forgot to set, and this arm exists to refuse exactly that class of thing.
     mode="switch"
-    case "${2:-}" in
-      "")        mode="switch" ;;
-      --boot)    mode="boot" ;;
-      --ff-only) mode="ff-only" ;;
-      *)         die "uso: upd apply [--boot|--ff-only]; no entiendo: ${*:2}" ;;
-    esac
+    if [ "$#" -eq 2 ]; then
+      case "$2" in
+        --boot)    mode="boot" ;;
+        --ff-only) mode="ff-only" ;;
+        *)         die "uso: upd apply [--boot|--ff-only]; no entiendo: '$2'" ;;
+      esac
+    fi
 
     # Preflight the tools *before* touching $REPO. Discovering that `nh` is
     # missing after the fast-forward leaves the repository moved and the system

@@ -719,6 +719,25 @@ upd_status() { # $@ the arguments after `status`
   [ "$status" -eq 1 ]
   [ ! -s "$NH_MARKER" ]
   [ "$(cat "$REPO/flake.lock")" = "v1" ]
+
+  # An empty argument is not "no argument". `upd apply "$FLAG"` with FLAG unset
+  # went straight through the guard into a hot `switch` -- measured, and it is
+  # the same silent-activation shape the guard exists to close, arriving through
+  # the one input nobody types on purpose.
+  run upd apply ""
+  [ "$status" -eq 1 ]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
+
+  # And the refusal has to show it. `${*:2}` renders an empty argument as
+  # nothing, so this used to answer "he recibido: --boot" -- rejecting the user
+  # for something that on its own is perfectly legal.
+  run upd apply --boot ""
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"'--boot'"* ]]
+  [[ "$output" == *"''"* ]]
+  [ ! -s "$NH_MARKER" ]
 }
 
 @test "apply --ff-only fast-forwards and stops before activating" {
