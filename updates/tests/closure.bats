@@ -80,6 +80,26 @@ setup() {
   [ -z "$output" ]
 }
 
+@test "closure_parse refuses a line that merely has a colon in it" {
+  # A colon is not a diff entry. Counting one as parsed would disarm the guard
+  # above at the worst possible moment: a `warning:` on stdout, or an error
+  # message mixed into the output, and the engine would report an empty
+  # closure_diff as though nothing had changed.
+  printf 'warning: something odd happened\n' > "$BATS_TMPDIR/warn.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/warn.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "closure_parse drops a stray warning without dropping real entries" {
+  # The other half of the rule: rejecting the noise must not reject the diff
+  # it came wrapped in, and the noise must not surface as an entry named
+  # "warning" either.
+  printf 'warning: something odd happened\ngcc: 16.1.0 → 16.2.0\n' > "$BATS_TMPDIR/mixed.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/mixed.txt' | jq -e '(.changed | length) == 1 and .changed[0].name == \"gcc\"'"
+  [ "$status" -eq 0 ]
+}
+
 @test "closure_parse on empty input is an empty diff, not an error" {
   run bash -c ": | closure_parse | jq -e '.added == [] and .removed == [] and .changed == [] and .size_delta_mb == 0'"
   [ "$status" -eq 0 ]

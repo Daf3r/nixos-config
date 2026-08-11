@@ -47,6 +47,7 @@ closure_parse() {
           sub(/^[^:]*: /, "", rest)
 
           size = 0
+          only_size = 0
           # A trailing ", <number> <unit>" is the size field. Anchored at the
           # end so a version containing a space could never be eaten by it.
           if (match(rest, /, -?[0-9]+(\.[0-9]+)? (B|KiB|MiB|GiB)$/)) {
@@ -63,6 +64,7 @@ closure_parse() {
             # shell string, and one would end it mid-parser.
             size = bytes(rest)
             rest = ""
+            only_size = 1
           }
 
           from = ""; to = ""
@@ -70,6 +72,15 @@ closure_parse() {
             split(rest, halves, " → ")
             from = halves[1]
             to = halves[2]
+          } else if (! only_size) {
+            # Everything reaching here has a colon and nothing else in common
+            # with a diff entry: no arrow, and not a bare size either. A colon
+            # alone must not count as parsed, or the guard at the bottom of
+            # this file is disarmed by the very thing it watches for -- a
+            # `warning:` reaching stdout, or an error message mixed into the
+            # output, would be enough to make an otherwise empty result look
+            # like a successful parse and report "nothing changed".
+            next
           }
 
           kind = "changed"
