@@ -128,14 +128,25 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 
 @test "show refuses a schema that is not a number without leaking a shell error" {
   # Both refusals above compare numerically, and `[ ausente -lt 2 ]` is a bash
-  # error, not a false: it prints "integer expression expected" to stderr and
-  # returns 2. A user who hand-edited the file must get this reader's own
-  # diagnostic, not a line about test operators.
+  # error, not a false: it returns 2, which the `if` reads as false, so without
+  # the guard the reader prints the shell's diagnostic and then advises updating
+  # the system on top of it.
+  #
+  # What is asserted is this reader's OWN sentence, not the absence of bash's.
+  # This test used to assert `!= *"integer expression"*` and nothing else, and
+  # that wording is not the one bash 5.3.15 uses -- it says `[: dos: integer
+  # expected`. Measured against a copy of upd.sh with the whole `case` deleted:
+  # the reader leaked `[: dos: integer expected`, advised "actualiza el
+  # sistema", and all three assertions still passed. A test that survives the
+  # deletion of the line it names holds nothing down, so the anchor is now the
+  # message only this file can produce; the negative is cut back to `integer`,
+  # which is in every wording bash has used for this error.
   status_json '{"schema":"dos","state":"ready","checked_at":"x","warnings":[]}'
   run upd
   [ "$status" -eq 1 ]
   [[ "$output" == *"schema dos"* ]]
-  [[ "$output" != *"integer expression"* ]]
+  [[ "$output" == *"no es un numero de schema"* ]]
+  [[ "$output" != *"integer"* ]]
 
   # And the same when there is no schema key at all, which is what
   # `.schema // "ausente"` produces.
@@ -143,7 +154,8 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   run upd
   [ "$status" -eq 1 ]
   [[ "$output" == *"ausente"* ]]
-  [[ "$output" != *"integer expression"* ]]
+  [[ "$output" == *"no es un numero de schema"* ]]
+  [[ "$output" != *"integer"* ]]
 }
 
 @test "an unrecognised state is loud and exits non-zero" {
