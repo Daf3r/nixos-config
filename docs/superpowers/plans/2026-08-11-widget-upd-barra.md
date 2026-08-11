@@ -1,0 +1,1699 @@
+# Apply from the bar — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Make the nightly prepared update visible and appliable from the DankMaterialShell bar, with the password prompt DMS already draws, without weakening any guard `upd` enforces today.
+
+**Architecture:** Three layers that fail separately. The engine grows a machine-readable `status.json` (schema 2) and a `upd status --json` subcommand that adds live blockers. A root `nixos-upd-apply@.service` template does the `nh os switch|boot` half, gated by polkit. A DMS plugin in this repository reads the first and starts the second.
+
+**Tech Stack:** bash, bats, jq, awk, nix, systemd, polkit, QML (Quickshell), JavaScript, node --test.
+
+Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
+
+## Global Constraints
+
+- Target repo: `/home/daf3r/nixos-config`. Flake attribute: `daf3r-starter`.
+- **The engine still never writes to `~/nixos-config` and never switches.** `upd apply --ff-only` is the only thing that writes to the repo, it runs as daf3r, and it stops before `nh`.
+- All scripts: `set -euo pipefail`. Library files under `updates/lib/` are sourced, carry `# shellcheck shell=bash`, and define functions only.
+- The user's shell is **fish**. Every command here is for `bash -c` or `nix run`; never write a bash heredoc into a fish prompt.
+- Commits: **no `Co-Authored-By` trailer**, author `Daf3r <87869353+Daf3r@users.noreply.github.com>` (already the repo's git config). Commit messages in Spanish, matching this repo's history; comments in `.nix`, `.sh`, `.qml` and `.js` in English.
+- bats: `nix run nixpkgs#bats -- updates/tests/`. The derivation runs the same suite at build time, so a red suite cannot be activated.
+- node tests: `nix develop ~/nixos-config#dms-plugins -c node --test updates/dms-plugin/tests/*.test.js`
+- Runtime state: `/var/lib/nixos-upd`, owned by daf3r via `StateDirectory=`.
+- DMS is pinned to 1.5.3. Plugin manifest ids are camelCase; the directory name is what appears under `~/.config/DankMaterialShell/plugins/`.
+- **`nix store diff-closures` has no `--json`** (verified 2026-08-11: `error: unrecognised flag '--json'`). Its human output must be parsed, and its ANSI colour codes stripped first.
+
+---
+
+## File Structure
+
+| File | Responsibility |
+|---|---|
+| `updates/lib/closure.sh` | **new** — parse `nix store diff-closures` text into `closure_diff` JSON; decide `reboot_recommended` |
+| `updates/lib/inputs.sh` | **new** — diff two `flake.lock` files into `changes[]` entries of kind `input` |
+| `updates/lib/status.sh` | schema bumped to 2 |
+| `updates/bump-brave-origin.sh` | emits a JSON object instead of a prose line |
+| `updates/bump-t3code-app.sh` | same |
+| `updates/nixos-upd.sh` | composes `changes[]`, `closure_diff`, `reboot_recommended` into the ready body |
+| `updates/upd.sh` | `SCHEMA=2`; renders `changes[]`; new `status --json`; `apply` split into `--ff-only` and the unit start |
+| `updates.nix` | packages the new lib files; adds `nixos-upd-apply@.service` and the polkit rules |
+| `updates/dms-plugin/plugin.json` | manifest, id `nixosUpd` |
+| `updates/dms-plugin/logic.js` | pure: parse, classify, choose the button. All unit tests point here |
+| `updates/dms-plugin/Daemon.qml` | polls, holds state, watches the apply unit |
+| `updates/dms-plugin/Widget.qml` | the bar item |
+| `updates/dms-plugin/Popout.qml` | the panel, instantiated from `Widget.qml`'s `popoutContent` — not a surface in `plugin.json` |
+| `dms.nix` | declares the plugin with a relative `src` |
+
+---
+
+### Task 1: Parse the closure diff
+
+**Files:**
+- Create: `updates/lib/closure.sh`
+- Create: `updates/tests/closure.bats`
+- Create: `updates/tests/fixtures/diff-closures.txt`
+
+**Interfaces:**
+- Produces: `closure_parse` — reads `nix store diff-closures` text on stdin, writes to stdout a JSON object `{added: [{name, to}], removed: [{name, from}], changed: [{name, from, to}], size_delta_mb: <number>}`. Returns 1 and writes nothing if stdin had non-blank lines but none parsed.
+
+- [ ] **Step 1: Capture the fixture from a real run**
+
+The engine has a real diff on disk right now. Copy it verbatim, ANSI codes included — the point of the fixture is that it is not idealised:
+
+```bash
+cp /var/lib/nixos-upd/diff.txt updates/tests/fixtures/diff-closures.txt
+```
+
+Then append three lines by hand for shapes the current diff does not contain, so the parser is tested against them too:
+
+```
+somethingnew: ∅ → 1.2.3
+multiver: 1.0, 1.0-fish → 2.0, 2.0-fish, 1.5 MiB
+biggrowth: 4.5 → 4.6, 1.2 GiB
+```
+
+- [ ] **Step 2: Write the failing test**
+
+`updates/tests/closure.bats`:
+
+```bash
+#!/usr/bin/env bats
+
+setup() {
+  source "${BATS_TEST_DIRNAME}/../lib/closure.sh"
+  FIX="${BATS_TEST_DIRNAME}/fixtures/diff-closures.txt"
+}
+
+@test "closure_parse classifies an addition" {
+  run bash -c "closure_parse < '$FIX' | jq -e '.added[] | select(.name==\"somethingnew\") | .to == \"1.2.3\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse classifies a removal" {
+  # A removal is the shape that matters most: it is how the 2026-08-11 diff
+  # announced that applying would delete dms-shell. If it were misfiled as a
+  # change, the panel would show a version bump where a package disappears.
+  printf 'gone: 1.0 → \xe2\x88\x85, -1.0 MiB\n' > "$BATS_TMPDIR/one.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/one.txt' | jq -e '.removed[0].name == \"gone\" and .removed[0].from == \"1.0\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse keeps the last comma field as size, not as a version" {
+  # `multiver: 1.0, 1.0-fish → 2.0, 2.0-fish, 1.5 MiB` — versions are comma
+  # separated and so is the size. Treating the trailing size as a version is
+  # the obvious wrong parse.
+  run bash -c "closure_parse < '$FIX' | jq -e '.changed[] | select(.name==\"multiver\") | .to == \"2.0, 2.0-fish\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse handles a line with a size and no versions" {
+  run bash -c "closure_parse < '$FIX' | jq -e '.changed[] | select(.name==\"kitty\") | .from == \"\" and .to == \"\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse sums sizes across units into MB" {
+  printf 'a: 1 → 2, 1.0 MiB\nb: 1 → 2, 1024.0 KiB\nc: 1 → 2, -0.5 MiB\n' > "$BATS_TMPDIR/sizes.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/sizes.txt' | jq -e '.size_delta_mb > 1.49 and .size_delta_mb < 1.51'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_parse refuses input it could not parse at all" {
+  # Silence is the failure mode this whole engine exists to remove. If a future
+  # nix changes the format, an empty closure_diff would render as "nothing
+  # changed" in the bar. It must be an error the caller can turn into a warning.
+  printf 'this is not a diff\nnor is this\n' > "$BATS_TMPDIR/junk.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/junk.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+}
+
+@test "closure_parse on empty input is an empty diff, not an error" {
+  run bash -c ": | closure_parse | jq -e '.added == [] and .removed == [] and .changed == [] and .size_delta_mb == 0'"
+  [ "$status" -eq 0 ]
+}
+```
+
+- [ ] **Step 3: Run the tests and watch them fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/closure.bats`
+Expected: every test fails with `closure_parse: command not found`.
+
+- [ ] **Step 4: Implement it**
+
+`updates/lib/closure.sh`:
+
+```bash
+# shellcheck shell=bash
+#
+# Turn `nix store diff-closures` output into structured data.
+#
+# It has no --json (verified against nix on 2026-08-11: `unrecognised flag`),
+# so this parses the human format. That format is a stability bet, and the bet
+# is hedged rather than hidden: input that produces no entries at all is a hard
+# failure, so a future nix that changes the layout surfaces as a warning in
+# status.json instead of as an empty diff that reads like "nothing changed".
+#
+# Line shapes, all real:
+#   name: 1.0 → 2.0                    version change, no size reported
+#   name: 1.0 → 2.0, 25.3 KiB          with size
+#   name: 1.0, 1.0-fish → 2.0, 2.0-fish, 5.9 MiB   multiple versions per side
+#   name: 1.0 → ∅, -788.9 KiB          removed
+#   name: ∅ → 1.0                      added
+#   name: 52.3 KiB                     same version string, different closure
+#
+# The size, when present, is always the last comma-separated field and always
+# matches a number followed by a unit. Versions are comma-separated too, which
+# is why the size is identified by shape and stripped from the end rather than
+# by splitting on commas.
+
+# stdin: diff text. stdout: one JSON object. Returns 1 if nothing parsed.
+closure_parse() {
+  local out
+  local raw
+  raw="$(cat)"
+  out="$(
+    printf '%s\n' "$raw" \
+      | sed 's/\x1b\[[0-9;]*m//g' \
+      | awk -F': ' '
+        function bytes(s,   n, u) {
+          n = s; u = s
+          sub(/ .*$/, "", n)
+          sub(/^[^ ]* /, "", u)
+          if (u == "B")   return n
+          if (u == "KiB") return n * 1024
+          if (u == "MiB") return n * 1024 * 1024
+          if (u == "GiB") return n * 1024 * 1024 * 1024
+          return 0
+        }
+        NF < 2 { next }
+        {
+          name = $1
+          rest = $0
+          sub(/^[^:]*: /, "", rest)
+
+          size = 0
+          # A trailing ", <number> <unit>" is the size field. Anchored at the
+          # end so a version containing a space could never be eaten by it.
+          if (match(rest, /, -?[0-9]+(\.[0-9]+)? (B|KiB|MiB|GiB)$/)) {
+            size = bytes(substr(rest, RSTART + 2))
+            rest = substr(rest, 1, RSTART - 1)
+          }
+
+          from = ""; to = ""
+          if (index(rest, " → ") > 0) {
+            split(rest, halves, " → ")
+            from = halves[1]
+            to = halves[2]
+          }
+
+          kind = "changed"
+          if (from == "∅") { kind = "added"; from = "" }
+          else if (to == "∅") { kind = "removed"; to = "" }
+
+          printf "%s\t%s\t%s\t%s\t%.0f\n", kind, name, from, to, size
+        }
+      ' \
+      | jq -R -s '
+          split("\n") | map(select(length > 0) | split("\t"))
+          | {
+              added:   [ .[] | select(.[0] == "added")   | {name: .[1], to: .[3]} ],
+              removed: [ .[] | select(.[0] == "removed") | {name: .[1], from: .[2]} ],
+              changed: [ .[] | select(.[0] == "changed") | {name: .[1], from: .[2], to: .[3]} ],
+              size_delta_mb: ( [ .[] | (.[4] | tonumber) ] | add // 0 | . / 1048576 | . * 100 | round | . / 100 )
+            }'
+  )" || return 1
+
+  # Empty input is a legitimate empty diff. Non-empty input that yielded
+  # nothing is the format having moved under us, and that must not be
+  # indistinguishable from "nothing changed".
+  local parsed
+  parsed="$(printf '%s' "$out" | jq -r '(.added | length) + (.removed | length) + (.changed | length)')"
+  if [ "$parsed" -eq 0 ] && [ -n "$(printf '%s' "$raw" | tr -d '[:space:]')" ]; then
+    return 1
+  fi
+
+  printf '%s' "$out"
+}
+```
+
+Note the first line of the function body: stdin is read once into `raw` (`local raw; raw="$(cat)"`) and the pipeline starts from `printf '%s\n' "$raw"`, not from stdin directly. Streaming would make "no input" and "no matches" indistinguishable, which is precisely the distinction the last test demands.
+
+- [ ] **Step 5: Run the whole suite**
+
+Run: `nix run nixpkgs#bats -- updates/tests/`
+Expected: all 61 existing tests plus the 7 new ones pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add updates/lib/closure.sh updates/tests/closure.bats updates/tests/fixtures/diff-closures.txt
+git commit -m "updates: parsear el diff de closures a JSON"
+```
+
+---
+
+### Task 2: Decide whether a reboot is needed
+
+**Files:**
+- Modify: `updates/lib/closure.sh`
+- Modify: `updates/tests/closure.bats`
+
+**Interfaces:**
+- Consumes: `closure_parse` output from Task 1.
+- Produces: `closure_reboot` — reads a `closure_diff` JSON object on stdin, writes `{reboot_recommended: <bool>, reboot_reason: [<name>, ...]}`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `updates/tests/closure.bats`:
+
+```bash
+@test "closure_reboot flags an nvidia driver change" {
+  # The 2026-08-11 prepared update: same kernel, nvidia-open 595.84 → 595.91.07.
+  # Applying that with `switch` leaves the loaded module out of step with the
+  # new userspace libraries until reboot.
+  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-open\",\"from\":\"595.84-7.1.6\",\"to\":\"595.91.07-7.1.6\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true and (.reboot_reason | index(\"nvidia-open\"))'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot flags a kernel change" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"linux-xanmod\",\"from\":\"6.17.12\",\"to\":\"7.1.6\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot flags mesa" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"mesa\",\"from\":\"25.3.1\",\"to\":\"26.2.0\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == true'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot does not flag ordinary userspace" {
+  run bash -c "echo '{\"changed\":[{\"name\":\"samba\",\"from\":\"4.23.8\",\"to\":\"4.23.10\"},{\"name\":\"kitty\",\"from\":\"\",\"to\":\"\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false and (.reboot_reason == [])'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot does not match a package that merely contains a keyword" {
+  # `nvidia-settings` is a GUI tool and moves with the driver, but on its own it
+  # is not a reason to reboot. Matching on substrings alone would make almost
+  # every nvidia update a reboot, and a recommendation that fires every time
+  # stops being read.
+  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-settings\",\"from\":\"595.84\",\"to\":\"595.91.07\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false'"
+  [ "$status" -eq 0 ]
+}
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/closure.bats`
+Expected: five failures, `closure_reboot: command not found`.
+
+- [ ] **Step 3: Implement**
+
+Append to `updates/lib/closure.sh`:
+
+```bash
+# Which packages, when they move, make `nh os switch` the wrong verb.
+#
+# Exact names, not substrings. `nvidia-open` is the kernel module and matters;
+# `nvidia-settings` is a GUI that ships alongside it and does not. A substring
+# rule would fire on every nvidia update, and an advisory that always fires is
+# an advisory nobody reads. `linux-xanmod` is this machine's kernel — a kernel
+# switch elsewhere would need its own entry, which is the honest trade for not
+# pattern-matching.
+_CLOSURE_REBOOT_PKGS="linux-xanmod initrd-linux-xanmod nvidia-open nvidia-x11 mesa"
+
+# stdin: a closure_diff object. stdout: {reboot_recommended, reboot_reason}.
+closure_reboot() {
+  jq --arg pkgs "$_CLOSURE_REBOOT_PKGS" '
+    ($pkgs | split(" ")) as $watch
+    | [ (.changed // [])[], (.added // [])[], (.removed // [])[] ]
+    | map(.name) | map(select(. as $n | $watch | index($n)))
+    | { reboot_recommended: (length > 0), reboot_reason: . }'
+}
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `nix run nixpkgs#bats -- updates/tests/closure.bats`
+Expected: PASS, 12 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add updates/lib/closure.sh updates/tests/closure.bats
+git commit -m "updates: decidir si la actualizacion pide reinicio"
+```
+
+---
+
+### Task 3: Diff two flake.lock files into changes[]
+
+**Files:**
+- Create: `updates/lib/inputs.sh`
+- Create: `updates/tests/inputs.bats`
+- Create: `updates/tests/fixtures/lock-before.json`, `updates/tests/fixtures/lock-after.json`
+
+**Interfaces:**
+- Produces: `inputs_diff OLD NEW` — two paths to `flake.lock` files. Writes a JSON array of `{name, kind: "input", from, to}`, one per input whose locked revision moved. `from`/`to` are the 7-character short revs. Inputs present in only one file are skipped.
+
+- [ ] **Step 1: Build the fixtures from this repo's real lock**
+
+```bash
+git -C /home/daf3r/nixos-config show c7dec43:flake.lock > updates/tests/fixtures/lock-before.json
+cp /home/daf3r/nixos-config/flake.lock updates/tests/fixtures/lock-after.json
+```
+
+These two differ by the `dms-plugins` input added on 2026-08-11, which makes the "present in only one file" case real rather than invented.
+
+- [ ] **Step 2: Write the failing test**
+
+`updates/tests/inputs.bats`:
+
+```bash
+#!/usr/bin/env bats
+
+setup() {
+  source "${BATS_TEST_DIRNAME}/../lib/inputs.sh"
+  BEFORE="${BATS_TEST_DIRNAME}/fixtures/lock-before.json"
+  AFTER="${BATS_TEST_DIRNAME}/fixtures/lock-after.json"
+}
+
+@test "inputs_diff reports nothing when both sides are the same file" {
+  run bash -c "inputs_diff '$AFTER' '$AFTER' | jq -e '. == []'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff skips an input that exists on only one side" {
+  # dms-plugins was added on 2026-08-11. An input that appeared is not an input
+  # that moved: reporting it as a change with an empty `from` would put a
+  # meaningless row in the panel every time an input is added.
+  run bash -c "inputs_diff '$BEFORE' '$AFTER' | jq -e 'map(.name) | index(\"dms-plugins\") | not'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff reports a moved input with short revs" {
+  jq '.nodes.nixpkgs_3.locked.rev = "0000000000000000000000000000000000000000"' "$AFTER" > "$BATS_TMPDIR/moved.json"
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/moved.json' | jq -e '.[0].to == \"0000000\" and (.[0].from | length) == 7 and .[0].kind == \"input\"'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff names the input, not the internal node key" {
+  # nixpkgs appears in the lock as node `nixpkgs_3` because of follows
+  # resolution. A panel that says "nixpkgs_3 moved" is leaking lock internals.
+  jq '.nodes.nixpkgs_3.locked.rev = "1111111111111111111111111111111111111111"' "$AFTER" > "$BATS_TMPDIR/moved.json"
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/moved.json' | jq -e '.[0].name == \"nixpkgs\"'"
+  [ "$status" -eq 0 ]
+}
+```
+
+- [ ] **Step 3: Run and watch it fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/inputs.bats`
+Expected: four failures, `inputs_diff: command not found`.
+
+- [ ] **Step 4: Implement**
+
+`updates/lib/inputs.sh`:
+
+```bash
+# shellcheck shell=bash
+#
+# What moved between two flake.lock files.
+#
+# The engine used to report this as nothing at all: the first real run moved six
+# inputs and status.json named none of them. Reading the lock is the reliable
+# source — `nix flake update`'s own stdout is prose meant for a human and it
+# changes between nix versions.
+#
+# Node keys are not input names. The root node's `inputs` map holds the real
+# names and points at node keys, and follows-resolution routinely produces keys
+# like `nixpkgs_3`. This resolves through that map so the reader sees `nixpkgs`.
+
+# $1 old lock, $2 new lock. stdout: JSON array of {name, kind, from, to}.
+inputs_diff() {
+  jq -n --slurpfile old "$1" --slurpfile new "$2" '
+    def revs($lock):
+      ($lock.nodes[$lock.root].inputs // {})
+      | with_entries(.value = ($lock.nodes[(.value | if type == "array" then .[0] else . end)].locked.rev // ""));
+
+    revs($old[0]) as $o | revs($new[0]) as $n
+    | [ $o | keys[]
+        | select($n[.] != null and $o[.] != null)
+        | select($o[.] != $n[.])
+        | select($o[.] != "" and $n[.] != "")
+        | {name: ., kind: "input", from: ($o[.][0:7]), to: ($n[.][0:7])} ]'
+}
+```
+
+- [ ] **Step 5: Run the tests**
+
+Run: `nix run nixpkgs#bats -- updates/tests/inputs.bats`
+Expected: PASS, 4 tests.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add updates/lib/inputs.sh updates/tests/inputs.bats updates/tests/fixtures/lock-before.json updates/tests/fixtures/lock-after.json
+git commit -m "updates: sacar del lock que inputs se movieron"
+```
+
+---
+
+### Task 4: Emit schema 2
+
+**Files:**
+- Modify: `updates/bump-brave-origin.sh` (the two `echo` lines at the end)
+- Modify: `updates/bump-t3code-app.sh` (same)
+- Modify: `updates/lib/status.sh:81`
+- Modify: `updates/nixos-upd.sh` (around `:356`, `:500` and the `ready_body` block at `:540`)
+- Modify: `updates/upd.sh:43` and the `ready)` arm at `:135`
+- Modify: `updates/tests/status.bats`
+- Modify: `updates/tests/upd.bats`
+- Modify: `updates.nix` (add the two new lib files to the derivation)
+
+**Interfaces:**
+- Consumes: `closure_parse`, `closure_reboot` (Task 1, 2), `inputs_diff` (Task 3).
+- Produces: `status.json` with `schema: 2`, carrying `changes[]`, `closure_diff`, `reboot_recommended`, `reboot_reason`. `local_pkgs` is gone.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `updates/tests/status.bats`, change every `jq -e '.schema == 1'` to `== 2`. Then append:
+
+```bash
+@test "status_write still refuses a body that would forge the envelope" {
+  # The envelope must win over the body — unchanged from schema 1, retested
+  # because the schema bump touches that exact jq expression.
+  status_write "$WORK/s.json" "ready" '{"schema":99,"state":"current"}'
+  jq -e '.schema == 2 and .state == "ready"' "$WORK/s.json"
+}
+```
+
+In `updates/tests/upd.bats`, add:
+
+```bash
+@test "upd show refuses a schema 1 status file" {
+  # The reader and the engine ship in the same derivation, so the only way
+  # these disagree is a stale upd earlier on $PATH. It must say so rather than
+  # render a file whose fields it is about to misread.
+  echo '{"schema":1,"state":"ready","checked_at":"x","warnings":[]}' > "$STATE_DIR/status.json"
+  run upd_main show
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema 1"* ]]
+}
+
+@test "upd show lists changes[] instead of local_pkgs" {
+  cat > "$STATE_DIR/status.json" <<'JSON'
+{"schema":2,"state":"ready","checked_at":"x","warnings":[],"unmanaged":[],
+ "branch":"auto/update","build":{"ok":true,"log":"/dev/null"},
+ "changes":[{"name":"nixpkgs","kind":"input","from":"abc1234","to":"def5678"}],
+ "closure_diff":{"added":[],"removed":[],"changed":[],"size_delta_mb":0},
+ "reboot_recommended":false,"reboot_reason":[]}
+JSON
+  run upd_main show
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nixpkgs"* ]]
+  [[ "$output" == *"abc1234"* ]]
+}
+
+@test "upd show announces a recommended reboot" {
+  cat > "$STATE_DIR/status.json" <<'JSON'
+{"schema":2,"state":"ready","checked_at":"x","warnings":[],"unmanaged":[],
+ "branch":"auto/update","build":{"ok":true,"log":"/dev/null"},"changes":[],
+ "closure_diff":{"added":[],"removed":[],"changed":[],"size_delta_mb":0},
+ "reboot_recommended":true,"reboot_reason":["nvidia-open"]}
+JSON
+  run upd_main show
+  [[ "$output" == *"nvidia-open"* ]]
+  [[ "$output" == *"reinicio"* ]]
+}
+```
+
+If `upd.bats` does not already expose the script as `upd_main` with a settable `STATE_DIR`, match whatever harness the existing tests in that file use — read it first and follow it rather than introducing a second style.
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/`
+Expected: the schema assertions and the three new `upd` tests fail; everything else passes.
+
+- [ ] **Step 3: Bump the schema**
+
+`updates/lib/status.sh:81`, in the `jq -n` envelope: `{schema: 1, ...}` becomes `{schema: 2, ...}`. Update the comment block at the top of the file, which currently says the reader is "a future reader (the phase-2 Noctalia bar plugin)" — it is now the DMS plugin in `updates/dms-plugin/`.
+
+`updates/upd.sh:43`: `SCHEMA=2`.
+
+- [ ] **Step 4: Make the bump scripts emit JSON**
+
+In `updates/bump-t3code-app.sh`, replace the two `echo` lines:
+
+```bash
+# was: echo "t3code-app $current (current)"
+jq -nc --arg f "$current" --arg t "$current" \
+  '{name: "t3code-app", kind: "local_pkg", from: $f, to: $t}'
+exit 0
+```
+
+```bash
+# was: echo "t3code-app $current -> $latest"
+jq -nc --arg f "$current" --arg t "$latest" \
+  '{name: "t3code-app", kind: "local_pkg", from: $f, to: $t}'
+```
+
+Do the same in `updates/bump-brave-origin.sh` with `"brave-origin"`. A package that is already current reports `from == to`; the reader treats that as "no change" rather than needing a separate flag.
+
+- [ ] **Step 5: Compose the new body**
+
+In `updates/nixos-upd.sh`:
+
+At `:356` and `:360`, the failure fallbacks currently assign prose. They become JSON objects so the body is uniform even when a bump fails:
+
+```bash
+if ! brave_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
+  brave_json='{"name":"brave-origin","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
+  warn brave_bump_failed "bump-brave-origin.sh failed; see $LOG"
+fi
+```
+
+Same shape for t3code. Note this adds a `warn` call that the prose version did not have — a failed bump was previously visible only as the words "(bump failed)" inside a string.
+
+Before the flake update runs, save the old lock so Task 3's function has something to compare against. Add right after the clone is in place:
+
+```bash
+cp "$WT/flake.lock" "$STATE_DIR/lock.before" 2>>"$LOG" \
+  || warn lock_snapshot_failed "could not snapshot flake.lock; the input change list will be empty"
+```
+
+After the diff at `:500`, add the parse:
+
+```bash
+closure_json='{"added":[],"removed":[],"changed":[],"size_delta_mb":0}'
+if ! closure_json="$(printf '%s\n' "$diff_txt" | closure_parse)"; then
+  warn closure_parse_failed "could not parse the closure diff; the change list will be empty. nix store diff-closures may have changed format"
+  closure_json='{"added":[],"removed":[],"changed":[],"size_delta_mb":0}'
+fi
+reboot_json="$(printf '%s' "$closure_json" | closure_reboot)"
+
+inputs_json='[]'
+if [ -f "$STATE_DIR/lock.before" ]; then
+  inputs_json="$(inputs_diff "$STATE_DIR/lock.before" "$WT/flake.lock")" || inputs_json='[]'
+fi
+```
+
+Then replace the `ready_body` block at `:540`:
+
+```bash
+ready_body="$(jq -n \
+  --argjson brave "$brave_json" \
+  --argjson t3 "$t3code_json" \
+  --argjson inputs "$inputs_json" \
+  --argjson closure "$closure_json" \
+  --argjson reboot "$reboot_json" \
+  --arg log "$LOG" \
+  --argjson warnings "$warnings" \
+  --argjson unmanaged "$unmanaged" \
+  '{build: {ok: true, log: $log},
+    branch: "auto/update",
+    changes: ($inputs + [$brave, $t3]),
+    closure_diff: $closure,
+    warnings: $warnings,
+    unmanaged: $unmanaged} + $reboot')" \
+  || fail check_failed "the update is prepared but its status body could not be rendered"
+```
+
+Source the new libraries wherever the existing `lib/*.sh` are sourced near the top of the file.
+
+- [ ] **Step 6: Render it in `upd show`**
+
+In `updates/upd.sh`, the `ready)` arm replaces the `local_pkgs` line:
+
+```bash
+      ready)
+        echo "hay una actualizacion preparada en la rama $(jq -r '.branch // "auto/update"' "$STATUS")"
+        jq -r '.changes[]? | select(.from != .to)
+               | "  " + .name + " " + (if .from == "" then "(nuevo)" else .from end)
+                 + " -> " + (if .to == "" then "(fuera)" else .to end)' "$STATUS"
+        jq -r '.closure_diff? | select(. != null)
+               | "  " + ((.changed | length) | tostring) + " paquetes cambian, "
+                 + ((.added | length) | tostring) + " entran, "
+                 + ((.removed | length) | tostring) + " salen ("
+                 + (.size_delta_mb | tostring) + " MB)"' "$STATUS"
+        if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
+          echo
+          echo "  ESTO PIDE REINICIO: $(jq -r '.reboot_reason | join(", ")' "$STATUS")"
+          echo "  aplicar con \`upd apply --boot\` y reiniciar, no con switch en caliente."
+        fi
+        print_unmanaged
+        ;;
+```
+
+- [ ] **Step 7: Package the new files**
+
+In `updates.nix`, the derivation copies `updates/lib/*.sh` into the store. Read the `installPhase` and confirm whether it globs or lists files individually. If it lists them, add `closure.sh` and `inputs.sh`. If it globs, verify with:
+
+```bash
+nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link 2>&1 | tail -5
+bash -c 'ls $(dirname $(readlink -f $(which nixos-upd)))/../lib/' 2>/dev/null || true
+```
+
+The suite runs inside the build, so a missing library file fails the build rather than failing at 07:32 tomorrow.
+
+- [ ] **Step 8: Run everything**
+
+Run: `nix run nixpkgs#bats -- updates/tests/`
+Expected: PASS, all tests.
+
+- [ ] **Step 9: Run the engine for real and read its output**
+
+```bash
+upd check && upd show && jq '.schema, .changes, .reboot_recommended' /var/lib/nixos-upd/status.json
+```
+
+Expected: `schema` is 2, `changes` is a non-empty array of objects, `reboot_recommended` is `true` (the prepared update moves `nvidia-open`, verified 2026-08-11). A test cannot catch a real-format surprise; this step is what does.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add updates/ updates.nix
+git commit -m "updates: status.json pasa a schema 2, con los cambios en estructura"
+```
+
+---
+
+### Task 5: `upd status --json`
+
+**Files:**
+- Modify: `updates/upd.sh` (new `status` case in the `case "$cmd"` block)
+- Modify: `updates/tests/upd.bats`
+
+**Interfaces:**
+- Produces: `upd status --json` on stdout — the `status.json` object plus `blockers: [{code, detail}]`. Exit 0 whenever it could produce an object, including when blockers exist; exit 1 only if the status file is unreadable or of an unknown schema.
+
+- [ ] **Step 1: Write the failing tests**
+
+```bash
+@test "upd status --json reports a dirty tree as a blocker" {
+  touch "$REPO/scratch.txt"
+  run upd_main status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+}
+
+@test "upd status --json reports the wrong branch as a blocker" {
+  git -C "$REPO" switch -c experimento
+  run upd_main status --json
+  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
+}
+
+@test "upd status --json has no blockers on a clean main" {
+  run upd_main status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers == []'
+}
+
+@test "upd status --json reports a pending reboot" {
+  # A `boot` apply does not move /run/current-system, so the next check would
+  # report `ready` again and the same update would be applied twice.
+  _UPD_BOOTED_SYSTEM="$BATS_TMPDIR/a" _UPD_CURRENT_SYSTEM="$BATS_TMPDIR/b" \
+    run upd_main status --json
+  echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
+}
+
+@test "upd status --json passes the engine's own message through" {
+  touch "$REPO/scratch.txt"
+  run upd_main status --json
+  echo "$output" | jq -e '.blockers[] | select(.code == "dirty_tree") | .detail | length > 0'
+}
+```
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
+Expected: five failures — `upd` prints its usage and exits 1 on the unknown `status` command.
+
+- [ ] **Step 3: Implement**
+
+Add to `updates/upd.sh` before the `*)` arm. The two `_UPD_*_SYSTEM` variables exist so the reboot check is testable without a second generation:
+
+```bash
+  status)
+    # The plugin's only entry point. It exists rather than letting the plugin
+    # read status.json because two of the conditions that stop an apply are not
+    # in that file and cannot be: the state of the user's working tree, and the
+    # branch it has checked out. Both change long after the nightly run wrote
+    # its status, and today they surface only as an exit 1 from `apply` — fine
+    # for a command, useless for a panel whose button would be doomed before it
+    # is drawn.
+    [ "${2:-}" = "--json" ] || die "uso: upd status --json"
+    [ -f "$STATUS" ] || die "no hay ninguna comprobacion todavia"
+    require_readable_status
+
+    blockers='[]'
+    add_blocker() { # $1 code, $2 detail
+      blockers="$(printf '%s' "$blockers" | jq -c --arg c "$1" --arg d "$2" '. + [{code: $c, detail: $d}]')"
+    }
+
+    if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=normal --ignore-submodules=none 2>/dev/null)" ]; then
+      add_blocker dirty_tree "el arbol de trabajo tiene cambios sin commitear; no aplico"
+    fi
+
+    cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)" || cur_branch=""
+    if [ -z "$cur_branch" ]; then
+      add_blocker wrong_branch "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
+    elif [ "$cur_branch" != "$BRANCH" ]; then
+      add_blocker wrong_branch "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'"
+    fi
+
+    if ! (exec 9>"$STATE_DIR/lock" && flock -n 9) 2>/dev/null; then
+      add_blocker engine_running "hay una comprobacion en marcha ahora mismo"
+    fi
+
+    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/nix/var/nix/profiles/system}" 2>/dev/null || true)"
+    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null || true)"
+    if [ -n "$booted" ] && [ -n "$current" ] && [ "$booted" != "$current" ]; then
+      add_blocker pending_reboot "ya hay una generacion aplicada para el proximo arranque; reinicia antes de aplicar otra"
+    fi
+
+    jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"
+    ;;
+```
+
+Add `status` to the usage text in the `*)` arm and to the `--help` output.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
+Expected: PASS.
+
+- [ ] **Step 5: Verify against the live machine**
+
+```bash
+upd status --json | jq '.state, .reboot_recommended, .blockers'
+```
+
+Expected: `blockers` is `[]` on a clean main. Then dirty the tree with `touch ~/nixos-config/borrame.txt`, run it again, confirm `dirty_tree` appears, and `rm ~/nixos-config/borrame.txt`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add updates/upd.sh updates/tests/upd.bats
+git commit -m "upd: subcomando status --json con los bloqueos en vivo"
+```
+
+---
+
+### Task 6: Split `apply` into its two halves
+
+**Files:**
+- Modify: `updates/upd.sh` (the `apply)` arm)
+- Modify: `updates/tests/upd.bats`
+
+**Interfaces:**
+- Produces: `upd apply --ff-only` — every guard the current `apply` runs, plus the fast-forward, and then stops without calling `nh`. Bare `upd apply` keeps its current behaviour exactly: guards, fast-forward, `nh os switch`. New `upd apply --boot` does the same with `nh os boot`.
+
+- [ ] **Step 1: Write the failing tests**
+
+```bash
+@test "upd apply --ff-only fast-forwards and does not switch" {
+  run upd_main apply --ff-only
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$WT" rev-parse auto/update)" ]
+  [ ! -f "$BATS_TMPDIR/nh-was-called" ]
+}
+
+@test "upd apply --ff-only refuses a dirty tree exactly like apply does" {
+  touch "$REPO/scratch.txt"
+  run upd_main apply --ff-only
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"sin commitear"* ]]
+}
+
+@test "upd apply --boot calls nh os boot, not switch" {
+  run upd_main apply --boot
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$BATS_TMPDIR/nh-was-called")" == *"boot"* ]]
+}
+```
+
+The existing `upd.bats` already stubs `nh` — reuse that stub and have it record its arguments to `$BATS_TMPDIR/nh-was-called`. Read the file first; do not add a second stubbing mechanism.
+
+- [ ] **Step 2: Run and watch them fail**
+
+Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
+Expected: the three new tests fail; `--ff-only` and `--boot` are treated as an unknown command.
+
+- [ ] **Step 3: Implement**
+
+In the `apply)` arm, parse the mode at the top and gate only the last two lines:
+
+```bash
+  apply)
+    mode="switch"
+    case "${2:-}" in
+      --ff-only) mode="ff-only" ;;
+      --boot)    mode="boot" ;;
+      "")        mode="switch" ;;
+      *)         die "uso: upd apply [--boot|--ff-only]" ;;
+    esac
+```
+
+Everything from the tool preflight down to `git -C "$REPO" merge --ff-only "$target"` is unchanged. Replace the final `nh os switch "$REPO"` with:
+
+```bash
+    # --ff-only exists for the bar plugin: the repository half runs as daf3r,
+    # and the root half is a systemd unit started separately. Doing the merge as
+    # root would leave root-owned objects in .git and break the next commit made
+    # by hand.
+    if [ "$mode" = "ff-only" ]; then
+      echo "fast-forward hecho; no aplico (--ff-only)"
+      exit 0
+    fi
+    nh os "$mode" "$REPO"
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `nix run nixpkgs#bats -- updates/tests/`
+Expected: PASS, including every pre-existing apply guard test — those are the regression surface for this change.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add updates/upd.sh updates/tests/upd.bats
+git commit -m "upd: apply --ff-only y apply --boot"
+```
+
+---
+
+### Task 7: The root unit and the polkit rules
+
+**Files:**
+- Modify: `updates.nix`
+
+**Interfaces:**
+- Produces: `nixos-upd-apply@switch.service` and `nixos-upd-apply@boot.service`, startable by daf3r with a password prompt. `nixos-upd.service` startable by daf3r with no prompt.
+
+- [ ] **Step 1: Add the unit**
+
+In `updates.nix`, alongside the existing `systemd.services.nixos-upd`:
+
+```nix
+  # The root half of an apply. It does one thing: activate. The git
+  # fast-forward has already happened, as daf3r, via `upd apply --ff-only` --
+  # if root did the merge, .git would end up with root-owned objects and the
+  # user's next commit would fail.
+  #
+  # A unit rather than a child of the shell, so a `dms restart` in the middle of
+  # a twenty-minute switch does not orphan it and its result stays queryable
+  # afterwards. Instance name is the nh verb, and nothing else is accepted.
+  systemd.services."nixos-upd-apply@" = {
+    description = "Apply the prepared system update (%i)";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.writeShellScript "nixos-upd-apply" ''
+        set -euo pipefail
+        case "$1" in
+          switch|boot) ;;
+          *) echo "nixos-upd-apply: unknown mode '$1'" >&2; exit 1 ;;
+        esac
+        exec ${pkgs.nh}/bin/nh os "$1" /home/daf3r/nixos-config
+      ''} %i";
+      # nh shells out to nix, which needs these on a system unit's minimal PATH.
+      Environment = "PATH=/run/current-system/sw/bin:/run/wrappers/bin";
+    };
+  };
+```
+
+Verify the `nh` attribute name against the pinned nixpkgs before building — if `pkgs.nh` does not exist under that name the build fails loudly, which is the desired failure.
+
+- [ ] **Step 2: Add the polkit rules**
+
+```nix
+  # Two levels on purpose.
+  #
+  # The check only builds -- it can never change the running system -- so
+  # demanding a password for it is friction with nothing bought. The apply gets
+  # auth_admin every time, and deliberately NOT auth_admin_keep: a five-minute
+  # grace period on the one action that changes the system is exactly what we do
+  # not want.
+  #
+  # A polkit rule can be syntactically fine and silently authorise nothing --
+  # that already happened on this machine with gamemode. The acceptance test is
+  # starting the unit and seeing the prompt, not reading this block.
+  security.polkit.extraConfig = '''
+    polkit.addRule(function(action, subject) {
+      if (action.id != "org.freedesktop.systemd1.manage-units") return undefined;
+      if (subject.user != "daf3r") return undefined;
+      var unit = action.lookup("unit");
+      if (unit == "nixos-upd.service") return polkit.Result.YES;
+      if (unit == "nixos-upd-apply@switch.service" ||
+          unit == "nixos-upd-apply@boot.service") return polkit.Result.AUTH_ADMIN;
+      return undefined;
+    });
+  ''';
+```
+
+(The `'''` above is this document's quoting; in the `.nix` file use Nix's `''` string delimiters.)
+
+- [ ] **Step 3: Build**
+
+Run: `nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link`
+Expected: builds. A red bats suite or a missing `pkgs.nh` stops it here.
+
+- [ ] **Step 4: Apply and verify by hand — this is the acceptance test**
+
+The switch must be run by daf3r (needs root):
+
+```bash
+nh os switch ~/nixos-config
+```
+
+Then, with the graphical session running:
+
+```bash
+systemctl start nixos-upd.service
+```
+
+Expected: **no prompt**, the unit runs, `systemctl status nixos-upd.service` shows it executed.
+
+```bash
+systemctl start nixos-upd-apply@boot.service
+```
+
+Expected: the **DMS polkit modal appears** asking for a password. Cancel it. Confirm with `systemctl is-active nixos-upd-apply@boot.service` that it did not run, and that `readlink /nix/var/nix/profiles/system` is unchanged.
+
+If no modal appears, the rule did not take effect — check `journalctl -u polkit -b` and do not proceed to Task 8 until it does. A silently-ineffective polkit rule is the known failure mode here.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add updates.nix
+git commit -m "updates: unidad de apply con root y reglas polkit acotadas"
+```
+
+---
+
+### Task 8: The plugin's pure logic
+
+**Files:**
+- Create: `updates/dms-plugin/logic.js`
+- Create: `updates/dms-plugin/tests/logic.test.js`
+
+**Interfaces:**
+- Produces:
+  - `classify(status)` → `{state, icon, tone, summary}` where `tone` is one of `"ok" | "ready" | "warn" | "error" | "unknown"`.
+  - `buttonFor(status)` → `{label, action, enabled, reason}` where `action` is `"apply" | "apply-boot" | "check" | "none"`.
+  - `changeLines(status)` → array of `{name, text}` for the panel.
+
+- [ ] **Step 1: Write the failing tests**
+
+`updates/dms-plugin/tests/logic.test.js`:
+
+```javascript
+const { test } = require('node:test')
+const assert = require('node:assert')
+const { classify, buttonFor, changeLines } = require('../logic.js')
+
+const ready = {
+  schema: 2, state: 'ready', checked_at: '2026-08-11T06:41:49-06:00',
+  warnings: [], blockers: [], reboot_recommended: false, reboot_reason: [],
+  changes: [{ name: 'nixpkgs', kind: 'input', from: 'abc1234', to: 'def5678' }],
+  closure_diff: { added: [], removed: [], changed: [], size_delta_mb: 1.5 },
+}
+
+test('a ready update offers to apply', () => {
+  const b = buttonFor(ready)
+  assert.equal(b.action, 'apply')
+  assert.equal(b.enabled, true)
+})
+
+test('a reboot-recommended update offers boot, never switch', () => {
+  const b = buttonFor({ ...ready, reboot_recommended: true, reboot_reason: ['nvidia-open'] })
+  assert.equal(b.action, 'apply-boot')
+})
+
+test('ready with warnings is visually distinct from ready without', () => {
+  const clean = classify(ready)
+  const warned = classify({ ...ready, warnings: [{ code: 'x', detail: 'y' }] })
+  assert.notEqual(clean.tone, warned.tone)
+})
+
+test('a blocker disables the button and says why', () => {
+  const b = buttonFor({ ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' }] })
+  assert.equal(b.enabled, false)
+  assert.match(b.reason, /sin commitear/)
+})
+
+test('an unknown schema is unknown, never healthy', () => {
+  const c = classify({ schema: 99, state: 'ready' })
+  assert.equal(c.tone, 'unknown')
+  assert.notEqual(c.tone, 'ok')
+})
+
+test('a null status is unknown, never up to date', () => {
+  // The failure that matters: upd not on PATH, the state dir unreadable, the
+  // process killed. Rendering that as "todo al dia" would recreate, in the most
+  // visible place on the screen, the exact failure the engine exists to remove.
+  const c = classify(null)
+  assert.equal(c.tone, 'unknown')
+})
+
+test('build_failed is an error, not a ready', () => {
+  assert.equal(classify({ ...ready, state: 'build_failed' }).tone, 'error')
+})
+
+test('changeLines skips entries whose version did not move', () => {
+  const lines = changeLines({ ...ready, changes: [
+    ...ready.changes,
+    { name: 'brave-origin', kind: 'local_pkg', from: '1.93.134', to: '1.93.134' },
+  ]})
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].name, 'nixpkgs')
+})
+
+test('changeLines renders an added and a removed package readably', () => {
+  const lines = changeLines({ ...ready, changes: [
+    { name: 'nuevo', kind: 'input', from: '', to: 'abc1234' },
+  ]})
+  assert.match(lines[0].text, /abc1234/)
+})
+```
+
+- [ ] **Step 2: Run and watch it fail**
+
+Run: `nix develop ~/nixos-config#dms-plugins -c node --test updates/dms-plugin/tests/logic.test.js`
+Expected: `Cannot find module '../logic.js'`.
+
+- [ ] **Step 3: Implement**
+
+`updates/dms-plugin/logic.js`:
+
+```javascript
+// Pure decisions for the bar plugin. No QML, no I/O — everything here is
+// testable with `node --test`, which is the only part of a QML plugin that can
+// be tested at all. Daemon.qml calls these and does nothing else with the data.
+
+const SCHEMA = 2
+
+// The rule the whole engine is built around: an incomplete or unreadable state
+// must never render like a healthy one. Every early return here lands on
+// 'unknown', never on 'ok'.
+function classify(status) {
+  if (!status || typeof status !== 'object') {
+    return { state: 'unknown', icon: 'help', tone: 'unknown', summary: 'no se pudo leer el estado' }
+  }
+  if (status.schema !== SCHEMA) {
+    return { state: 'unknown', icon: 'help', tone: 'unknown',
+             summary: `status.json declara schema ${status.schema}, y este plugin entiende ${SCHEMA}` }
+  }
+  const warned = Array.isArray(status.warnings) && status.warnings.length > 0
+  switch (status.state) {
+    case 'current':
+      return { state: 'current', icon: 'check_circle', tone: warned ? 'warn' : 'ok',
+               summary: 'todo al dia' }
+    case 'ready':
+      return { state: 'ready', icon: 'system_update_alt', tone: warned ? 'warn' : 'ready',
+               summary: `${changeLines(status).length} cambios preparados` }
+    case 'build_failed':
+      return { state: 'build_failed', icon: 'error', tone: 'error',
+               summary: 'la actualizacion preparada NO compila' }
+    case 'check_failed':
+      return { state: 'check_failed', icon: 'error', tone: 'error',
+               summary: status.error || 'la comprobacion fallo' }
+    default:
+      return { state: 'unknown', icon: 'help', tone: 'unknown',
+               summary: `estado desconocido: ${status.state}` }
+  }
+}
+
+function buttonFor(status) {
+  const c = classify(status)
+  if (c.tone === 'unknown') {
+    return { label: 'Sin estado', action: 'none', enabled: false, reason: c.summary }
+  }
+  if (status.state !== 'ready') {
+    return { label: 'Comprobar ahora', action: 'check', enabled: true, reason: '' }
+  }
+  const blockers = Array.isArray(status.blockers) ? status.blockers : []
+  if (blockers.length > 0) {
+    // The engine's own wording, passed through untouched. Rewording it here
+    // would mean maintaining two descriptions of the same refusal.
+    return { label: 'Aplicar', action: 'none', enabled: false,
+             reason: blockers.map(b => b.detail).join('; ') }
+  }
+  return status.reboot_recommended
+    ? { label: 'Aplicar al arrancar', action: 'apply-boot', enabled: true,
+        reason: `pide reinicio: ${(status.reboot_reason || []).join(', ')}` }
+    : { label: 'Aplicar', action: 'apply', enabled: true, reason: '' }
+}
+
+function changeLines(status) {
+  if (!status || !Array.isArray(status.changes)) return []
+  return status.changes
+    .filter(c => c.from !== c.to)
+    .map(c => ({
+      name: c.name,
+      text: `${c.from || '(nuevo)'} → ${c.to || '(fuera)'}`,
+    }))
+}
+
+module.exports = { classify, buttonFor, changeLines, SCHEMA }
+```
+
+- [ ] **Step 4: Run the tests**
+
+Run: `nix develop ~/nixos-config#dms-plugins -c node --test updates/dms-plugin/tests/logic.test.js`
+Expected: PASS, 9 tests.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add updates/dms-plugin/
+git commit -m "plugin: la logica pura del widget, con sus pruebas"
+```
+
+---
+
+### Task 9: The bar item
+
+**Files:**
+- Create: `updates/dms-plugin/plugin.json`, `updates/dms-plugin/Daemon.qml`, `updates/dms-plugin/Widget.qml`
+- Modify: `dms.nix`
+
+**Interfaces:**
+- Consumes: `logic.js` from Task 8, `upd status --json` from Task 5.
+- Produces: a bar item that shows state. No buttons yet — Task 10 adds the panel.
+
+- [ ] **Step 1: Write the manifest**
+
+`updates/dms-plugin/plugin.json`:
+
+```json
+{
+    "id": "nixosUpd",
+    "name": "NixOS updates",
+    "description": "The nightly prepared system update, and the button that applies it",
+    "version": "0.1.0",
+    "author": "daf3r",
+    "type": "composite",
+    "icon": "system_update_alt",
+    "capabilities": ["dankbar-widget"],
+    "components": {
+        "daemon": "./Daemon.qml",
+        "widget": "./Widget.qml"
+    },
+    "permissions": ["process"],
+    "requires_dms": ">=1.5.0"
+}
+```
+
+`permissions` is decorative in DMS 1.5.3 — `PluginService.qml:295-302` stores it and three settings screens display it, nothing enforces it. Declared honestly anyway, because the panel that shows it to the user is the only audit surface there is.
+
+- [ ] **Step 2: Write the daemon**
+
+`updates/dms-plugin/Daemon.qml`:
+
+```qml
+import QtQuick
+import Quickshell
+import Quickshell.Io
+import qs.Modules.Plugins
+import "./logic.js" as Logic
+
+// The daemon surface runs ONCE for the whole shell. The widget surface is
+// instantiated once PER SCREEN, and this machine has two — claude-usage learned
+// that the expensive way, giving itself a 429 by doing I/O in the pill. So
+// every process, timer and file read lives here, and the widget only paints
+// what this publishes through the global var.
+PluginComponent {
+    id: root
+
+    property int pollIntervalMs: 60000
+
+    // The channel to the widget. Same varName on both sides. It carries the
+    // already-classified view rather than the raw status: classify() is the
+    // decision, and running it once here beats running it per screen.
+    PluginGlobalVar {
+        id: updState
+        varName: "updState"
+        defaultValue: ({ view: Logic.classify(null), status: null, applying: false, lastError: "" })
+    }
+
+    function publish(status, applying, lastError) {
+        updState.set({
+            view: Logic.classify(status),
+            status: status,
+            applying: applying,
+            lastError: lastError,
+        })
+    }
+
+    function poll() {
+        statusProc.running = true
+    }
+
+    Process {
+        id: statusProc
+        command: ["upd", "status", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                var parsed = null
+                try {
+                    parsed = JSON.parse(text)
+                } catch (e) {
+                    parsed = null   // stays null: classify() renders it unknown
+                }
+                root.publish(parsed, false, "")
+            }
+        }
+        onExited: (code, st) => {
+            // A non-zero exit means upd refused to answer — unreadable status,
+            // unknown schema, or not on PATH. Publishing null is the honest
+            // outcome; the one thing forbidden is leaving the last good state
+            // on screen as though it were current.
+            if (code !== 0)
+                root.publish(null, false, "")
+        }
+    }
+
+    Timer {
+        interval: root.pollIntervalMs
+        repeat: true
+        running: true
+        triggeredOnStart: true
+        onTriggered: root.poll()
+    }
+}
+```
+
+Check the `import qs.Modules.Plugins` line against `claude-usage/Daemon.qml:75` and use whatever import that file uses for `PluginComponent` — it is the working reference on this machine.
+
+- [ ] **Step 3: Write the widget**
+
+`updates/dms-plugin/Widget.qml`. It paints and nothing else — no `Process`, no
+`Timer`, no file access, for the per-screen reason in the daemon's header
+comment:
+
+```qml
+import QtQuick
+import qs.Common
+import qs.Widgets
+import qs.Modules.Plugins
+
+PluginComponent {
+    id: root
+
+    PluginGlobalVar {
+        id: updState
+        varName: "updState"     // same name the daemon publishes under
+    }
+
+    readonly property var view: updState.value && updState.value.view
+        ? updState.value.view
+        : { state: "unknown", icon: "help", tone: "unknown", summary: "" }
+
+    // The tone→colour map is the whole point of the bar item. `ready` and
+    // `warn` MUST be different here and not only inside the panel: upd.sh makes
+    // the same distinction in its heading, because a ready carrying warnings
+    // that looks identical to a clean one leaves reading them to chance.
+    readonly property color toneColor: {
+        switch (view.tone) {
+        case "ok":      return Theme.surfaceVariantText
+        case "ready":   return Theme.primary
+        case "warn":    return Theme.warning
+        case "error":   return Theme.error
+        default:        return Theme.surfaceVariantText
+        }
+    }
+
+    horizontalBarPill: Component {
+        Row {
+            spacing: Theme.spacingXS
+            DankIcon {
+                name: root.view.icon
+                color: root.toneColor
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            StyledText {
+                text: root.view.state === "ready" ? root.view.summary : ""
+                color: root.toneColor
+                font.pixelSize: Theme.fontSizeSmall
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+    }
+
+    popoutContent: Component {
+        Popout {}
+    }
+}
+```
+
+Read `claude-usage/Widget.qml:95-250` before writing this and match its actual
+property names for the pill components and the imports — that file is the
+working reference on this machine, and DMS's plugin API is not documented
+anywhere else. If it declares both a horizontal and a vertical pill, declare
+both here too rather than leaving the vertical bar broken.
+
+- [ ] **Step 4: Declare it**
+
+In `dms.nix`, next to the `plugins.claude-usage` block:
+
+```nix
+    # The bar half of the update engine in ./updates. Unlike claude-usage this
+    # is NOT a flake input: a path relative to this flake's own tree is fine
+    # under pure evaluation -- what fails is an absolute path -- so the engine
+    # and its reader move in the same commit and iterating costs one switch,
+    # with no push and no `nix flake update`.
+    plugins.nixos-upd = {
+      enable = true;
+      src = ./updates/dms-plugin;
+    };
+```
+
+- [ ] **Step 5: Build, switch, and look at the bar**
+
+```bash
+nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link
+nh os switch ~/nixos-config   # daf3r runs this
+journalctl --user -u dms.service -f | grep -i nixosUpd
+```
+
+Expected: `DankBar: Plugin loaded: nixosUpd` and `Daemon plugin loaded: nixosUpd`, and the icon appears in the bar showing the real current state. This is the step that catches a QML error, which no unit test can.
+
+- [ ] **Step 6: Verify the unknown path by breaking it on purpose**
+
+```bash
+chmod 000 /var/lib/nixos-upd/status.json
+```
+
+Expected: within a minute the bar shows the unknown state, **not** "todo al dia". Then `chmod 600 /var/lib/nixos-upd/status.json` and confirm it recovers.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add updates/dms-plugin/ dms.nix
+git commit -m "plugin: el icono de estado en la barra"
+```
+
+---
+
+### Task 10: The panel and the apply
+
+**Files:**
+- Create: `updates/dms-plugin/Popout.qml`
+- Modify: `updates/dms-plugin/plugin.json` (register the popout), `updates/dms-plugin/Daemon.qml` (the actions)
+
+**Interfaces:**
+- Consumes: `buttonFor`, `changeLines` (Task 8); `upd apply --ff-only` (Task 6); `nixos-upd-apply@*.service` (Task 7).
+
+- [ ] **Step 1: Add the actions to the daemon**
+
+First, replace Task 9's `publish(status, applying, lastError)` with the
+`lastStatus` property and `republish()` below — one function reading three
+properties, rather than a signature that grows an argument every time the daemon
+gains a piece of state. Update `statusProc`'s two call sites accordingly:
+`root.lastStatus = parsed; root.republish()` on success, and
+`root.lastStatus = null; root.republish()` on a non-zero exit.
+
+Then add to `Daemon.qml`:
+
+```qml
+    // Two processes, because they are two different failure domains. The
+    // fast-forward runs as daf3r and either succeeds or prints exactly why not;
+    // only if it succeeded does the root half start. Chaining them into one
+    // shell line would lose which of the two failed.
+    // Mirrors of what publish() sends to the widget. Kept as properties so the
+    // process handlers below have somewhere to write before republishing.
+    property string lastError: ""
+    property bool applying: false
+    property var lastStatus: null
+
+    function republish() {
+        updState.set({
+            view: Logic.classify(root.lastStatus),
+            status: root.lastStatus,
+            applying: root.applying,
+            lastError: root.lastError,
+        })
+    }
+
+    function apply(mode) {   // mode: "switch" | "boot"
+        root.lastError = ""
+        root.applying = true
+        root.republish()
+        ffProc.pendingMode = mode
+        ffProc.running = true
+    }
+
+    Process {
+        id: ffProc
+        property string pendingMode: "switch"
+        command: ["upd", "apply", "--ff-only"]
+        stderr: StdioCollector { id: ffErr }
+        onExited: (code, st) => {
+            if (code !== 0) {
+                root.applying = false
+                root.lastError = ffErr.text        // the engine's words, verbatim
+                root.republish()
+                return
+            }
+            unitProc.command = ["systemctl", "start", "--no-block",
+                                "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
+            unitProc.running = true
+        }
+    }
+
+    Process {
+        id: unitProc
+        stderr: StdioCollector { id: unitErr }
+        onExited: (code, st) => {
+            if (code !== 0) {
+                root.applying = false
+                root.lastError = unitErr.text      // includes a cancelled polkit prompt
+                root.republish()
+                return
+            }
+            unitWatch.running = true
+        }
+    }
+
+    // --no-block returns as soon as the job is queued, so completion has to be
+    // watched for. A switch can take twenty minutes; the shell must not pretend
+    // it is done when it is only started.
+    Timer {
+        id: unitWatch
+        interval: 3000
+        repeat: true
+        onTriggered: watchProc.running = true
+    }
+
+    Process {
+        id: watchProc
+        command: ["systemctl", "show", "-p", "ActiveState", "-p", "Result", "--value",
+                  "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                const lines = text.trim().split("\n")
+                if (lines[0] === "failed" || (lines[0] === "inactive" && lines[1] !== "success")) {
+                    root.applying = false
+                    unitWatch.running = false
+                    root.lastError = "la unidad termino en " + lines[1]
+                    root.republish()
+                } else if (lines[0] === "inactive" && lines[1] === "success") {
+                    root.applying = false
+                    unitWatch.running = false
+                    root.poll()   // poll() republishes with the fresh status
+                }
+            }
+        }
+    }
+
+    function check() {
+        checkProc.running = true
+    }
+
+    Process {
+        id: checkProc
+        command: ["systemctl", "start", "--no-block", "nixos-upd.service"]
+        onExited: root.poll()
+    }
+```
+
+- [ ] **Step 2: Write the panel**
+
+`updates/dms-plugin/Popout.qml`. It is instantiated from `popoutContent` in
+Widget.qml, so it is not registered in `plugin.json` — DMS's popout is a
+`Component` on the widget, not a fourth surface. Skeleton:
+
+```qml
+import QtQuick
+import qs.Common
+import qs.Widgets
+import qs.Modules.Plugins
+import "./logic.js" as Logic
+
+Column {
+    id: root
+    spacing: Theme.spacingM
+
+    PluginGlobalVar {
+        id: updState
+        varName: "updState"
+    }
+
+    readonly property var st: updState.value ? updState.value.status : null
+    readonly property var view: updState.value ? updState.value.view : Logic.classify(null)
+    readonly property bool applying: updState.value ? updState.value.applying : false
+    readonly property string lastError: updState.value ? updState.value.lastError : ""
+    readonly property var button: Logic.buttonFor(root.st)
+
+    StyledText {
+        text: root.view.summary
+        color: Theme.surfaceText
+        font.pixelSize: Theme.fontSizeMedium
+    }
+
+    Repeater {
+        model: Logic.changeLines(root.st)
+        delegate: Row {
+            spacing: Theme.spacingS
+            StyledText { text: modelData.name; color: Theme.surfaceText }
+            StyledText { text: modelData.text; color: Theme.surfaceVariantText }
+        }
+    }
+
+    // Warnings and blockers, verbatim. Rewording them here would mean two
+    // descriptions of the same refusal drifting apart.
+    Repeater {
+        model: root.st && root.st.warnings ? root.st.warnings : []
+        delegate: StyledText {
+            text: "AVISO [" + modelData.code + "] " + modelData.detail
+            color: Theme.warning
+            wrapMode: Text.Wrap
+            width: parent.width
+        }
+    }
+
+    StyledText {
+        visible: !root.button.enabled && root.button.reason !== ""
+        text: root.button.reason
+        color: Theme.error
+        wrapMode: Text.Wrap
+        width: parent.width
+    }
+
+    Row {
+        spacing: Theme.spacingS
+
+        // Disabled, never hidden. A missing button teaches nothing; a disabled
+        // one reading "la rama es dms, no main" says what to do about it.
+        DankButton {
+            text: root.applying ? "Aplicando..." : root.button.label
+            enabled: root.button.enabled && !root.applying
+            onClicked: {
+                if (root.button.action === "apply") daemon.apply("switch")
+                else if (root.button.action === "apply-boot") daemon.apply("boot")
+                else if (root.button.action === "check") daemon.check()
+            }
+        }
+
+        DankButton {
+            text: "Comprobar ahora"
+            iconName: "refresh"
+            enabled: !root.applying
+            onClicked: daemon.check()
+        }
+    }
+
+    StyledText {
+        visible: root.lastError !== ""
+        text: root.lastError
+        color: Theme.error
+        font.family: Theme.monoFontFamily
+        wrapMode: Text.Wrap
+        width: parent.width
+    }
+}
+```
+
+`daemon` here is however `claude-usage`'s popout reaches its daemon surface —
+read `Widget.qml:780-800` to see how it wires `popoutContent` to daemon
+functions, and use that mechanism. If the daemon is not directly reachable, move
+`apply()`/`check()` behind the global var (a command field the daemon watches),
+and say so in a comment rather than duplicating the processes into the popout,
+which would run them once per screen.
+
+- [ ] **Step 3: Confirm the manifest needs no popout entry**
+
+`plugin.json` keeps only `daemon` and `widget` under `components`. Verify by
+checking `claude-usage/plugin.json`, which declares the same two and still shows
+a popout on click.
+
+- [ ] **Step 4: Build, switch, and drive it**
+
+```bash
+nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link
+nh os switch ~/nixos-config
+```
+
+Then, in the running session:
+
+1. Click the icon. The panel lists the real prepared changes.
+2. `touch ~/nixos-config/borrame.txt`, wait a minute, reopen: the button is disabled and says the tree is dirty. `rm ~/nixos-config/borrame.txt`.
+3. Press Apply. **The DMS polkit modal appears.** Cancel it. The panel reports the cancellation and does not claim success.
+4. Press Apply again and enter the password. The panel shows the apply running; `journalctl -u nixos-upd-apply@boot.service -f` shows `nh` working.
+5. When it finishes, confirm `readlink /nix/var/nix/profiles/system` moved, and that the panel now shows the `pending_reboot` blocker rather than offering to apply again.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add updates/dms-plugin/
+git commit -m "plugin: el panel, con el boton que aplica"
+```
+
+---
+
+### Task 11: Close the loop
+
+**Files:**
+- Modify: `docs/superpowers/specs/2026-08-09-actualizacion-automatica-design.md` (its Phase 2 section)
+- Modify: `README.md` and `README.es.md` if they describe `upd`'s subcommands
+
+- [ ] **Step 1: Retire the Phase 2 section**
+
+The 2026-08-09 spec lists three deferred items: the bar plugin, `switch` being the wrong verb, and the missing machine-readable change list. All three are now implemented. Replace that section with a pointer to `2026-08-11-widget-upd-barra-design.md` and a one-line statement of what shipped. Leaving a "deferred" section describing work that is done is the same stale-state problem the engine exists to prevent, one level up.
+
+- [ ] **Step 2: Update the READMEs**
+
+Check whether they document `upd`'s subcommands:
+
+```bash
+grep -n "upd " README.md README.es.md
+```
+
+If they do, add `status --json`, `apply --boot` and `apply --ff-only`, and mention the bar plugin.
+
+- [ ] **Step 3: Full verification pass**
+
+```bash
+nix run nixpkgs#bats -- updates/tests/
+nix develop ~/nixos-config#dms-plugins -c node --test updates/dms-plugin/tests/*.test.js
+nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link
+upd status --json | jq '.schema, .blockers, .reboot_recommended'
+```
+
+Expected: all green, `schema` 2.
+
+- [ ] **Step 4: Commit and publish**
+
+```bash
+git add docs/ README.md README.es.md
+git commit -m "docs: la fase 2 del motor esta hecha"
+git push origin main
+```
+
+---
+
+## Notes for the implementer
+
+- **`nix store diff-closures` output is a parsing bet.** Task 1 makes an unparseable diff a hard error precisely so the bet is visible. If it ever fires, the fix is in `closure_parse` and its fixture, not in silencing the warning.
+- **A polkit rule can be written, evaluate cleanly, and authorise nothing.** That happened on this machine with gamemode. Task 7 Step 4 is not optional and is not replaceable by reading the `.nix`.
+- **The engine and the plugin ship in the same derivation.** They cannot disagree within a generation, which is why the schema check is a refusal rather than a compatibility shim.
+- **Do not weaken any existing guard in `upd apply`.** Every one of them was reproduced from a real failure before it was written; `upd.sh`'s comments record which. Task 6 moves where the last two lines run, and nothing else.
