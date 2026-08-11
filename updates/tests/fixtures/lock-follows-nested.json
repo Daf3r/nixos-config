@@ -1,0 +1,67 @@
+{
+  "nodes": {
+    "depB": {
+      "inputs": {
+        "inner": [
+          "pin"
+        ],
+        "pin": "pin"
+      },
+      "locked": {
+        "lastModified": 1786458678,
+        "narHash": "sha256-0TK3yeumjIi9xuRcMoQuolVaj63eJHuSibCbFWDwI4I=",
+        "ref": "refs/heads/main",
+        "rev": "857474bddcf4c287add50f6ac6205d62c372f6db",
+        "revCount": 1,
+        "type": "git",
+        "url": "file:///build/depB"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///build/depB"
+      }
+    },
+    "pin": {
+      "locked": {
+        "lastModified": 1786458709,
+        "narHash": "sha256-NbLIbWsIW8Fv1ziH1WMfQJ6lZ/ZQEYVIUNPSKFJViQc=",
+        "ref": "refs/heads/main",
+        "rev": "7c24612a8488530628c4fb287f892f127aa90c53",
+        "revCount": 2,
+        "type": "git",
+        "url": "file:///build/other"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///build/other"
+      }
+    },
+    "pin_2": {
+      "locked": {
+        "lastModified": 1786458709,
+        "narHash": "sha256-OEQFyowEc3fXP2QfEIgeZIrwyB204VWswnYkg5s+c88=",
+        "ref": "refs/heads/main",
+        "rev": "37c57554acf9405794c6ebcb4cb9fad54a64256b",
+        "revCount": 2,
+        "type": "git",
+        "url": "file:///build/pin"
+      },
+      "original": {
+        "type": "git",
+        "url": "file:///build/pin"
+      }
+    },
+    "root": {
+      "inputs": {
+        "deepA": [
+          "depB",
+          "inner"
+        ],
+        "depB": "depB",
+        "pin": "pin_2"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

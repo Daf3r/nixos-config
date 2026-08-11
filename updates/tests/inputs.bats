@@ -10,6 +10,8 @@ setup() {
   AFTER="${BATS_TEST_DIRNAME}/fixtures/lock-after.json"
   FOLLOWS="${BATS_TEST_DIRNAME}/fixtures/lock-follows.json"
   TYPECHANGE="${BATS_TEST_DIRNAME}/fixtures/lock-typechange.json"
+  NESTED="${BATS_TEST_DIRNAME}/fixtures/lock-follows-nested.json"
+  SELFNAME="${BATS_TEST_DIRNAME}/fixtures/lock-follows-selfname.json"
 }
 
 @test "inputs_diff reports nothing when both sides are the same file" {
@@ -63,12 +65,95 @@ setup() {
   [ "$status" -eq 0 ]
 }
 
-@test "inputs_diff skips an input whose node has no rev instead of emitting a null" {
+@test "inputs_diff resolves a follows path from the root, not from where the walk is standing" {
+  # EVERY follows path in a flake.lock is relative to the root node, including
+  # the ones written inside an internal node. This repo's own lock has two:
+  # `dms.inputs.nixpkgs = ["nixpkgs"]` and the same under home-manager, and
+  # both mean the ROOT's nixpkgs -- read relative to their own node they would
+  # be circular.
+  #
+  # lock-follows.json cannot catch a walk that forgets this, because every
+  # segment there resolves straight to a string. This fixture is the shape that
+  # does, and it is real `nix flake lock` output for
+  # `inputs.depB.inputs.inner.follows = "pin"` plus
+  # `inputs.deepA.follows = "depB/inner"`:
+  #
+  #   root:  {"deepA": ["depB","inner"], "depB": "depB", "pin": "pin_2"}
+  #   depB:  {"inner": ["pin"], "pin": "pin"}
+  #
+  # `deepA` walks to depB, finds `inner` is itself a follows path, and that
+  # path is root-relative: root's `pin` is node `pin_2`. Resolving it against
+  # depB instead lands on depB's own `pin`, which is node `pin` -- a DIFFERENT
+  # repository with a different rev, and no error anywhere. The two leaf repos
+  # were given different content on purpose so the wrong answer is a wrong rev
+  # and not a coincidence.
+  #
+  # So: move node `pin_2` and `deepA` has to move with it.
+  jq '.nodes.pin_2.locked.rev = "9999999999999999999999999999999999999999"' "$NESTED" > "$BATS_TMPDIR/nested-moved.json"
+  run bash -c "inputs_diff '$NESTED' '$BATS_TMPDIR/nested-moved.json' | jq -e 'map(.name) == [\"deepA\",\"pin\"] and (.[0] | .from == \"37c5755\" and .to == \"9999999\")'"
+  [ "$status" -eq 0 ]
+  # And the mirror: moving node `pin` -- depB's own, the one the wrong
+  # resolution would pick -- must move nothing at the root at all.
+  jq '.nodes.pin.locked.rev = "8888888888888888888888888888888888888888"' "$NESTED" > "$BATS_TMPDIR/nested-other.json"
+  run bash -c "inputs_diff '$NESTED' '$BATS_TMPDIR/nested-other.json' | jq -e '. == []'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff terminates on a follows segment named after a root input" {
+  # The same root-relative rule, in the form that does not merely give a wrong
+  # answer. Real `nix flake lock` output for
+  # `inputs.depB.inputs.pin.follows = "pin"` plus
+  # `inputs.deepB.follows = "depB/pin"`:
+  #
+  #   root:  {"deepB": ["depB","pin"], "depB": "depB", "pin": "pin"}
+  #   depB:  {"inner": "inner", "pin": ["pin"]}
+  #
+  # A walk that resolves `["pin"]` against depB looks up depB's `pin`, which is
+  # `["pin"]` again, and recurses forever -- measured as jq exhausting memory,
+  # inside a systemd unit. Nothing about this is exotic: the collision is only
+  # that a segment shares a name with a root input, and
+  # `dms.inputs.nixpkgs = ["nixpkgs"]` is already in this repo's lock, one
+  # top-level `inputs.X.follows = "dms/nixpkgs"` away from being reached.
+  #
+  # The address-space cap is the point of the test: without it a regression
+  # here does not fail, it hangs and eats the machine. 512 MB is far above what
+  # the correct walk needs and far below what the runaway wants.
+  jq '.nodes.pin.locked.rev = "7777777777777777777777777777777777777777"' "$SELFNAME" > "$BATS_TMPDIR/selfname-moved.json"
+  run bash -c "ulimit -v 524288; inputs_diff '$SELFNAME' '$BATS_TMPDIR/selfname-moved.json' | jq -e 'map(.name) == [\"deepB\",\"pin\"]'"
+  [ "$status" -eq 0 ]
+}
+
+@test "inputs_diff refuses a root input pointing at a node the lock does not have" {
+  # A dangling node key reads as "no rev", the empty-rev filter drops it, and
+  # the input silently vanishes from the report: five names become four and the
+  # exit status stays 0. That is the same silence the no-root-inputs guard
+  # exists to refuse, so it gets the same treatment rather than an exception
+  # nobody could see.
+  jq '.nodes[.root].inputs.nixpkgs = "nixpkgs_99"' "$AFTER" > "$BATS_TMPDIR/dangling.json"
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/dangling.json' 2> '$BATS_TMPDIR/dangling-err.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'inputs_diff' "$BATS_TMPDIR/dangling-err.txt"
+  grep -q 'nixpkgs_99' "$BATS_TMPDIR/dangling-err.txt"
+  # A reference that is neither a node key nor a follows path is the same class
+  # of unreadable lock and gets the same refusal, rather than being carried
+  # along to fail as something more confusing further down.
+  jq '.nodes[.root].inputs.nixpkgs = 42' "$AFTER" > "$BATS_TMPDIR/notaref.json"
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/notaref.json' 2> '$BATS_TMPDIR/notaref-err.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'inputs_diff' "$BATS_TMPDIR/notaref-err.txt"
+}
+
+@test "inputs_diff does not report an input that has no rev on either side" {
   # Not every input type carries a rev. `local` in lock-follows.json is a real
   # `path:` input as nix locked it: narHash and lastModified, no rev at all.
-  # Read without a fallback, its rev is null, null is never equal to anything,
-  # and the input is reported as moved on every single run with `from` and `to`
-  # as JSON nulls -- garbage in the panel, and permanent.
+  #
+  # This is the harmless half and the name says so: revless on both sides
+  # compares equal to itself and drops out through the equality filter alone.
+  # It holds with the `// ""` fallback deleted, measured, so it is NOT what
+  # pins that fallback -- the test below it is. What this one pins is that a
+  # revless input never reaches the bar at all, in either shape.
   #
   # Asserting on the raw text as well as on the list: a `from: null` reaching
   # the bar is the failure being prevented, and only the name list would still
@@ -148,8 +233,15 @@ setup() {
   run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/junk.json' 2>/dev/null"
   [ "$status" -eq 1 ]
   [ -z "$output" ]
-  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/does-not-exist.json' 2>/dev/null"
+  # The missing file gets its own check before jq is reached, purely so the
+  # message names this function: jq calls it `Bad JSON in --slurpfile old ...`,
+  # which names neither. A lock that is not there yet is the ordinary first-run
+  # case, so it is the message someone will actually read.
+  run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/does-not-exist.json' 2> '$BATS_TMPDIR/missing-err.txt'"
   [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'inputs_diff' "$BATS_TMPDIR/missing-err.txt"
+  grep -q 'does-not-exist.json' "$BATS_TMPDIR/missing-err.txt"
   [ -z "$output" ]
   printf '' > "$BATS_TMPDIR/empty.json"
   run bash -c "inputs_diff '$AFTER' '$BATS_TMPDIR/empty.json' 2>/dev/null"
