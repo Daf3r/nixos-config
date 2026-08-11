@@ -162,6 +162,25 @@ case "$cmd" in
     state="$(jq -r '.state // "ausente"' "$STATUS")"
     when="$(jq -r '.checked_at // "fecha desconocida"' "$STATUS")"
     nwarn="$(warn_count)"
+    # Read once, used twice: the reboot advisory and the footer under it, which
+    # have to agree about whether this update wants a reboot. The bug that
+    # pairing fixed *was* two sources for one screen, and one read is the
+    # cheapest way to keep it that way.
+    #
+    # Read up here, before a single line is printed, and not down in the `ready`
+    # arm where it lived for one round. Moving it out of the `if [ "$(jq …)" ]`
+    # condition and into an assignment moved it into a context where errexit
+    # acts, and `show` started dying with jq's own exit code after printing its
+    # heading -- measured at RC=5 with half a report on screen and a code its
+    # own header does not document. Up here the refusal happens before any
+    # output exists, so a reader gets either a whole report or a refusal.
+    #
+    # `|| die`, not `|| reboot_rec=false`: swallowing the failure would silently
+    # drop the reboot advisory, which is the one line on this screen that
+    # changes what the user types. The cost is one jq on the states that do not
+    # need it, which is a process on a command a human runs once a morning.
+    reboot_rec="$(jq -r '.reboot_recommended // false' "$STATUS")" \
+      || die "no pude leer si esta actualizacion pide reinicio; no imprimo un informe a medias"
 
     # The heading is where a clean run and a run with findings visibly part
     # ways. Without this, a `ready` with three warnings and a `ready` with none
@@ -174,10 +193,6 @@ case "$cmd" in
     fi
 
     rc=0
-    # Only the `ready` arm sets this, and only the `ready` footer reads it, but
-    # it is declared here so the read below cannot become an unset one under
-    # `set -u` if either of those two ever moves.
-    reboot_rec=false
     case "$state" in
       current)
         echo "todo al dia"
@@ -196,18 +211,6 @@ case "$cmd" in
         echo "la comprobacion fallo: $(jq -r '.error // "sin detalle"' "$STATUS")"
         ;;
       ready)
-        # Read once, used twice: the advisory below and the footer under it,
-        # which have to agree about whether this update wants a reboot. They
-        # cannot disagree at runtime even with two reads of the same expression
-        # -- but the bug this pairing just fixed *was* two sources for one
-        # screen, and one read is the cheapest way to keep it that way. It also
-        # saves a jq on the state `show` spends most of its mornings in.
-        #
-        # No `|| reboot_rec=false`: this is the behaviour the two reads already
-        # had, and swallowing a jq failure here would silently drop the reboot
-        # advisory, which is the one line on this screen that changes what the
-        # user types.
-        reboot_rec="$(jq -r '.reboot_recommended // false' "$STATUS")"
         echo "hay una actualizacion preparada en la rama $(jq -r '.branch // "auto/update"' "$STATUS")"
         # `changes[]` carries every input and every hand-packaged app the run
         # looked at, moved or not, so the "did not move" rows are filtered out

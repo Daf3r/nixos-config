@@ -323,6 +323,35 @@ upd_status() { # $@ the arguments after `status`
   [[ "$output" != *"--boot"* ]]
 }
 
+@test "show refuses whole rather than print half a report when jq fails" {
+  # The reboot flag is read once and used twice, and hoisting that read out of
+  # an `if [ "$(jq …)" ]` condition and into an assignment moved it into a
+  # context where errexit acts. Measured on the version between the two: `show`
+  # printed its heading and then died with RC=5 -- jq's code, which this file's
+  # header does not document, over half a report.
+  #
+  # Both halves are asserted: the documented refusal, and that nothing was
+  # printed before it. The second is what makes the read's *position* matter
+  # rather than just its guard.
+  ready_status
+  status_json "$(jq '.reboot_recommended = true' "$STATE/status.json")"
+  { printf '#!%s\n' "$BASH"; cat <<EOF
+for a in "\$@"; do
+  case "\$a" in
+    *reboot_recommended*) echo "jq: fallo simulado" >&2; exit 5 ;;
+  esac
+done
+exec $(command -v jq) "\$@"
+EOF
+  } > "$WORK/bin/jq"
+  chmod +x "$WORK/bin/jq"
+
+  run --separate-stderr upd
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  [[ "$stderr" == *"no pude leer si esta actualizacion pide reinicio"* ]]
+}
+
 @test "show survives a ready body missing the schema 2 fields" {
   # Not a producer path -- the engine always writes all of them -- but a
   # hand-edited or truncated file must not take the reader down with a jq
