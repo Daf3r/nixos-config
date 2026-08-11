@@ -41,11 +41,23 @@ status_json() { # $1 the JSON body, written as-is
   printf '%s\n' "$1" > "$STATE/status.json"
 }
 
+# A schema 2 `ready`: one input that moved, one hand-packaged app that moved,
+# one that did not, and a closure diff. The unchanged `brave-origin` entry is
+# deliberate -- the engine reports every local package on every run, moved or
+# not, so `from == to` is the ordinary case and the reader has to keep it out
+# of the change list on its own.
 ready_status() {
   status_json '{"build":{"ok":true,"log":"/l"},"branch":"auto/update",
-    "local_pkgs":["brave-origin sin cambios","t3code-app sin cambios"],
+    "changes":[{"name":"nixpkgs","kind":"input","from":"f13ff45","to":"279b4a8"},
+      {"name":"brave-origin","kind":"local_pkg","from":"1.93.134","to":"1.93.134"},
+      {"name":"t3code-app","kind":"local_pkg","from":"0.0.32","to":"0.0.33"}],
+    "closure_diff":{"added":[{"name":"libnew","to":"1.0"}],
+      "removed":[{"name":"libold","from":"0.9"},{"name":"libgone","from":"0.1"}],
+      "changed":[{"name":"gcc","from":"16.1.0","to":"16.2.0"}],
+      "size_delta_mb":8.88},
+    "reboot_recommended":false,"reboot_reason":[],
     "warnings":'"${1:-[]}"',"unmanaged":[],
-    "schema":1,"checked_at":"2026-08-09T03:00:11+02:00","state":"ready"}'
+    "schema":2,"checked_at":"2026-08-09T03:00:11+02:00","state":"ready"}'
 }
 
 # A throwaway $REPO plus the clone the engine would have left beside it: on
@@ -85,18 +97,30 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" == *"no es un objeto JSON legible"* ]]
 }
 
-@test "show refuses a schema it does not understand" {
-  status_json '{"schema":2,"checked_at":"x","state":"ready","warnings":[]}'
+@test "show refuses a schema from the future" {
+  status_json '{"schema":3,"checked_at":"x","state":"ready","warnings":[]}'
   run upd
   [ "$status" -eq 1 ]
-  [[ "$output" == *"schema 2"* ]]
+  [[ "$output" == *"schema 3"* ]]
+}
+
+@test "show refuses a schema 1 status file" {
+  # The reader and the engine ship in the same derivation, so the only way
+  # these disagree is a stale upd earlier on $PATH. It must say so rather than
+  # render a file whose fields it is about to misread: a schema 1 body carries
+  # `local_pkgs` and no `changes`, so a reader that went ahead would print an
+  # empty change list for an update that moves six inputs.
+  status_json '{"schema":1,"state":"ready","checked_at":"x","warnings":[]}'
+  run upd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"schema 1"* ]]
 }
 
 @test "an unrecognised state is loud and exits non-zero" {
   # The regression this file exists for. Without the default arm the reader
   # prints the heading, falls through the case, and exits 0 -- which reads
   # exactly like "nothing to do".
-  status_json '{"schema":1,"checked_at":"x","state":"rolled_back","warnings":[]}'
+  status_json '{"schema":2,"checked_at":"x","state":"rolled_back","warnings":[]}'
   run upd
   [ "$status" -eq 2 ]
   [[ "$output" == *"estado desconocido"* ]]
@@ -118,10 +142,72 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" == *"AVISO [local_bump_failed] brave-origin se quedo atras"* ]]
 }
 
+@test "show lists changes[] instead of local_pkgs" {
+  ready_status
+  run upd
+  [ "$status" -eq 0 ]
+  # The input the run moved, named, with both revisions -- the whole reason
+  # schema 2 exists: the first real run moved six inputs and named none.
+  [[ "$output" == *"nixpkgs f13ff45 -> 279b4a8"* ]]
+  [[ "$output" == *"t3code-app 0.0.32 -> 0.0.33"* ]]
+  # A package that did not move is not a change. It is still in `changes[]`
+  # (the engine reports the check ran), so the filtering is the reader's job.
+  [[ "$output" != *"brave-origin"* ]]
+}
+
+@test "show summarises the closure diff with its three counts and the size" {
+  # Without this the entire closure_diff block can be deleted from the reader
+  # with every other test still green: nothing else in this file reads it.
+  ready_status
+  run upd
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 paquetes cambian"* ]]
+  [[ "$output" == *"1 entran"* ]]
+  [[ "$output" == *"2 salen"* ]]
+  [[ "$output" == *"8.88 MB"* ]]
+}
+
+@test "show announces a recommended reboot, and stays quiet when none is needed" {
+  # The negative half is not padding: an unconditional notice would pass the
+  # positive assertions alone, and an advisory that fires on every update is
+  # one nobody reads.
+  ready_status
+  run upd
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"REINICIO"* ]]
+
+  status_json '{"build":{"ok":true,"log":"/l"},"branch":"auto/update","changes":[],
+    "closure_diff":{"added":[],"removed":[],"changed":[],"size_delta_mb":0},
+    "reboot_recommended":true,"reboot_reason":["nvidia-open","nvidia-x11"],
+    "warnings":[],"unmanaged":[],
+    "schema":2,"checked_at":"x","state":"ready"}'
+  run upd
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nvidia-open"* ]]
+  [[ "$output" == *"nvidia-x11"* ]]
+  [[ "$output" == *"REINICIO"* ]]
+  # And it must say what to do about it, or the flag is trivia. Deliberately
+  # not `upd apply --boot`, which the plan wrote here: that flag does not
+  # exist, and `upd apply --boot` was measured doing a hot `nh os switch` with
+  # the flag ignored -- advice that does the opposite of what it says.
+  [[ "$output" == *"reinicia"* ]]
+  [[ "$output" != *"--boot"* ]]
+}
+
+@test "show survives a ready body missing the schema 2 fields" {
+  # Not a producer path -- the engine always writes all of them -- but a
+  # hand-edited or truncated file must not take the reader down with a jq
+  # error and an exit code nothing documents. `upd show` promises 0, 1 or 2.
+  status_json '{"schema":2,"checked_at":"x","state":"ready","warnings":[]}'
+  run upd
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"actualizacion preparada"* ]]
+}
+
 @test "warnings are shown on current too, not only on ready" {
   # `current` and a silently failed bump co-occur precisely when the failed
   # bump is what left the closure unchanged.
-  status_json '{"schema":1,"checked_at":"x","state":"current",
+  status_json '{"schema":2,"checked_at":"x","state":"current",
     "warnings":[{"code":"local_bump_failed","detail":"t3code-app se quedo atras"}]}'
   run upd
   [ "$status" -eq 0 ]
@@ -130,7 +216,7 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 }
 
 @test "warnings are shown on build_failed too" {
-  status_json '{"schema":1,"checked_at":"x","state":"build_failed",
+  status_json '{"schema":2,"checked_at":"x","state":"build_failed",
     "build":{"ok":false,"log":"/var/lib/nixos-upd/last.log"},
     "warnings":[{"code":"local_bump_failed","detail":"brave-origin se quedo atras"}]}'
   run upd
@@ -144,7 +230,7 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   # nixos-upd.sh's fail() has one fallback body, for a jq failure, that omits
   # `warnings` entirely. Effectively unreachable, which is exactly why nothing
   # would notice if this reader assumed the key were there.
-  status_json '{"schema":1,"checked_at":"x","state":"check_failed",
+  status_json '{"schema":2,"checked_at":"x","state":"check_failed",
     "error":"no se pudo codificar el mensaje"}'
   run upd
   [ "$status" -eq 0 ]
@@ -152,7 +238,7 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 }
 
 @test "a warnings field that is not a list is reported, not skipped" {
-  status_json '{"schema":1,"checked_at":"x","state":"current","warnings":"boom"}'
+  status_json '{"schema":2,"checked_at":"x","state":"current","warnings":"boom"}'
   run upd
   [ "$status" -eq 0 ]
   [[ "$output" == *"no es una lista"* ]]
@@ -176,7 +262,7 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   # diff.txt is written only on the ready path, so after a failed run it
   # survives describing an older comparison while status.json has moved on.
   printf 'brave-origin: 1.85.121 -> 1.86.2\n' > "$STATE/diff.txt"
-  status_json '{"schema":1,"checked_at":"2026-08-05T03:00:11+02:00",
+  status_json '{"schema":2,"checked_at":"2026-08-05T03:00:11+02:00",
     "state":"check_failed","error":"nix flake update failed","warnings":[]}'
   run upd diff
   [ "$status" -eq 0 ]
@@ -200,6 +286,21 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 }
 
 # --- apply ------------------------------------------------------------------
+
+@test "apply refuses an argument it does not know instead of ignoring it" {
+  # Measured before the guard: `upd apply --boot` fast-forwarded the repository
+  # and ran `nh os switch` -- the flag accepted, ignored, and the hot
+  # activation done anyway. An option that silently does the opposite of its
+  # name is worse than no option, and `--boot` is exactly the flag a reader of
+  # the reboot advice would reach for before Task 6 lands it.
+  make_rig
+  run upd apply --boot
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--boot"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
+  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+}
 
 @test "apply refuses a dirty target tree, prints it, and fetches nothing" {
   make_rig
@@ -275,7 +376,7 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
 
 @test "apply refuses when the state is not ready" {
   make_rig
-  status_json '{"schema":1,"checked_at":"x","state":"build_failed","warnings":[]}'
+  status_json '{"schema":2,"checked_at":"x","state":"build_failed","warnings":[]}'
   run upd apply
   [ "$status" -eq 1 ]
   [[ "$output" == *"no hay ninguna actualizacion lista"* ]]

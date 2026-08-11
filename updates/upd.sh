@@ -39,8 +39,11 @@ WT="$STATE_DIR/wt"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The one schema this reader understands. Kept as a variable so the refusal
-# message below can name both sides of the mismatch.
-SCHEMA=1
+# message below can name both sides of the mismatch. Schema 2 dropped the prose
+# `local_pkgs` array for the structured `changes[]`, `closure_diff`,
+# `reboot_recommended` and `reboot_reason`; the two formats share no field this
+# reader could fall back on, which is why the gate refuses rather than degrades.
+SCHEMA=2
 
 die() { # $1 message, $2 exit code (default 1)
   echo "upd: $1" >&2
@@ -134,7 +137,44 @@ case "$cmd" in
         ;;
       ready)
         echo "hay una actualizacion preparada en la rama $(jq -r '.branch // "auto/update"' "$STATUS")"
-        jq -r '.local_pkgs[]?' "$STATUS" | sed 's/^/  /'
+        # `changes[]` carries every input and every hand-packaged app the run
+        # looked at, moved or not, so the "did not move" rows are filtered out
+        # here rather than left out there: the engine reporting that it checked
+        # brave-origin and found nothing is information, printing
+        # "brave-origin 1.93.134 -> 1.93.134" is noise. An entry with an empty
+        # side is a package that appeared or went away, and saying so beats a
+        # row with a blank in it.
+        jq -r '.changes[]? | select(type == "object") | select(.from != .to)
+               | "  " + (.name // "sin nombre")
+                 + " " + (if (.from // "") == "" then "(nuevo)" else .from end)
+                 + " -> " + (if (.to // "") == "" then "(fuera)" else .to end)' "$STATUS"
+        # One line for the closure, because the per-package detail is what
+        # `upd diff` is for. The `// []` fallbacks are not producer paths --
+        # the engine always writes all four keys -- but a truncated or
+        # hand-edited file must not make jq error out and hand `upd show` an
+        # exit code its own header does not document.
+        jq -r '.closure_diff? | select(type == "object")
+               | "  " + ((.changed // [] | length) | tostring) + " paquetes cambian, "
+                 + ((.added // [] | length) | tostring) + " entran, "
+                 + ((.removed // [] | length) | tostring) + " salen ("
+                 + ((.size_delta_mb // 0) | tostring) + " MB)"' "$STATUS"
+        # The one finding that changes what the user must type. `nh os switch`
+        # activates in place, and a kernel or NVIDIA module that moved leaves
+        # the loaded module out of step with the new userspace until a reboot.
+        #
+        # It does NOT say "aplicar con `upd apply --boot`", which is what the
+        # plan wrote here: that flag does not exist yet, and measured today
+        # `upd apply --boot` fast-forwards and runs `nh os switch` all the same
+        # -- the hot activation the advice is trying to avoid. Pointing a user
+        # at a flag that silently does the opposite is worse than no advice.
+        # When Task 6 splits apply into switch and boot, this is where the
+        # wording changes.
+        if [ "$(jq -r '.reboot_recommended // false' "$STATUS")" = "true" ]; then
+          echo
+          echo "  ESTO PIDE REINICIO: $(jq -r '(.reboot_reason // []) | join(", ")' "$STATUS")"
+          echo "  \`upd apply\` activa en caliente y el modulo ya cargado deja de cuadrar"
+          echo "  con las librerias nuevas: reinicia en cuanto lo apliques."
+        fi
         print_unmanaged
         ;;
       *)
@@ -146,7 +186,7 @@ case "$cmd" in
         # than the engine that wrote the file (they are packaged together, but
         # a stale copy on $PATH or a hand-run script from a checkout is not
         # exotic), a future state added to the producer, or a corrupted file
-        # that still happens to parse as an object with schema 1.
+        # that still happens to parse as an object carrying the right schema.
         echo "upd: estado desconocido: '$state'" >&2
         echo "upd: este lector solo entiende ready, current, build_failed y check_failed" >&2
         echo "upd: probablemente upd es mas viejo que el motor que escribio $STATUS; mira el fichero a mano" >&2
@@ -203,6 +243,16 @@ case "$cmd" in
     ;;
 
   apply)
+    # `apply` takes no arguments today, and accepting one silently is how an
+    # option that does nothing comes to look like an option that worked.
+    # Measured before this guard: `upd apply --boot` fast-forwarded $REPO and
+    # ran `nh os switch` with the flag ignored, so someone following advice
+    # written for the split that Task 6 has not landed yet would get the hot
+    # activation they were told to avoid, and nothing anywhere would say so.
+    if [ "$#" -gt 1 ]; then
+      die "\`upd apply\` todavia no acepta argumentos y he recibido: ${*:2}. No aplico: hoy solo hay activacion en caliente, asi que si el aviso pide reinicio, aplica con \`upd apply\` a secas y reinicia despues"
+    fi
+
     # Preflight the tools *before* touching $REPO. Discovering that `nh` is
     # missing after the fast-forward leaves the repository moved and the system
     # not switched, which is the one half-applied state worth avoiding.
