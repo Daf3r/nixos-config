@@ -1,16 +1,23 @@
 #!/usr/bin/env bats
 #
 # `blockers_live` is driven end to end by upd.bats, through `upd status --json`,
-# and that is where its behaviour is pinned. This file exists for the two
-# clauses of its contract that the end-to-end tests cannot reach and that were
-# both found to be false once already:
+# and that is where its behaviour is pinned. This file exists for the clauses of
+# its contract that the end-to-end tests cannot reach -- every one of which was
+# found to be false at some point, which is why they are tested and not merely
+# written down:
 #
-#   1. the argument list survives values that begin with a dash. Reaching that
-#      through `upd status --json` needs a $REPO whose name starts with one,
-#      with a git repository inside it -- a contortion in a file whose harness
-#      builds $REPO for every test. Here it is one call.
-#   2. nothing is written to stderr. Nothing in upd.bats separates the two
-#      streams for this, and `run --separate-stderr` makes it one assertion.
+#   - the argument list survives values that begin with a dash. Reaching that
+#     through `upd status --json` needs a $REPO whose name starts with one, with
+#     a git repository inside it -- a contortion in a file whose harness builds
+#     $REPO for every test. Here it is one call.
+#   - nothing is written to stderr. Nothing in upd.bats separates the two
+#     streams for this, and `run --separate-stderr` makes it one assertion.
+#   - an unwritable $TMPDIR is a blocker and not a clean tree, quietly.
+#   - git's complaint is flattened and cut before it reaches a panel.
+#
+# Numbered counts are deliberately absent from that list and from the sentence
+# above it. Every count in this repository's prose has gone stale at least once,
+# and no assertion can catch prose that says "two" when it means "four".
 #
 # Everything else -- which blockers appear when -- stays in upd.bats, where it
 # is tested through the interface the panel actually calls. Duplicating it here
@@ -150,7 +157,7 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -z "$stderr" ]
   echo "$output" | jq -e 'map(.code) | index("repo_uncheckable")'
-  # And it says which of the three things `repo_uncheckable` now covers this is,
+  # And it says which of the things `repo_uncheckable` now covers this one is,
   # or whoever reads it off the panel goes looking at the wrong one.
   echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | test("temporal")'
 }

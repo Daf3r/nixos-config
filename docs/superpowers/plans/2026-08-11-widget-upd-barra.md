@@ -788,7 +788,7 @@ Explicit paths, never `git add -A`: there is an untracked file from another sess
 **Files:**
 - Added: `updates/lib/blockers.sh`
 - Modified: `updates/upd.sh` (the `status)` arm shrinks; `LIB_DIR` and one `source` at the top)
-- Added: `updates/tests/blockers.bats` (review round: the two clauses of the contract the end-to-end tests cannot reach)
+- Added: `updates/tests/blockers.bats` (review rounds: the clauses of the contract the end-to-end tests cannot reach)
 - Modified: `updates/tests/upd.bats` — **one test added**, none changed; see Step 2
 - Not modified: `updates.nix` — verified against the store, not by reading it
 
@@ -838,7 +838,7 @@ Three findings, all of them the same shape as the ones Task 5 kept closing — a
 2. **The header promised two things the code did not do.** "Nothing to stderr" was false (`git status`'s warnings went straight through) and "never fails" was false (finding 1). Both are now stated in the form they can be kept, and both are tested.
 3. **`git status` failing read as "clean tree"** — the third copy of the defect the `flock` arm and the repository guard had already closed. In a work tree git cannot fully read (a directory the user cannot open) it warns on stderr, **exits 0, and prints nothing on stdout**, so `[ -n "$(…)" ]` was false and no `dirty_tree` was reported. It now answers `repo_uncheckable`, which is why that row grew in Task 5's table above.
 
-`updates/tests/blockers.bats` (6 tests) exists for the two clauses the end-to-end suite cannot reach: an argument beginning with a dash, and stderr staying empty. Everything else stays in `upd.bats` — duplicating it would mean two places to update and one of them drifting. One test was added to `upd.bats` for the `|| die` seam, injected through `$LIB_DIR` the way `nixos-upd.bats` already stubs `closure_reboot`; without it the guard would be code nobody ever ran, which this repository has a commit about.
+`updates/tests/blockers.bats` exists for the clauses the end-to-end suite cannot reach: an argument beginning with a dash, and stderr staying empty. Everything else stays in `upd.bats` — duplicating it would mean two places to update and one of them drifting. One test was added to `upd.bats` for the `|| die` seam, injected through `$LIB_DIR` the way `nixos-upd.bats` already stubs `closure_reboot`; without it the guard would be code nobody ever ran, which this repository has a commit about.
 
 - [x] **Step 6: The second review round**
 

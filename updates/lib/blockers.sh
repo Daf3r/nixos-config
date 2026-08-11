@@ -24,9 +24,12 @@
 # check" and "there is nothing to report" are different answers and the panel
 # must not confuse them.
 #
-# The three clauses below are the contract, and they are stated in the form they
-# can actually be kept -- an earlier version of this header promised "nothing to
-# stderr" and "never fails" flatly, and both were false:
+# The clauses below are the contract, and they are stated in the form they can
+# actually be kept -- an earlier version of this header promised "nothing to
+# stderr" and "never fails" flatly, and both were false. They are not counted,
+# here or anywhere else in this file: a count in prose goes stale the moment a
+# clause is added, and no test can assert against a sentence that says "three"
+# where it means "four".
 #
 #   stdout   one JSON array, and nothing else on any path.
 #   stderr   nothing. Every command run below either has its stderr silenced or
@@ -157,8 +160,13 @@ blockers_live() {
       # in 10 identical runs, so it is not even deterministic. Harmless today
       # only because errexit does not act here (see the header); armed for the
       # first caller that invokes this some other way. The slice also counts
-      # characters rather than bytes, so it cannot cut a UTF-8 one in half, and
-      # it spawns nothing at all in the path the panel polls on a timer.
+      # characters rather than bytes *in a UTF-8 locale*, so there it cannot
+      # cut one in half -- under LC_ALL=C it counts bytes again and can, which
+      # matters because the nix build sandbox usually has no LANG set. The
+      # damage would be cosmetic (jq substitutes U+FFFD) and needs a non-ASCII
+      # name landing exactly on the 200th byte, so it is stated rather than
+      # defended against. `head -c` had no locale under which it did better.
+      # And it spawns nothing at all in the path the panel polls on a timer.
       tree_err="$(< "$err_file")"
       tree_err="${tree_err//$'\n'/ }"
       tree_err="${tree_err:0:200}"
