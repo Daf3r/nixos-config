@@ -79,10 +79,20 @@ require_readable_status() {
     # the key is missing. `[ ausente -lt 2 ]` is not false, it is a bash error
     # on stderr and a status of 2, so an unguarded version would answer the
     # hand-edited case with a line about test operators.
+    #
+    # The third pattern is the length cap, and it is not belt and braces: a
+    # string of digits alone passes `*[!0-9]*` at any length, and `[` parses it
+    # with strtoimax, so a value past 2^63 lands in the very same bash error the
+    # first two patterns exist to avoid -- measured on this file before the cap
+    # with `"schema": 99999999999999999999`, which leaked
+    # `[: 99999999999999999999: integer expected` and then advised updating the
+    # system. Ten characters or more is well past any schema this reader will
+    # ever meet (they are counted 1, 2, 3) and comfortably short of where bash
+    # overflows, so nothing legitimate is caught by it.
     local advice
     case "$schema" in
-      '' | *[!0-9]*)
-        advice="y eso no es un numero de schema: el fichero esta corrupto o editado a mano, miralo tu" ;;
+      '' | *[!0-9]* | ??????????*)
+        advice="y eso no es un numero de schema que este lector pueda comparar: el fichero esta corrupto o editado a mano, miralo tu" ;;
       *)
         if [ "$schema" -lt "$SCHEMA" ]; then
           advice="el viejo es el fichero, no este lector: lanza \`upd check\` para que el motor lo reescriba"

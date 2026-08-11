@@ -158,6 +158,21 @@ upd() { REPO="${REPO:-$WORK/repo}" STATE_DIR="$STATE" bash "$UPD" "$@"; }
   [[ "$output" != *"integer"* ]]
 }
 
+@test "show refuses a schema of digits that bash cannot compare either" {
+  # The same defect as above, reached through the arm that was meant to be the
+  # safe one: `*[!0-9]*` accepts a digit string of any length, and `[` parses it
+  # with strtoimax. Measured on the reader before the length cap, with a schema
+  # of twenty nines: `[: 99999999999999999999: integer expected` on stderr, and
+  # then "actualiza el sistema" -- advice derived from a comparison that never
+  # happened.
+  status_json '{"schema":99999999999999999999,"state":"ready","checked_at":"x","warnings":[]}'
+  run upd
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no es un numero de schema"* ]]
+  [[ "$output" != *"integer"* ]]
+  [[ "$output" != *"actualiza el sistema"* ]]
+}
+
 @test "an unrecognised state is loud and exits non-zero" {
   # The regression this file exists for. Without the default arm the reader
   # prints the heading, falls through the case, and exits 0 -- which reads
