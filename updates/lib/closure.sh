@@ -160,39 +160,30 @@ closure_parse() {
 # NVIDIA module, the module already loaded stops matching the new userspace
 # libraries and everything that opens the driver breaks until a reboot, so the
 # panel has to offer `boot` and a restart instead of the hot apply.
+#
+# Exit status: 0 with the object on stdout; 1 on empty stdin, with a message on
+# stderr; whatever jq exits with (5) on input that is not an object or is not
+# JSON. Callers must test truth and not `-eq 1` -- unlike closure_parse, which
+# promises 1 for every failure it has.
 closure_reboot() {
-  # Which packages, when they move, make `nh os switch` the wrong verb.
+  # Which packages, when they move, make `nh os switch` the wrong verb. Exact
+  # names, not substrings: `nvidia-open` is the kernel module and matters,
+  # `nvidia-settings` and `mesa-demos` ship alongside and do not, and an
+  # advisory that fires on every nvidia update is one nobody reads.
+  # `linux-xanmod` is this machine's kernel; another machine's would need its
+  # own entry, which is the honest trade for not pattern-matching. All five
+  # spellings were checked against real diff output -- a name that never
+  # matches is a guard that protects nothing.
   #
-  # Exact names, not substrings. `nvidia-open` is the kernel module and
-  # matters; `nvidia-settings` is a GUI that ships alongside it and does not. A
-  # substring rule would fire on every nvidia update, and an advisory that
-  # always fires is an advisory nobody reads. `linux-xanmod` is this machine's
-  # kernel -- a kernel switch elsewhere would need its own entry, which is the
-  # honest trade for not pattern-matching.
-  #
-  # All five spellings were checked against real output rather than guessed at,
-  # since a name that never matches is a guard that protects nothing. The
-  # 2026-08-11 diff carries initrd-linux-xanmod, nvidia-open and nvidia-x11
-  # verbatim, and `nix store diff-closures` between system generations 60 and
-  # 65 -- the pair that crossed 6.17.12 to 7.1.6 -- names the other two as
-  # `linux-xanmod` and `mesa` on their own lines.
-  #
-  # Inside the function and not at file scope, which is where it started. The
-  # tests, and any caller that exports this to a child shell, get the function
-  # alone: `export -f` carries no variables, so a file-scope list arrived empty,
-  # `--arg pkgs ""` split into an empty watch list, and every input answered
-  # `reboot_recommended: false` with a clean exit status. Measured: the nvidia,
-  # kernel and mesa cases failed while the two negative cases passed, which is
-  # the failure pointing the wrong way -- silently saying a driver change is
-  # safe to apply hot. Keeping the list here makes that impossible rather than
-  # merely detectable, and it is also what keeps this file to functions only.
+  # Keep this inside the function. At file scope it does not survive
+  # `export -f`, and the function then answers `false` -- "safe to apply hot" --
+  # for everything, with a clean exit status. Measured; see the task 2 report.
   local _CLOSURE_REBOOT_PKGS="linux-xanmod initrd-linux-xanmod nvidia-open nvidia-x11 mesa"
 
-  # Read stdin whole before jq sees it, for the one input jq cannot refuse from
-  # inside: on empty input no filter runs at all, so it writes nothing and
-  # exits 0. A caller reading a closure_diff file that does not exist yet would
-  # get that silence, and silence here reads as "no reboot needed" -- the
-  # direction that hurts, since it offers the hot apply for a driver change.
+  # Read stdin whole first, for the one input jq cannot refuse from inside: on
+  # empty input no filter runs at all, so it writes nothing and exits 0. A
+  # caller reading a closure_diff file that does not exist yet would get that
+  # silence, and silence here reads as "no reboot needed".
   local raw
   raw="$(cat)"
   if [ -z "$(printf '%s' "$raw" | tr -d '[:space:]')" ]; then
@@ -201,19 +192,15 @@ closure_reboot() {
   fi
 
   # No `|| return 1` after jq, unlike closure_parse: jq is the last command of
-  # the function, so its status is the function's and a broken jq cannot be
-  # mistaken for a verdict.
+  # the function, so its status is already the function's.
   #
-  # `null` gets the same treatment as garbage rather than the default lists:
-  # every lookup on it is null, `// []` turns those into empty arrays, and the
-  # answer comes back as a confident false. An input that is not an object is
-  # not a diff this can vouch for.
+  # `null` is refused rather than defaulted: every lookup on it is null, the
+  # `// []` fallbacks turn those into empty lists, and the answer comes back as
+  # a confident false.
   #
-  # index() and not a substring test, which is the whole point of the list. It
-  # returns a position, and the first entry returns 0 -- true in jq, where only
-  # null and false are not. The kernel case below is exactly that first entry,
-  # so the day someone rewrites this with a truthiness that counts 0 as no
-  # match, a test says so.
+  # index() returns a position, and the first entry returns 0 -- true in jq,
+  # where only null and false are not. The kernel case is that first entry and
+  # has a test, so a rewrite that counts 0 as no match is caught.
   printf '%s' "$raw" | jq --arg pkgs "$_CLOSURE_REBOOT_PKGS" '
     if type != "object" then error("closure_reboot: expected a closure_diff object") else . end
     | ($pkgs | split(" ")) as $watch

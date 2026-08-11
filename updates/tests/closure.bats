@@ -241,7 +241,30 @@ setup() {
   # is not a reason to reboot. Matching on substrings alone would make almost
   # every nvidia update a reboot, and a recommendation that fires every time
   # stops being read.
-  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-settings\",\"from\":\"595.84\",\"to\":\"595.91.07\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false'"
+  #
+  # `mesa-demos` is the one that pins that. nvidia-settings alone does not:
+  # it contains no watch entry as a substring, so the faithful wrong
+  # implementation -- `select($n | contains($w))` over the same full names --
+  # still answers false for it and this test survives. `mesa-demos` is a real
+  # package on this machine and a supercharged spelling of `mesa`, so it is
+  # exactly what a substring rule would swallow. It is a graphics demo suite;
+  # it does not touch the running GL stack.
+  run bash -c "echo '{\"changed\":[{\"name\":\"nvidia-settings\",\"from\":\"595.84\",\"to\":\"595.91.07\"},{\"name\":\"mesa-demos\",\"from\":\"9.0.0\",\"to\":\"9.0.1\"}],\"added\":[],\"removed\":[]}' | closure_reboot | jq -e '.reboot_recommended == false and (.reboot_reason == [])'"
+  [ "$status" -eq 0 ]
+}
+
+@test "closure_reboot looks at added and removed, not only changed" {
+  # Two thirds of the input surface. Collecting only `.changed` left every
+  # other test in this file green, so nothing said the other two lists were
+  # read at all -- the same hole that let nvidia-x11 be deleted from the watch
+  # list unnoticed.
+  #
+  # Both are real shapes: the 60->65 diff on this machine added mesa-libgbm out
+  # of nothing, and turning the proprietary driver off removes nvidia-x11
+  # outright. A driver that disappears from the closure is the strongest reboot
+  # case there is -- the module is still loaded and its files are about to stop
+  # existing.
+  run bash -c "echo '{\"changed\":[],\"added\":[{\"name\":\"mesa\",\"to\":\"26.2.0\"}],\"removed\":[{\"name\":\"nvidia-x11\",\"from\":\"595.84\"}]}' | closure_reboot | jq -e '.reboot_recommended == true and (.reboot_reason | sort) == [\"mesa\",\"nvidia-x11\"]'"
   [ "$status" -eq 0 ]
 }
 
