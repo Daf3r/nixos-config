@@ -30,9 +30,9 @@ nixpkgs fijado y solo activa el motor nuevo.
 | 1 | `lib/closure.sh` — `closure_parse`, de la salida de `nix store diff-closures` a JSON | `67f24dc..2c14b74` |
 | 2 | `closure_reboot` — decide si el cambio pide reinicio | `75e6693..58098f1` |
 | 3 | `lib/inputs.sh` — `inputs_diff`, qué inputs movió el lock | `e64cdef..3fd6f35` |
-| 4 | `status.json` a schema 2 y el motor componiendo el cuerpo nuevo | `5d59da9..5fd8535` |
+| 4 | `status.json` a schema 2 y el motor componiendo el cuerpo nuevo | `5d59da9..8c37916` |
 
-116 tests verdes al cerrar (103 al empezar la tarea 4), shellcheck limpio y
+120 tests verdes al cerrar (103 al empezar la tarea 4), shellcheck limpio y
 build del sistema verde con la suite dentro de la derivación.
 
 ## Los defectos del plan que aparecieron al ejecutarlo
@@ -77,6 +77,15 @@ familia: **tests que no sujetaban lo que su nombre decía**.
   la mutación dejó tres mutantes vivos, todos ahí. Ahora tiene
   `updates/tests/nixos-upd.bats`, end-to-end con `nix`, `nixos-rebuild`, `curl`
   y `npm` stubbed, cubriendo el camino `ready`.
+- **Y una vez más en la última ronda de la tarea 4**: el test que decía sujetar
+  la guardia numérica del rechazo por schema asertaba la ausencia de `integer
+  expression`, una redacción que bash 5.3.15 no usa — el suyo es `integer
+  expected`. Con la guardia entera borrada, el lector filtraba el error del
+  shell y las tres aserciones seguían pasando. El ancla pasó a ser el mensaje
+  propio del lector; de paso se cerró el mismo hueco por el otro lado (una tira
+  de dígitos de cualquier longitud volvía a romper `[`) y se ejercitó por fin la
+  rama de recuperación del veredicto de reinicio, inyectando el fallo por
+  `$LIB_DIR` como el resto del fichero hace con `nix` y `curl`.
 
 ## Decisiones tomadas, con su porqué
 
