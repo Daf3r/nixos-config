@@ -66,9 +66,10 @@ setup() {
 @test "closure_parse counts the size of a line that has no versions" {
   # `kitty: 51.2 KiB` -- same version string, different closure -- is a real
   # shape and carries a real size. Identifying the size only by a leading
-  # comma silently drops every one of them: on the 2026-08-11 diff that is
-  # 2.56 of 8.88 MB gone, and the bar would report 6.33 as if it were the
-  # whole delta.
+  # comma silently drops every one of them. Measured on the 19 lines of the
+  # 2026-08-11 production diff, whose true total is 8.88 MB: five entries of
+  # this shape carry 2.56 MB between them, and dropping those made the same
+  # diff report 6.33 as though it were the whole delta.
   printf 'kitty: 1024.0 KiB\n' > "$BATS_TMPDIR/nover.txt"
   run bash -c "closure_parse < '$BATS_TMPDIR/nover.txt' | jq -e '.size_delta_mb == 1'"
   [ "$status" -eq 0 ]
@@ -106,6 +107,37 @@ setup() {
   run bash -c "closure_parse < '$FIX' | tail -c 1 | od -An -c | tr -d ' '"
   [ "$status" -eq 0 ]
   [ "$output" = '\n' ]
+}
+
+@test "closure_parse refuses a size unit it does not know instead of counting zero" {
+  # The half-edit this guards against: some future nix grows a TiB, whoever
+  # meets it teaches the line patterns about the new unit and forgets the
+  # conversion. A zero size reads exactly like a package that did not change
+  # size, so nothing would ever say the parser had gone half-blind.
+  #
+  # stderr is redirected inside the bash -c so that $output is stdout alone:
+  # the property under test is that nothing is emitted, and a diagnostic
+  # landing in $output would hide that.
+  printf 'huge: 1.0 → 2.0, 1.0 TiB\n' > "$BATS_TMPDIR/tib.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/tib.txt' 2> '$BATS_TMPDIR/tib-err.txt'"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
+  grep -q 'TiB' "$BATS_TMPDIR/tib-err.txt"
+}
+
+@test "closure_parse refuses the whole diff when a later line has an unknown unit" {
+  # The dangerous half of the case above, and the one that says why awk has to
+  # be the last command of its substitution. Here the good line is emitted
+  # before awk reaches the bad one, so the table is not empty, the entry-count
+  # guard at the end is satisfied, and every other signal says success. Only
+  # the exit status of awk itself knows the diff was cut short.
+  #
+  # Reporting the survivors would be worse than reporting nothing: the bar
+  # would show a smaller update than the one about to be applied.
+  printf 'gcc: 16.1.0 → 16.2.0\nhuge: 1.0 → 2.0, 1.0 TiB\n' > "$BATS_TMPDIR/mixed-tib.txt"
+  run bash -c "closure_parse < '$BATS_TMPDIR/mixed-tib.txt' 2>/dev/null"
+  [ "$status" -eq 1 ]
+  [ -z "$output" ]
 }
 
 @test "closure_parse sums sizes across units into MB" {
@@ -168,6 +200,11 @@ setup() {
 
   run bash -c "closure_parse < '$FIX'"
   [ "$status" -eq 1 ]
+  # The status is half of it. The property that matters is that nothing is
+  # emitted: a diff nobody can vouch for must not reach the bar at all. Folded
+  # into a single jq call some day, the status alone could go on passing while
+  # a partial object was already on stdout.
+  [ -z "$output" ]
 }
 
 @test "closure_parse on empty input is an empty diff, not an error" {

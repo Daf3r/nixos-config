@@ -31,16 +31,30 @@
 closure_parse() {
   local out
   local raw
+  local table
   raw="$(cat)"
-  out="$(
+
+  # awk is the last command of this substitution on purpose. A command
+  # substitution reports the status of its last command, so awk exiting on an
+  # unknown unit is caught right here without the caller having to have set
+  # pipefail -- and it must not depend on that, since a caller is free not to,
+  # and the tests run this through a plain `bash -c`. Feeding jq from the same
+  # pipeline would have hidden that status behind jq succeeding on the partial
+  # table awk had already written.
+  table="$(
     printf '%s\n' "$raw" \
       | sed 's/\x1b\[[0-9;]*m//g' \
       | awk -F': ' '
-        # The unit list lives in THREE places: the two size regexes below and
-        # this function. Adding one (a TiB from some future nix) to only the
-        # regexes is the dangerous half-edit: the line still parses, and the
-        # size silently becomes 0 because this falls through to the return at
-        # the end. Change all three together.
+        # The one place that knows the units. The patterns below deliberately
+        # accept any alphabetic unit and leave the judgement here, so that a
+        # unit this cannot convert is impossible to introduce by editing one
+        # site and not the other -- there is no other site.
+        #
+        # Unknown means stop, not zero. A zero is indistinguishable from a
+        # package whose size did not move, so a TiB arriving in some future
+        # nix would quietly shrink every total that contained one. Exiting
+        # non-zero here fails closure_parse as a whole, which is the same
+        # treatment any other unparseable input gets.
         function bytes(s,   n, u) {
           n = s; u = s
           sub(/ .*$/, "", n)
@@ -49,7 +63,8 @@ closure_parse() {
           if (u == "KiB") return n * 1024
           if (u == "MiB") return n * 1024 * 1024
           if (u == "GiB") return n * 1024 * 1024 * 1024
-          return 0
+          printf "closure_parse: unknown size unit %s in %s\n", u, $0 > "/dev/stderr"
+          exit 1
         }
         NF < 2 { next }
         {
@@ -65,10 +80,13 @@ closure_parse() {
           only_size = 0
           # A trailing ", <number> <unit>" is the size field. Anchored at the
           # end so a version containing a space could never be eaten by it.
-          if (match(rest, /, -?[0-9]+(\.[0-9]+)? (B|KiB|MiB|GiB)$/)) {
+          # The unit is matched as letters rather than as a list: bytes() is
+          # the one place that decides which units exist, and it refuses the
+          # ones it cannot convert.
+          if (match(rest, /, -?[0-9]+(\.[0-9]+)? [A-Za-z]+$/)) {
             size = bytes(substr(rest, RSTART + 2))
             rest = substr(rest, 1, RSTART - 1)
-          } else if (rest ~ /^-?[0-9]+(\.[0-9]+)? (B|KiB|MiB|GiB)$/) {
+          } else if (rest ~ /^-?[0-9]+(\.[0-9]+)? [A-Za-z]+$/) {
             # `name: 52.3 KiB` -- same version string, different closure. Here
             # the size is the whole field and there is no comma in front of it,
             # so the branch above never sees it. Measured on the 2026-08-11
@@ -104,7 +122,11 @@ closure_parse() {
 
           printf "%s\t%s\t%s\t%s\t%.0f\n", kind, name, from, to, size
         }
-      ' \
+      '
+  )" || return 1
+
+  out="$(
+    printf '%s\n' "$table" \
       | jq -R -s '
           split("\n") | map(select(length > 0) | split("\t"))
           | {
