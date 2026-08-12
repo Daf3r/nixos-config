@@ -192,6 +192,17 @@ in
 
     kdePackages.dolphin # SUPER+E in config/niri/config.kdl
     kdePackages.kate # SUPER+K
+
+    # The KIO workers Dolphin talks every protocol that is not a local file
+    # through. Plasma would pull these in; running Dolphin on its own does not,
+    # so without this the only worker in the profile is the one Kate brings
+    # along, and Dolphin can open nothing but the filesystem. The one that
+    # matters here is mtp: a phone plugged in over USB is recognised by the
+    # kernel and permitted to this user by udev, but MTP is spoken entirely in
+    # userspace — with no worker for it Dolphin has nothing to talk to and the
+    # device simply never appears. With it, the phone opens at mtp:/.
+    kdePackages.kio-extras
+
     filezilla
 
     # Nextcloud desktop sync client. Qt, so it picks up the platform theme and
