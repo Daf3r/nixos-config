@@ -4,13 +4,19 @@ Plan: `docs/superpowers/plans/2026-08-11-widget-upd-barra.md`
 Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 Rama: `upd-barra`, desde `9864df3` en `main`. **Sin integrar.**
 
-Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 7 de 11 hechas**, más una
+Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 8 de 11 hechas**, más una
 tarea 5b que no estaba en el plan. Cada una con revisión y **todas sus rondas de
 arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
 
-**159 tests verdes**, shellcheck limpio, y build del sistema verde con la suite
-corriendo dentro de la derivación y con el chequeo de la unidad de apply también
-dentro.
+**159 tests bats verdes** y la suite de node del plugin, shellcheck limpio, y
+build del sistema verde con la suite corriendo dentro de la derivación y con el
+chequeo de la unidad de apply también dentro.
+
+**Ojo al historial: otra sesión mergeó `main` dentro de esta rama** (`3e187dc`,
+que trae `a15768d`: los workers de KIO para que Dolphin vea el teléfono por MTP).
+Toca **solo `apps.nix`, +11 líneas**, nada de `updates/` ni del plugin, y entró
+sin conflictos — pero la rama del widget lleva ahora un commit que no es suyo, y
+al integrar aparecerá dos veces en el historial.
 
 **La tarea 7 está aceptada en la máquina.** Su prueba falló a la primera —la
 unidad murió en 48 ms porque `nh` se niega a correr como root, ver «Ronda 1»— y
@@ -223,6 +229,16 @@ distintas**, que es exactamente por lo que aquí se renombró
 El plan lo escribió Claude y **los defectos los encontraron los
 implementadores**, todos medidos contra datos reales:
 
+0. **El plan trataba «bloqueos ausentes» igual que «sin bloqueos»** — el
+   `buttonFor` del brief hacía `Array.isArray(status.blockers) ? … : []`. Como el
+   fichero de disco no lleva esa clave y nunca la llevará, la versión del plan,
+   **corrida verbatim contra el fichero real de esta máquina**, dibujaba
+   `[ACTIVO] "Aplicar al arrancar"` sobre un repo con el árbol sucio y en la rama
+   equivocada: un botón que `upd apply` iba a rechazar. Lo que lo hace
+   concluyente es que **sobre el objeto de ejemplo del propio plan —que sí trae
+   `blockers: []`— el agujero es invisible**. Es el defecto de esta tanda que más
+   se habría visto en pantalla, y el que justifica la regla de medir el contrato
+   contra la fuente viva en vez de contra el plan.
 1. **El regex del tamaño exigía una coma delante.** Las líneas `kitty: 51.2 KiB`
    contaban 0: se perdían 2,56 de 8,88 MB en cinco paquetes del diff real.
 2. **La lista de paquetes de reinicio estaba a nivel de fichero**, y ahí no
@@ -291,6 +307,24 @@ de producción que el test dice cubrir y confirmar que el test cae.
   mutación del arnés hay que poder decir que **ningún test posible** la
   distinguiría. Si la diferencia existe y simplemente nadie la observa, es un
   hueco de cobertura con el nombre cambiado.
+- **La mutación siempre encuentra supervivientes, así que hace falta un criterio
+  de parada — y el criterio no puede ser el cansancio.** En la tarea 8 se
+  lanzaron 17 mutantes propios y sobrevivieron los 17; con 40 habrían salido más.
+  El criterio que se usó, y que se recomienda reutilizar: **se ancla lo que el
+  usuario ve y puede ser mentira.** Entró el resumen que decía «todo al dia»
+  sobre algo que no compila, el `tone` invertible, el icono —lo único visible sin
+  abrir el panel— y la etiqueta que describe la acción. Quedaron fuera, **por
+  escrito y como hueco declarado**, las etiquetas decorativas y un separador.
+  Declarar el hueco es la parte que hace honesto el criterio.
+- **Probar decisiones no es probar lo que se dice.** La suite de la tarea 8
+  anclaba qué acción se ofrece y si está activa, y dejaba libre **el texto que el
+  panel escribe**. Un módulo que decide bien y dice algo falso tiene el mismo
+  fallo desde el único asiento que importa, que es el del usuario.
+- **Un recuento con cero tests pasados no es una mutación muerta: es un fichero
+  que no parsea.** Ocurrió una vez, con un mutante que rompía un template
+  literal; `node --test` lo presentaba como un test fallando y se lee igual que
+  una muerte legítima. Se caza poniendo `node --check` delante, y la señal a la
+  que hay que mirar en la tabla es el número de **pasados**, no el de fallos.
 - **Un arreglo propuesto en una revisión es una hipótesis, no una instrucción.**
   Dos arreglos de revisores resultaron falsos al medirlos: `integer expected` no
   es subcadena de `integer expression expected`, y **`$stdout` no existe en
@@ -495,11 +529,25 @@ de producción que el test dice cubrir y confirmar que el test cae.
 
 | Tarea | Qué falta | Necesita root |
 |---|---|---|
-| 7 | **solo la prueba de aceptación**: ver el modal | **sí** |
-| 8 | `logic.js` del plugin y sus pruebas | no |
 | 9 | `plugin.json`, `Daemon.qml`, `Widget.qml`, declaración en `dms.nix` | **sí**, paso 5 |
 | 10 | `Popout.qml` y las acciones del daemon | **sí**, paso 4 |
 | 11 | Retirar la fase 2 de la spec vieja, READMEs y pasada de verificación | no |
+
+**La tarea 9 hereda tres cosas, y la primera es dura:**
+
+1. **Tiene que sondear `upd status --json`, nunca el fichero de disco.** Los dos
+   documentos son idénticos byte a byte salvo por una clave: el fichero **no
+   lleva `blockers` y nunca lo llevará** (`lib/blockers.sh:5-10` — el árbol
+   sucio y la rama sacada son hechos del momento, y la pasada nocturna los
+   escribiría con horas de antelación). Si el widget lee el fichero, el panel
+   **nunca ofrecerá aplicar**: correcto, pero inútil.
+2. **`engine_running` no apaga «Comprobar ahora».** Con `state: current` y ese
+   bloqueo el botón sale activo, y el motor lo rechazaría por el lock.
+   `blockers_live` se calcula en todos los estados, pero `buttonFor` solo lo
+   consulta en la rama `ready`. El brief tiene la misma forma, así que no era
+   defecto de la tarea 8: hay que decidirlo aquí.
+3. `unmanaged[]`, `kind` y `size_delta_mb` viajan en los datos y **nadie los
+   pinta todavía**.
 
 **De las tres cosas que heredaba la tarea 7, dos están cerradas y una sigue
 abierta a propósito.** La guardia del HEAD desprendido, cerrada: frase corregida,
