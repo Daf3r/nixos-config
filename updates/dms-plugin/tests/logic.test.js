@@ -332,22 +332,36 @@ test('a healthy state never borrows the icon of a broken one, or the other way r
   assert.notEqual(classify(ready).icon, classify({ ...ready, state: 'build_failed' }).icon)
 })
 
-test('no disabled button is ever mute', () => {
+test('none of these six paths leaves the button dead and mute', () => {
   // A dead button with no reason is the one outcome a user can neither act on
-  // nor report. Three of the four paths that disable it were pinned one at a
-  // time; this covers the set, so a new one cannot arrive silent.
-  const mudos = [
+  // nor report.
+  //
+  // The list is written out, not derived, and the name of this test says six
+  // rather than "every": a seventh path added to buttonFor with an empty reason
+  // would not be caught here. An earlier version of this comment claimed it
+  // would, which was measured false. Deriving the real set means enumerating
+  // the return paths of a function from outside it, and that costs more than
+  // this test is worth -- so the honest move is the narrower promise.
+  //
+  // Both properties are asserted per case, and that is the point of the loop
+  // over a filter: the first version collected the cases that were disabled
+  // *and* mute and asserted the collection was empty, so a mutant that enabled
+  // every button emptied the list and the test passed green over seven other
+  // failures. A filter that finds nothing must not read as a pass.
+  const apagados = [
     ['status ausente', null],
     ['schema desconocido', { schema: 99, state: 'ready' }],
     ['estado desconocido', { ...ready, state: 'reticulando_splines' }],
     ['sin lista de bloqueos', onDisk],
     ['bloqueo con detalle', { ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol tiene cambios' }] }],
     ['bloqueo sin detalle', { ...ready, blockers: [{ code: 'dirty_tree' }] }],
-  ].filter(([, s]) => {
-    const b = buttonFor(s)
-    return b.enabled === false && !(b.reason && b.reason.trim().length > 0)
-  })
-  assert.deepEqual(mudos.map(([name]) => name), [], 'un boton apagado sin motivo no se puede ni accionar ni reportar')
+  ]
+  for (const [nombre, status] of apagados) {
+    const b = buttonFor(status)
+    assert.equal(b.enabled, false, `${nombre}: este camino tiene que apagar el boton`)
+    assert.ok(b.reason && b.reason.trim().length > 0,
+      `${nombre}: un boton apagado sin motivo no se puede ni accionar ni reportar`)
+  }
 })
 
 test('the label tells the truth about which apply this is', () => {
