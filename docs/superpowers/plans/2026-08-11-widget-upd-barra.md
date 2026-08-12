@@ -962,13 +962,23 @@ Two smaller things from the same round: `tr … | head -c 200` was a race under 
 polkit rules verified by evaluation rather than by reading, and an `apply` whose
 five refusals all say what they mean.
 
-**Still outstanding, and it is daf3r's to run:** the acceptance test. Steps 3–5
-of the original brief are in the Task 7 report as a copy-and-paste block —
-`nh os switch`, then `systemctl start nixos-upd.service` expecting **no** prompt,
-then `systemctl start nixos-upd-apply@boot.service` expecting the DMS modal. A
-silently-ineffective polkit rule is the known failure mode here, and it has
-happened on this machine before with gamemode. Do not start Task 8 until the
-modal has been seen.
+**The acceptance test ran, failed, and then passed.** It is worth reading in that
+order, because the first run is the whole argument for insisting on it: the unit
+died in 48 ms on `Don't run nh os as root`, a refusal nothing in the suite could
+have seen, because bats stubs `nh` and a stub accepts whatever it is handed. The
+build-time check described above exists because of that run.
+
+The second run passed both halves — polkit denied on cancel (the unit produced no
+journal entries at all, which is the proof) and allowed after authentication, and
+the unit finished with `Result=success` and `Adding configuration to bootloader`.
+That last line is the evidence, and it replaces a criterion this plan briefly
+carried that proved nothing: `readlink /nix/var/nix/profiles/system` having
+changed, which it had — because of the `nh os switch` in the step before, not
+because of the apply.
+
+With it, the one thing the build-time check cannot reach is now known to work:
+libgit2 opening a repository root does not own. A sandbox has neither that
+repository nor a foreign owner, so only the machine could answer it.
 
 ---
 

@@ -12,10 +12,10 @@ arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`
 corriendo dentro de la derivación y con el chequeo de la unidad de apply también
 dentro.
 
-**La tarea 7 dio su prueba de aceptación, falló, y está arreglada.** Lo de polkit
-pasó —el modal salió— y lo de `nh` no: la unidad murió en 48 ms porque `nh` se
-niega a correr como root. Ver «Ronda 1» abajo. **Lo que queda es volver a
-arrancarla** y ver que esta vez activa.
+**La tarea 7 está aceptada en la máquina.** Su prueba falló a la primera —la
+unidad murió en 48 ms porque `nh` se niega a correr como root, ver «Ronda 1»— y
+tras el arreglo pasó entera: polkit deniega al cancelar y permite al autenticar,
+y la unidad terminó con `Result=success` y `Adding configuration to bootloader`.
 
 ## Dónde se paró exactamente
 
@@ -127,39 +127,39 @@ con el mismo nixpkgs fijado y solo activa el motor nuevo.
 prueban con igualdad exacta que se invoca como `os boot` y no como `os switch`,
 pero la primera ejecución real será en esta máquina.
 
-### La prueba de aceptación de la tarea 7, ronda 2
+### La prueba de aceptación de la tarea 7: **PASADA**
 
-Lo de polkit **ya está validado** en la ronda 1 y no hay que repetirlo: el modal
-salió y esperó ~55 s a que se autenticara. Lo que falta es que la unidad, ya con
-`--elevation-strategy none`, llegue a activar.
+Corrida en la máquina, y las dos mitades quedaron demostradas:
 
-```
-nh os switch ~/nixos-config
-```
+- **polkit, las dos direcciones.** Al cancelar el modal, la unidad **no arrancó**
+  — cero entradas en el journal, que es la prueba de la denegación. Tras
+  autenticar, arrancó.
+- **La activación.** `Result=success`, `ExecMainStatus=0`, sin
+  `Don't run nh os as root` y sin `is not owned by current user`, y con
+  `> Adding configuration to bootloader` en el journal.
 
-Pide contraseña (es `nh` como root, por la vía normal).
+Con eso **la mitad de libgit2 que declaré no demostrable queda demostrada**: root
+leyó `~/nixos-config` a través del fetcher de git de nix y la exención
+`safe.directory` hizo su trabajo. Era lo único que no se podía comprobar en un
+sandbox, porque un sandbox no tiene ni ese repositorio ni un dueño distinto.
+
+**Corrección de un criterio que yo di y que no probaba nada.** Escribí que
+`readlink /nix/var/nix/profiles/system` «debe haber cambiado». **Es falso como
+prueba de esta acción**: la generación que apareció la había creado el
+`nh os switch` del paso anterior, no el apply. Lo que demuestra que el apply hizo
+algo es **`Adding configuration to bootloader`** en el journal de la unidad. Un
+criterio de aceptación que se cumple por el paso anterior no es un criterio de
+aceptación — es la misma clase de defecto que esta rama lleva persiguiendo, esta
+vez en mi propia lista de comprobación.
+
+Si hubiera que repetirla algún día, los comandos son:
 
 ```
 systemctl reset-failed nixos-upd-apply@boot.service
-systemctl start nixos-upd-apply@boot.service
-```
-
-Sale el modal, se **mete la contraseña** esta vez. Y después:
-
-```
+systemctl start nixos-upd-apply@boot.service     # sale el modal
 systemctl show nixos-upd-apply@boot.service -p Result -p ExecMainStatus
-journalctl -u nixos-upd-apply@boot.service -b --no-pager | tail -30
+journalctl -u nixos-upd-apply@boot.service -b --no-pager | grep -i bootloader
 ```
-
-Demuestra que funcionó: `Result=success`, `ExecMainStatus=0`, y en el journal
-**ninguna** de estas dos líneas —
-
-- `Don't run nh os as root` → el arreglo de la ronda 1 no llegó
-- `is not owned by current user` → el `safe.directory` no llega a libgit2
-
-— sino `nh` construyendo y dejando la generación lista para el próximo arranque.
-Se confirma con `readlink /nix/var/nix/profiles/system`, que **debe haber
-cambiado** (es `boot`: escribe el perfil y no toca `/run/current-system`).
 
 ## Qué hay hecho
 
@@ -358,6 +358,25 @@ de producción que el test dice cubrir y confirmar que el test cae.
   Coste: `nh` sondea `nix --version` y `nix config show experimental-features`
   antes de mirar el uid, así que el chequeo necesita `nix` en el PATH y
   `NIX_CONFIG = "experimental-features = nix-command flakes"`.
+
+  **Y de ahí cuelga la portabilidad del chequeo de `applyCommand`**: si algún día
+  el kernel, el nix o la máquina de build no permiten anidar espacios de nombres,
+  el chequeo **no puede correr**. No se degrada en silencio — su control positivo
+  falla y el build para diciendo que no pudo comprobar nada —, que es la elección
+  deliberada: un build que se detiene con una explicación antes que un chequeo
+  que deja de comprobar sin avisar. Pero conviene saberlo antes de mover este
+  repo a un builder remoto o a CI.
+
+- **Las dos superficies ya no dicen la misma frase sobre un repositorio que no se
+  puede abrir, y hoy son compatibles pero no iguales**: `upd.sh` dice «no puedo
+  leer … como repositorio git **con arbol de trabajo**» y `lib/blockers.sh:113`
+  sigue diciendo «no puedo leer … como repositorio git». La divergencia nació al
+  arreglar lo del repo bare, que es exactamente la distinción que la frase larga
+  añade. El test de contrato del repo ilegible ancla la de `apply` por
+  subcadena, así que la divergencia **no la rompe nadie sin querer** — pero el
+  comentario de esa guardia justifica su existencia hablando de que las dos
+  superficies digan cosas compatibles, y eso es ya una afirmación que hay que
+  releer si alguien vuelve a tocar cualquiera de las dos.
 
 ## Decisiones tomadas, con su porqué
 
