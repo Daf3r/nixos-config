@@ -193,6 +193,21 @@ in
     kdePackages.dolphin # SUPER+E in config/niri/config.kdl
     kdePackages.kate # SUPER+K
 
+    # Cursor, the AI editor. A VSCode fork, so Electron, so it picks its
+    # credential backend by sniffing XDG_CURRENT_DESKTOP — which says "niri"
+    # here, a name Chromium does not recognise, so it falls back to the "basic"
+    # plaintext store and treats the machine as having no keyring at all. The
+    # visible symptom is a sign-in that appears to work and is gone by the next
+    # launch, because nothing was ever written where it could be read back;
+    # gnome-keyring-daemon is running and owns org.freedesktop.secrets, it just
+    # never gets asked. Same fault, and same one-flag fix, as ./pkgs/t3code-app.nix.
+    #
+    # This one goes through the package's own `commandLineArgs` rather than a
+    # wrapProgram: it lands in the bin/cursor wrapper, and the .desktop entries
+    # call `cursor` by name off PATH, so the launcher inherits it without the
+    # Exec= line needing to be rewritten.
+    (code-cursor.override { commandLineArgs = "--password-store=gnome-libsecret"; })
+
     # The KIO workers Dolphin talks every protocol that is not a local file
     # through. Plasma would pull these in; running Dolphin on its own does not,
     # so without this the only worker in the profile is the one Kate brings
