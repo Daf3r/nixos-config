@@ -8,14 +8,19 @@ Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 8 de 11 hechas**, más 
 tarea 5b que no estaba en el plan. Cada una con revisión y sus rondas de arreglo
 cerradas, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
 
-**Lo único sin verificar al cerrar: la ronda 3 de la tarea 8** (`6dd10a2`). Su
-re-revisión se lanzó y la sesión se acabó antes de que volviera, así que **el
-implementador la declara hecha y nadie la ha comprobado**. Lo que sí está
-confirmado a mano: **159 bats + 35 node, cero fallos**. Los tres puntos que esa
-ronda tocaba son de texto y de una aserción —corregir una afirmación falsa en el
-nombre y el comentario de un test, impedir que ese test se auto-desactive, y
-añadir la columna de pasados a una tabla del informe—, así que el riesgo es bajo;
-pero **es lo primero que hay que cerrar mañana**, antes de empezar la tarea 9.
+**La ronda 3 de la tarea 8 (`6dd10a2`) llegó a re-revisarse y quedó aprobada**,
+justo al cerrar la sesión. Verificado por ejecución, no por lectura: el séptimo
+camino mudo **sobrevive** (35✔ 0✘), que es exactamente lo que el texto corregido
+promete — ni de más ni de menos; y el test que se auto-desactivaba ahora cae con
+el mutante que antes lo dejaba en verde. El contraste se midió **en las dos
+direcciones**: con el fichero anterior (`dfb5aa0`) y el mismo mutante, la suite
+daba 28✔ 7✘ **con `no disabled button is ever mute` en VERDE**.
+
+Queda una sola cosa, cosmética y no bloqueante: el encabezado de la sección 7 del
+informe dice «44 lanzados» y la tabla tiene **43 filas válidas** — el Q5 inválido
+(el que no parseaba) está contado en el 44, así que la frase «en las 44 la suma
+da 35» es falsa justo para ése. Debería decir «en las 43 válidas». El informe
+vive en `.superpowers/`, que está fuera de git.
 
 **159 tests bats verdes** y la suite de node del plugin, shellcheck limpio, y
 build del sistema verde con la suite corriendo dentro de la derivación y con el
