@@ -60,10 +60,20 @@ test('changeLines skips entries whose version did not move', () => {
 })
 
 test('changeLines renders an added and a removed package readably', () => {
-  const lines = changeLines({ ...ready, changes: [
+  // Rewritten from the plan's version, which built only the added package and
+  // then asserted `/abc1234/` on it -- so the name promised two cases and the
+  // body covered one, and `(nuevo)` and `(fuera)` could both vanish with the
+  // suite still green. The vice this branch keeps finding, in a test of my own.
+  const [added, removed] = changeLines({ ...ready, changes: [
     { name: 'nuevo', kind: 'input', from: '', to: 'abc1234' },
+    { name: 'retirado', kind: 'local_pkg', from: '1.93.134', to: '' },
   ]})
-  assert.match(lines[0].text, /abc1234/)
+  assert.equal(added.name, 'nuevo')
+  assert.match(added.text, /abc1234/)
+  assert.match(added.text, /\(nuevo\)/, 'una entrada sin origen tiene que decir que es nueva')
+  assert.equal(removed.name, 'retirado')
+  assert.match(removed.text, /1\.93\.134/)
+  assert.match(removed.text, /\(fuera\)/, 'una entrada sin destino tiene que decir que se va')
 })
 
 // ---------------------------------------------------------------------------
@@ -241,9 +251,14 @@ test('a blocker with no detail still explains why the button is dead', () => {
 })
 
 test('a blocker with neither code nor detail still explains itself', () => {
+  // Tightened: `length > 0` was satisfied by any string at all, including one
+  // that says nothing. With no code and no detail there is nothing true left to
+  // say about *this* blocker, so what the line owes the user is the admission
+  // and somewhere to go -- the same `upd status` its sibling above points at.
   const b = buttonFor({ ...ready, blockers: [{}] })
   assert.equal(b.enabled, false)
-  assert.ok(b.reason.length > 0)
+  assert.match(b.reason, /sin codigo/)
+  assert.match(b.reason, /upd status/)
 })
 
 test('warnings false is not a warning, because jq reads it as absent', () => {
@@ -257,6 +272,97 @@ test('a reboot with no reasons given does not trail an empty list', () => {
   const b = buttonFor({ ...ready, reboot_recommended: true, reboot_reason: [] })
   assert.equal(b.action, 'apply-boot')
   assert.doesNotMatch(b.reason, /:\s*$/, 'un motivo cortado en dos puntos parece un fallo de la app')
+})
+
+// ---------------------------------------------------------------------------
+// What the user actually reads, anchored in absolute values.
+//
+// Everything above pinned decisions -- which action, enabled or not. These pin
+// the four fields the panel paints: the summary sentence, the tone, the icon
+// and the button label. A suite that checks only decisions lets the module keep
+// deciding right and start *saying* something false, which is the same bug from
+// the one seat that matters.
+// ---------------------------------------------------------------------------
+
+test('every state says something true about itself', () => {
+  // build_failed had its tone pinned and its sentence loose, so the summary
+  // could read "todo al dia" over an update that does not compile while the
+  // tone stayed 'error'. The tone colours a dot; this is the line a human
+  // reads.
+  const summaryOf = s => classify(s).summary
+  assert.match(summaryOf({ ...ready, state: 'build_failed' }), /NO compila/)
+  assert.doesNotMatch(summaryOf({ ...ready, state: 'build_failed' }), /todo al dia/)
+  assert.equal(summaryOf({ ...ready, state: 'current' }), 'todo al dia')
+  assert.match(summaryOf(ready), /^1 cambios/)
+  assert.match(summaryOf({ ...ready, state: 'check_failed', error: 'no pude clonar' }), /no pude clonar/)
+  assert.doesNotMatch(summaryOf({ ...ready, state: 'check_failed' }), /todo al dia/)
+})
+
+test('the tone of a ready is not merely different when warned, it is the right way round', () => {
+  // The plan's test asked only for `notEqual`, and a swapped pair is also
+  // unequal: a clean ready painted as a warning and a warned one as clean
+  // passes that assertion perfectly.
+  assert.equal(classify(ready).tone, 'ready')
+  assert.equal(classify({ ...ready, warnings: [{ code: 'x', detail: 'y' }] }).tone, 'warn')
+})
+
+test('each state carries its own icon', () => {
+  // In a bar widget the icon is the whole of what is visible without opening
+  // the panel -- the most seen field in this module, and until now the only one
+  // with no assertion anywhere.
+  const iconOf = s => classify(s).icon
+  assert.equal(iconOf({ ...ready, state: 'current' }), 'check_circle')
+  assert.equal(iconOf(ready), 'system_update_alt')
+  assert.equal(iconOf({ ...ready, state: 'build_failed' }), 'error')
+  assert.equal(iconOf({ ...ready, state: 'check_failed' }), 'error')
+  assert.equal(iconOf({ ...ready, state: 'reticulando_splines' }), 'help')
+  assert.equal(iconOf({ schema: 99, state: 'ready' }), 'help')
+  assert.equal(iconOf(null), 'help')
+})
+
+test('a healthy state never borrows the icon of a broken one, or the other way round', () => {
+  // The pairing the table above cannot catch on its own: swap two icons and
+  // each assertion still finds *an* icon. What must hold is that the three
+  // kinds stay apart.
+  const ok = classify({ ...ready, state: 'current' }).icon
+  for (const state of ['build_failed', 'check_failed', 'reticulando_splines']) {
+    assert.notEqual(classify({ ...ready, state }).icon, ok, `${state} no puede llevar el icono de un sistema al dia`)
+  }
+  assert.notEqual(classify(ready).icon, ok)
+  assert.notEqual(classify(ready).icon, classify({ ...ready, state: 'build_failed' }).icon)
+})
+
+test('no disabled button is ever mute', () => {
+  // A dead button with no reason is the one outcome a user can neither act on
+  // nor report. Three of the four paths that disable it were pinned one at a
+  // time; this covers the set, so a new one cannot arrive silent.
+  const mudos = [
+    ['status ausente', null],
+    ['schema desconocido', { schema: 99, state: 'ready' }],
+    ['estado desconocido', { ...ready, state: 'reticulando_splines' }],
+    ['sin lista de bloqueos', onDisk],
+    ['bloqueo con detalle', { ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol tiene cambios' }] }],
+    ['bloqueo sin detalle', { ...ready, blockers: [{ code: 'dirty_tree' }] }],
+  ].filter(([, s]) => {
+    const b = buttonFor(s)
+    return b.enabled === false && !(b.reason && b.reason.trim().length > 0)
+  })
+  assert.deepEqual(mudos.map(([name]) => name), [], 'un boton apagado sin motivo no se puede ni accionar ni reportar')
+})
+
+test('the label tells the truth about which apply this is', () => {
+  // The one label that must never drift: "Aplicar al arrancar" and "Aplicar"
+  // are two different operations -- nh switch now against nh boot at the next
+  // start -- and a reboot-recommended update degraded to the plain label reads
+  // as an offer to switch onto a new kernel right now.
+  const boot = buttonFor({ ...ready, reboot_recommended: true, reboot_reason: ['nvidia-open'] })
+  assert.equal(boot.action, 'apply-boot')
+  assert.match(boot.label, /arrancar/)
+  const now = buttonFor(ready)
+  assert.equal(now.action, 'apply')
+  assert.equal(now.label, 'Aplicar')
+  assert.doesNotMatch(now.label, /arrancar/)
+  assert.notEqual(boot.label, now.label)
 })
 
 test('a reboot-recommended real status says which packages asked for it', () => {
