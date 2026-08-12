@@ -271,6 +271,44 @@ let
         exit 1
       fi
 
+      # --- a copy of the script that records nh's arguments ------------------
+      # Running the real script proves nh accepts the command line; it does not
+      # prove *which* command line, because nh dies at flake resolution long
+      # before the verb matters and prints the same complaint either way.
+      # Measured: hardcoding `nh os boot` and never propagating $mode left the
+      # build green with this check announcing it had run both modes -- which in
+      # production is `nixos-upd-apply@switch` activating a `boot`, or a `boot`
+      # activating in place.
+      #
+      # So the argument vector is read rather than inferred: the same script
+      # with nh's store path swapped for a recorder. That is a derived copy, and
+      # deriving a copy is what went wrong with the first control in this file,
+      # so the two differences are worth stating -- the substitution is asserted
+      # to have landed, and it removes nothing that is under test. The
+      # unmodified script is still what the loop below runs against the real nh.
+      nh_path="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' ${applyScript})"
+      if [ -z "$nh_path" ]; then
+        echo "check: cannot find the nh invocation in the apply command, so its"
+        echo "check: arguments cannot be read. Has the script's shape changed?"
+        cat ${applyScript}
+        exit 1
+      fi
+      mkdir -p rec
+      cat > rec/nh <<'RECORDER'
+#!/bin/sh
+printf 'ARGV:'
+for a in "$@"; do printf ' [%s]' "$a"; done
+echo
+RECORDER
+      chmod +x rec/nh
+      sed "s|^exec $nh_path |exec $PWD/rec/nh |" ${applyScript} > recorded
+      if cmp -s recorded ${applyScript}; then
+        echo "check: swapping nh for the recorder changed nothing, so the"
+        echo "check: argument assertions below would be reading the real nh."
+        exit 1
+      fi
+      chmod +x recorded
+
       # --- the thing being checked ------------------------------------------
       # Both instances the polkit rules name, not just one. `switch` and `boot`
       # are separate arms of the script's `case`, so checking only `boot` left
@@ -346,6 +384,60 @@ let
           cat real.log
           exit 1
         fi
+
+        # And what nh was actually handed. Last on purpose, like the anchor
+        # above it: the runtime failures are the more specific diagnosis, and a
+        # red build carrying the wrong reason has already cost this branch a
+        # round. One equality covers the verb, the mode reaching it, the flag
+        # spelled the way nh understands it, and the repository.
+        got="$(./recorded "$mode")"
+        want="ARGV: [os] [$mode] [--elevation-strategy] [none] [${repo}]"
+        if [ "$got" != "$want" ]; then
+          echo "check: the $mode instance would not hand nh the $mode verb."
+          echo "check:   esperado: $want"
+          echo "check:   recibido: $got"
+          exit 1
+        fi
+      done
+
+      # --- and that the mode guard still refuses ------------------------------
+      # The negative half of the same guard, which the loop above cannot reach
+      # because it only ever passes valid modes. Measured: deleting the `*)` arm
+      # left the build green, and root can start any instance of a template, so
+      # polkit is not what keeps this closed -- the script is.
+      #
+      # The empty string is in the list because it is the mode nobody types on
+      # purpose: it is what an unset variable expands to, and in Task 6 an empty
+      # mode sailed through `upd apply` as `switch`.
+      # `bad_out`, not `out`: stdenv's $out is the output path, and shadowing it
+      # here made `install` at the bottom fail with an empty target. Found by the
+      # build, which is the argument for the check being in the build.
+      for bad in --frobnicate switchh boot-ish ""; do
+        bad_out="$(./recorded "$bad" 2>&1)" && bad_rc=0 || bad_rc=$?
+
+        # Reaching nh first, because it is the specific and dangerous outcome:
+        # the guard is gone and an arbitrary word is on its way to becoming an
+        # nh subcommand. Measured -- with the exit status tested first, deleting
+        # the `*)` arm reported "the apply command accepted the mode", which is
+        # true but is the consequence, not the fault.
+        case "$bad_out" in
+          *ARGV:*)
+            echo "check: the mode '$bad' reached nh instead of being refused."
+            echo "check:   $bad_out"
+            exit 1 ;;
+        esac
+        if [ "$bad_rc" -eq 0 ]; then
+          echo "check: the apply command accepted the mode '$bad' and exited 0."
+          exit 1
+        fi
+        case "$bad_out" in
+          *"unknown mode"*) ;;
+          *)
+            echo "check: the mode '$bad' was refused without saying so, which is"
+            echo "check: the difference between a guard and an accident."
+            echo "check:   $bad_out"
+            exit 1 ;;
+        esac
       done
 
       # --- and that the git config is found where the command points at it ---
@@ -376,9 +468,10 @@ let
         exit 1
       fi
 
-      echo "check: nh ran both modes as root, reached ${repo}, and did not have"
-      echo "check: to be told to ignore its own refusal; and the safe.directory"
-      echo "check: exemption is readable at the path the command exports"
+      echo "check: nh ran as root for switch and for boot, was handed that verb"
+      echo "check: and ${repo}, and did not have to be told to ignore its own"
+      echo "check: refusal; every other mode is refused before nh sees it; and"
+      echo "check: the safe.directory exemption is readable where it points"
       install -m 0555 ${applyScript} $out
     '';
 
