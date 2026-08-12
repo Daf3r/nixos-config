@@ -235,7 +235,28 @@ in
     # discord is the official build, added on request. It works, it just stays
     # the one window on the desktop that ignores the palette.
     vesktop
-    discord
+
+    # The official client flickers and throws visual artifacts under Wayland on
+    # this machine. The two flags below are not a guess: brave-origin already
+    # runs with them here (see pkgs/brave-origin.nix) and does not flicker, so
+    # this is the same Chromium base, the same compositor and the same NVIDIA
+    # driver in a configuration already proven on this hardware. Routing the GL
+    # calls through ANGLE avoids whatever Electron's native path gets wrong with
+    # the proprietary driver.
+    #
+    # Forcing X11 instead would also stop the flicker, but it is the wrong trade
+    # here: X11 supports only one global scale factor, and this laptop drives an
+    # internal panel at scale 1.6 alongside an external monitor at scale 1, so
+    # any single value is wrong on one of the two screens.
+    #
+    # The password store matters for a different failure. Electron apps default
+    # to an unencrypted store under niri and quietly lose their session, which is
+    # the same root cause as the Clerk login problem that went unexplained for
+    # months. Naming gnome-libsecret points it at the keyring that is already
+    # running.
+    (discord.override {
+      commandLineArgs = "--use-gl=angle --use-angle=gl --password-store=gnome-libsecret";
+    })
 
     # Telegram. Has a Noctalia community template, so it picks up the palette
     # like vesktop does — pick "noctalia" under Settings > Chat Settings >
