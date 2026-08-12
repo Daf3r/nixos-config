@@ -53,16 +53,17 @@ y compatible con NixOS/niri.
 - Sustituir la llamada al paquete comunitario en `home.nix`.
 - Mantener el CLI `codex` separado del cliente gráfico.
 
-### 4. Regresiones — parcialmente completada
+### 4. Regresiones — completada
 
 - Test de metadata: arquitectura, nombre, versión y desktop entry.
 - Test del wrapper: `--password-store=gnome-libsecret` llega al proceso.
 - Test de que no se conserva updater imperativo.
 - Build del paquete y del sistema completo completado; el desktop entry apunta
   al wrapper Nix y no quedan referencias de código al input comunitario.
-- Falta ejecutar la aplicación en la sesión gráfica real.
+- La aplicación real arrancó en niri, conservó la sesión y se verificó el
+  escalado visual configurado en `1.25×`.
 
-### 5. Aceptación en la máquina — pendiente del usuario
+### 5. Aceptación en la máquina — completada
 
 - `nh os switch` desde este worktree.
 - Arranque del cliente oficial y login.
@@ -71,7 +72,7 @@ y compatible con NixOS/niri.
 - Comparar el comportamiento con la instalación actual antes de retirar el
   fallback.
 
-## Decisiones abiertas
+## Decisiones futuras
 
 1. Si el cliente oficial Linux ya contiene su propio manejo de keyring y si el
    wrapper sigue siendo necesario.

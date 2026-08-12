@@ -545,13 +545,11 @@ de producción que el test dice cubrir y confirmar que el test cae.
   directorio entero. Cómodo para añadir, y también significa que **nadie se
   entera si un fichero de `lib/` desaparece**.
 
-## Lo que queda
+## Cierre de tareas
 
-| Tarea | Qué falta | Necesita root |
-|---|---|---|
-| 9 | `plugin.json`, `Daemon.qml`, `Widget.qml`, declaración en `dms.nix` | **sí**, paso 5 |
-| 10 | `Popout.qml` y las acciones del daemon | **sí**, paso 4 |
-| 11 | Retirar la fase 2 de la spec vieja, READMEs y pasada de verificación | no |
+Las tareas 9, 10 y 11 quedaron implementadas, integradas y aceptadas en la
+máquina. La tabla histórica anterior se conserva en el historial de Git; no
+representa pendientes actuales.
 
 **La tarea 9 hereda tres cosas, y la primera es dura:**
 
@@ -640,7 +638,8 @@ La revisión también corrigió la deuda que el cierre histórico dejaba anotada
 subdirectorio ilegible ya no puede pasar como árbol limpio; el caso tiene una
 regresión en `updates/tests/upd.bats`.
 
-Sigue pendiente la aceptación que no se puede demostrar desde este worktree:
-build con el daemon de Nix, switch, DMS activo, click en el popout y las dos
-rutas de polkit. El build local no llegó a evaluar porque el sandbox negó el
-socket `/nix/var/nix/daemon-socket/socket`.
+La aceptación que antes no se podía demostrar desde el worktree fue ejecutada
+en la máquina el 2026-08-12: build con el daemon de Nix, switch, DMS activo,
+click en el popout, las dos rutas de polkit y una aplicación real de update.
+El resultado actual es `state: current`, `blockers: []` y
+`nixos-upd.service: Result=success`.

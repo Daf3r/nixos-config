@@ -1,5 +1,10 @@
 # Prepared-update engine — Implementation Plan
 
+> Estado: implementado y aceptado. Este documento conserva la secuencia
+> histórica de implementación; sus casillas originales no representan
+> pendientes actuales. La aceptación final está registrada en
+> `docs/superpowers/ledger/2026-08-11-widget-upd-barra.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A daily systemd timer that prepares a fully-built system update — flake inputs plus the two locally-packaged apps — verifies it, and reports it, without ever applying it or touching `~/nixos-config`.

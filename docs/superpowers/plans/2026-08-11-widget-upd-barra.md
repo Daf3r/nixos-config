@@ -1,5 +1,9 @@
 # Apply from the bar — Implementation Plan
 
+> Estado: implementado, integrado en `main` y aceptado en la máquina el
+> 2026-08-12. Las casillas de las fases históricas describen el trabajo
+> ejecutado; el cierre verificable está en el ledger de este trabajo.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the nightly prepared update visible and appliable from the DankMaterialShell bar, with the password prompt DMS already draws, without weakening any guard `upd` enforces today.
@@ -1693,7 +1697,7 @@ grep -n "upd " README.md README.es.md
 
 If they do, add `status --json`, `apply --boot` and `apply --ff-only`, and mention the bar plugin.
 
-- [ ] **Step 3: Full verification pass**
+- [x] **Step 3: Full verification pass**
 
 ```bash
 nix run nixpkgs#bats -- updates/tests/
@@ -1702,15 +1706,22 @@ nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-
 upd status --json | jq '.schema, .blockers, .reboot_recommended'
 ```
 
-Expected: all green, `schema` 2.
+Resultado: aceptado en la máquina el 2026-08-12. El build del sistema, el
+switch, DMS activo, el popout, las dos rutas de polkit y una aplicación real de
+update terminaron correctamente. La comprobación actual devuelve `schema` 2,
+`state: current` y `blockers: []`.
 
-- [ ] **Step 4: Commit and publish**
+- [x] **Step 4: Commit and publish**
 
 ```bash
 git add docs/ README.md README.es.md
 git commit -m "docs: la fase 2 del motor esta hecha"
 git push origin main
 ```
+
+Resultado: integrado y publicado en `main`; el commit de cierre del plugin es
+`7d55eec` y el estado actual de `main` también contiene los cambios posteriores
+del cliente oficial de ChatGPT.
 
 ---
 
