@@ -5,8 +5,17 @@ Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 Rama: `upd-barra`, desde `9864df3` en `main`. **Sin integrar.**
 
 Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 8 de 11 hechas**, más una
-tarea 5b que no estaba en el plan. Cada una con revisión y **todas sus rondas de
-arreglo cerradas**, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
+tarea 5b que no estaba en el plan. Cada una con revisión y sus rondas de arreglo
+cerradas, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
+
+**Lo único sin verificar al cerrar: la ronda 3 de la tarea 8** (`6dd10a2`). Su
+re-revisión se lanzó y la sesión se acabó antes de que volviera, así que **el
+implementador la declara hecha y nadie la ha comprobado**. Lo que sí está
+confirmado a mano: **159 bats + 35 node, cero fallos**. Los tres puntos que esa
+ronda tocaba son de texto y de una aserción —corregir una afirmación falsa en el
+nombre y el comentario de un test, impedir que ese test se auto-desactive, y
+añadir la columna de pasados a una tabla del informe—, así que el riesgo es bajo;
+pero **es lo primero que hay que cerrar mañana**, antes de empezar la tarea 9.
 
 **159 tests bats verdes** y la suite de node del plugin, shellcheck limpio, y
 build del sistema verde con la suite corriendo dentro de la derivación y con el
