@@ -136,4 +136,13 @@ function changeLines(status) {
     }))
 }
 
-module.exports = { classify, buttonFor, changeLines, SCHEMA }
+// Guarded because this file has two homes now, and only one of them has a
+// `module`. Under `import "logic.js" as Logic` the QML engine exposes the
+// top-level declarations of the script itself and defines nothing called
+// `module`. Measured on Quickshell 0.3.0 / Qt 6.11 with the bare assignment:
+// `@logic.js[..]: ReferenceError: module is not defined` on every load. The
+// functions still answered, because the declarations above are hoisted before
+// the throwing line -- so the failure is a warning in the log today and a
+// silent dependency on evaluation order for as long as it is left there.
+if (typeof module !== 'undefined')
+  module.exports = { classify, buttonFor, changeLines, SCHEMA }

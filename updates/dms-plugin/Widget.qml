@@ -1,0 +1,141 @@
+// The bar item. It paints and nothing else -- no Process, no Timer, no file
+// access -- for the per-screen reason in Daemon.qml's header comment.
+//
+// There is no `popoutContent` here yet, and its absence is the whole of what
+// "no buttons in this task" means: PluginComponent turns a click into a popout
+// only when that property is set, so the pill is inert until Task 10 declares
+// the panel.
+
+import QtQuick
+import qs.Common
+import qs.Modules.Plugins
+import qs.Widgets
+
+PluginComponent {
+    id: root
+
+    // What this paints before anyone has published, and if what arrives is not
+    // the shape agreed with the daemon. It is what Logic.classify(null) returns,
+    // written out rather than computed, because reaching for logic.js here
+    // would load and parse it once per screen to answer a question with one
+    // constant answer.
+    //
+    // The gap before the first publish is emphatically NOT "everything is
+    // fine": it is "nobody has answered yet", which is the same thing an
+    // unreadable status means and gets the same face.
+    readonly property var unknownView: ({
+            state: "unknown",
+            icon: "help",
+            tone: "unknown",
+            summary: ""
+        })
+
+    // Same varName the daemon publishes under: this is the channel. It has to
+    // be a direct child of the PluginComponent, because `value` reads the
+    // pluginId off its own parent.
+    PluginGlobalVar {
+        id: updState
+        varName: "updState"
+        defaultValue: ({
+                view: root.unknownView,
+                status: null,
+                applying: false,
+                lastError: ""
+            })
+    }
+
+    readonly property var view: (updState.value && updState.value.view) ? updState.value.view : root.unknownView
+
+    // The tone->colour map is the whole point of the bar item. `ready` and
+    // `warn` MUST be different here and not only inside the panel: upd.sh makes
+    // the same distinction in its own heading, because a ready carrying
+    // warnings that looks identical to a clean one leaves reading them to
+    // chance. `unknown` deliberately shares the muted colour of `ok` and is
+    // told apart by its icon instead -- a grey question mark is not a claim
+    // that anything is fine, and painting it red would cry failure over a
+    // shell that has merely not finished its first poll.
+    readonly property color toneColor: {
+        switch (root.view.tone) {
+        case "ok":
+            return Theme.surfaceVariantText;
+        case "ready":
+            return Theme.primary;
+        case "warn":
+            return Theme.warning;
+        case "error":
+            return Theme.error;
+        default:
+            return Theme.surfaceVariantText;
+        }
+    }
+
+    // The bar decides these, not the plugin: both scale with the configured bar
+    // thickness and with the user's icon and font scaling. PluginComponent
+    // already exposes iconSizeLarge under exactly the expression claude-usage
+    // spells out by hand for its own pill; the text size has no such shortcut.
+    readonly property int pillTextSize: Theme.barTextSize(root.barThickness, root.barConfig?.fontScale, root.barConfig?.maximizeWidgetText)
+
+    // Only a `ready` says anything in words. The other four states are an icon
+    // and a colour: `current` is the state this bar spends its whole day in and
+    // a permanent "todo al dia" would be a sentence nobody reads after the
+    // first week, while the two failures have a message that belongs in the
+    // panel, where there is room for it and something to do about it.
+    readonly property string pillText: root.view.state === "ready" ? root.view.summary : ""
+
+    horizontalBarPill: Component {
+        Item {
+            // BasePill measures the implicit size of whatever it loads and adds
+            // its own padding around it, so these two are the whole contract.
+            implicitWidth: hRow.implicitWidth
+            implicitHeight: hRow.implicitHeight
+
+            Row {
+                id: hRow
+                anchors.centerIn: parent
+                spacing: Theme.spacingXS
+
+                DankIcon {
+                    name: root.view.icon
+                    size: root.iconSizeLarge
+                    color: root.toneColor
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                StyledText {
+                    visible: root.pillText !== ""
+                    text: root.pillText
+                    color: root.toneColor
+                    font.pixelSize: root.pillTextSize
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+        }
+    }
+
+    // The vertical bar gets the icon and nothing else, and that is a limit of
+    // the space rather than a decision: in vertical orientation BasePill pins
+    // the pill's width to widgetThickness, so "6 cambios preparados" would be
+    // cut off mid-word rather than shortened. What survives the trim is what
+    // the horizontal pill leads with anyway -- the icon says which of the five
+    // states this is, and the colour still separates a clean ready from one
+    // carrying warnings. The count itself is nowhere on a vertical bar until
+    // Task 10 puts the panel behind the click.
+    //
+    // Declaring this at all is the point: leaving verticalBarPill null makes
+    // PluginComponent measure the widget at zero and the item simply is not
+    // there, which on a side bar reads as a plugin that failed to load.
+    verticalBarPill: Component {
+        Item {
+            implicitWidth: vIcon.implicitWidth
+            implicitHeight: vIcon.implicitHeight
+
+            DankIcon {
+                id: vIcon
+                anchors.centerIn: parent
+                name: root.view.icon
+                size: root.iconSizeLarge
+                color: root.toneColor
+            }
+        }
+    }
+}

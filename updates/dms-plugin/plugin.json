@@ -1,0 +1,16 @@
+{
+    "id": "nixosUpd",
+    "name": "NixOS updates",
+    "description": "The nightly prepared system update, and the button that applies it",
+    "version": "0.1.0",
+    "author": "daf3r",
+    "type": "composite",
+    "icon": "system_update_alt",
+    "capabilities": ["dankbar-widget"],
+    "components": {
+        "daemon": "./Daemon.qml",
+        "widget": "./Widget.qml"
+    },
+    "permissions": ["process"],
+    "requires_dms": ">=1.5.0"
+}
