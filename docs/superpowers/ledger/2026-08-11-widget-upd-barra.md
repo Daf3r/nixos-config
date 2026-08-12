@@ -76,6 +76,21 @@ dentro del sandbox, así que la ejecución muere en la resolución del flake, qu
 casos. El script comprobado **es** el que ejecuta la unidad: no hay forma de
 meterlo en el sistema sin que el chequeo haya pasado.
 
+**Ese chequeo se equivocó tres veces en tres rondas, siempre igual: afirmando más
+de lo que miraba.** Vale la pena la lista, porque es el patrón de toda la rama:
+
+| Ronda | Qué afirmaba de más | Qué lo destapó |
+|---|---|---|
+| 1 | el control salía del propio script quitándole el flag, así que desaparecía con él | revertir el arreglo fallaba culpando al control |
+| 2 | todas las aserciones sobre `nh` eran negativas: un log que `nh` nunca escribió las cumple todas | un `nh` inexistente y un `case` sin `boot`, los dos con build verde |
+| 3 | «corrió los dos modos» sin mirar qué modo recibía `nh`, y sin ejercitar ningún modo inválido | fijar `nh os boot`, y borrar el brazo `*)`, los dos con build verde |
+
+Lo que corrige la 3: se lee el **vector de argumentos** que recibiría `nh` (copia
+del script con la ruta de `nh` sustituida por un grabador), y se ejercitan cuatro
+modos inválidos —la cadena vacía entre ellos— exigiendo que se rechacen antes de
+que `nh` los vea. **Descartado por medición**: comprobar el *texto* del script
+probaría que la línea dice `os "$mode"`, no que `nh` reciba el modo.
+
 ### Lo que había dejado la ronda 3 de la tarea 6, y qué queda de ello
 
 1. **El mensaje de `apply` anclado en los cuatro contratos donde entonces ya era
@@ -358,6 +373,16 @@ de producción que el test dice cubrir y confirmar que el test cae.
   Coste: `nh` sondea `nix --version` y `nix config show experimental-features`
   antes de mirar el uid, así que el chequeo necesita `nix` en el PATH y
   `NIX_CONFIG = "experimental-features = nix-command flakes"`.
+
+- **Que `nh` llegue a resolver el flake no dice con qué verbo lo llamaron.** Muere
+  en la ruta del flake antes de que el subcomando importe, y la queja es idéntica
+  para `switch` y para `boot`. Así que fijar `nh os boot` sin propagar el modo
+  deja el build verde: hay que **leer el vector de argumentos**, no inferirlo de
+  que la ejecución llegó lejos. El truco barato es una copia del script con la
+  ruta de `nh` sustituida por un grabador de argumentos.
+- **En un builder de nixpkgs, `out` es el path de salida.** Usarla como variable
+  de bucle deja `install` sin destino (`install: target "''": No such file or
+  directory`). Lo encontró el propio build.
 
   **Y de ahí cuelga la portabilidad del chequeo de `applyCommand`**: si algún día
   el kernel, el nix o la máquina de build no permiten anidar espacios de nombres,
