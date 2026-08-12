@@ -12,6 +12,8 @@
     ./wireguard.nix
     ./tailscale.nix
     ./storage.nix
+    ./memory.nix
+    ./monitor.nix
     ./updates.nix
   ];
 
