@@ -218,7 +218,32 @@ test('the disabled check button says the engine is busy, in the engine words', (
   // description of the same refusal, drifting from the first.
   const b = buttonFor({ ...ready, state: 'current', blockers: [enMarcha] })
   assert.equal(b.reason, enMarcha.detail)
-  assert.match(b.label, /Comprobar/, 'la etiqueta sigue nombrando la operacion; lo apagado es el boton')
+  assert.equal(b.label, 'Comprobar ahora', 'la etiqueta sigue nombrando la operacion; lo apagado es el boton')
+})
+
+test('engine_running is found wherever it sits in the list, not only first', () => {
+  // The ordering is not hypothetical and it is not favourable: blockers.sh
+  // appends the two git facts before it ever looks at the lock, so on a machine
+  // somebody is working on -- dirty tree, feature branch -- `engine_running` is
+  // the third entry and never the first.
+  //
+  // Every other case in this section hands the function a one-element list, and
+  // that is what made them all agree with a reader that only ever inspected
+  // `blockers[0]`. Measured: replacing the `find` with a guarded
+  // `status.blockers[0].code === 'engine_running'` passed all 41 tests, and the
+  // defect it leaves is precisely the one this branch exists to prevent -- a
+  // live "Comprobar ahora" over an engine that holds the lock.
+  const b = buttonFor({ ...ready, state: 'current', blockers: [
+    { code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' },
+    { code: 'wrong_branch', detail: "esta en la rama 'upd-barra' y el motor prepara desde 'main'" },
+    enMarcha,
+  ]})
+  assert.equal(b.enabled, false, 'el motor esta corriendo aunque no encabece la lista')
+  assert.equal(b.action, 'none')
+  // Solo el del lock: los otros dos paran un apply y no dicen nada de una
+  // comprobacion, asi que citarlos aqui seria darle al usuario dos motivos de
+  // los cuales uno no lo es.
+  assert.equal(b.reason, enMarcha.detail)
 })
 
 test('an engine_running with no detail still explains why checking is off', () => {

@@ -66,10 +66,27 @@ PluginComponent {
 
     function poll() {
         // A poll still in flight owns the cycle; starting a second process on
-        // top of it would leave two collectors racing to publish. The guard
-        // below is what guarantees this branch is not permanent.
-        if (statusProc.running)
+        // top of it would leave two collectors racing to publish.
+        if (statusProc.running) {
+            // ...and this is what keeps that branch from being permanent.
+            // Measured on Quickshell 0.3.0, because the obvious assumption is
+            // wrong: `running = false` does NOT clear the flag, it asks for a
+            // SIGTERM and leaves `running` true until the child actually dies.
+            // A child that ignores TERM keeps it true forever -- confirmed with
+            // `sh -c "trap '' TERM; sleep 300"`, still running four seconds
+            // after the request, while an obedient sibling reported exit 15.
+            //
+            // That is reachable here rather than academic: `upd status --json`
+            // is bash, and a non-interactive bash does not act on a signal until
+            // the foreground child it is waiting on returns -- so a `git status`
+            // stalled on a filesystem outlives the SIGTERM and holds this true
+            // with it. With stallGuard already spent (repeat: false) and this
+            // returning early every minute, nothing would be armed and the
+            // daemon would sit on its last `null` and never try again.
+            if (!stallGuard.running)
+                stallGuard.restart();
             return;
+        }
         statusProc.running = true;
         stallGuard.restart();
     }

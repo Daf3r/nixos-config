@@ -1,5 +1,8 @@
 // The bar item. It paints and nothing else -- no Process, no Timer, no file
-// access -- for the per-screen reason in Daemon.qml's header comment.
+// access -- for the per-screen reason in Daemon.qml's header comment. The one
+// thing it does import is logic.js, and only to ask it what an unknown state
+// looks like; the classification of a real status still happens once, in the
+// daemon, and arrives here already decided.
 //
 // There is no `popoutContent` here yet, and its absence is the whole of what
 // "no buttons in this task" means: PluginComponent turns a click into a popout
@@ -10,25 +13,25 @@ import QtQuick
 import qs.Common
 import qs.Modules.Plugins
 import qs.Widgets
+import "logic.js" as Logic
 
 PluginComponent {
     id: root
 
     // What this paints before anyone has published, and if what arrives is not
-    // the shape agreed with the daemon. It is what Logic.classify(null) returns,
-    // written out rather than computed, because reaching for logic.js here
-    // would load and parse it once per screen to answer a question with one
-    // constant answer.
+    // the shape agreed with the daemon. The gap before the first publish is
+    // emphatically NOT "everything is fine": it is "nobody has answered yet",
+    // which is the same thing an unreadable status means and gets the same face.
     //
-    // The gap before the first publish is emphatically NOT "everything is
-    // fine": it is "nobody has answered yet", which is the same thing an
-    // unreadable status means and gets the same face.
-    readonly property var unknownView: ({
-            state: "unknown",
-            icon: "help",
-            tone: "unknown",
-            summary: ""
-        })
+    // Asked of logic.js rather than written out here, and the earlier version of
+    // this file did write it out. The argument for the copy was that importing
+    // logic.js costs a parse per screen -- true, and not worth what it buys: two
+    // evaluations of a 150-line pure module at shell start against a literal
+    // that nothing ties to `classify`. Change the unknown icon or tone over
+    // there and the face this paints before the first poll would have drifted in
+    // silence, with no test able to see it. Deriving it makes the divergence
+    // impossible instead of merely tested for.
+    readonly property var unknownView: Logic.classify(null)
 
     // Same varName the daemon publishes under: this is the channel. It has to
     // be a direct child of the PluginComponent, because `value` reads the
