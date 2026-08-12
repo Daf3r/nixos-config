@@ -68,21 +68,31 @@ PluginComponent {
         // A poll still in flight owns the cycle; starting a second process on
         // top of it would leave two collectors racing to publish.
         if (statusProc.running) {
-            // ...and this is what keeps that branch from being permanent.
-            // Measured on Quickshell 0.3.0, because the obvious assumption is
-            // wrong: `running = false` does NOT clear the flag, it asks for a
-            // SIGTERM and leaves `running` true until the child actually dies.
-            // A child that ignores TERM keeps it true forever -- confirmed with
-            // `sh -c "trap '' TERM; sleep 300"`, still running four seconds
-            // after the request, while an obedient sibling reported exit 15.
+            // This branch can last a while, and the reason is measured rather
+            // than assumed: `running = false` does NOT clear the flag. It asks
+            // for a SIGTERM and leaves `running` true until the child actually
+            // dies. A child that ignores TERM keeps it true for as long as it
+            // lives -- confirmed with `sh -c "trap '' TERM; sleep 300"`, still
+            // true four seconds after the request, while an obedient sibling
+            // reported exit 15. And it is reachable here: `upd status --json`
+            // is bash, and a non-interactive bash does not act on a signal
+            // until the foreground child it is waiting on returns, so a `git
+            // status` stalled on a filesystem outlives the SIGTERM.
             //
-            // That is reachable here rather than academic: `upd status --json`
-            // is bash, and a non-interactive bash does not act on a signal until
-            // the foreground child it is waiting on returns -- so a `git status`
-            // stalled on a filesystem outlives the SIGTERM and holds this true
-            // with it. With stallGuard already spent (repeat: false) and this
-            // returning early every minute, nothing would be armed and the
-            // daemon would sit on its last `null` and never try again.
+            // What re-arming buys, stated no wider than the measurement: while
+            // the flag is stuck, every cycle asks for the child's termination
+            // again and republishes the unknown state. Without it the guard is
+            // spent after its first firing and the blocked ticks do nothing at
+            // all -- measured with that same stubborn child, publishes at 8s /
+            // 28s / 48s with this line against a single one at 8s without it.
+            //
+            // What it does NOT buy, and an earlier version of this comment
+            // claimed it did: recovery. The poll Timer at the bottom is
+            // `repeat: true` and nothing stops it, so the moment the flag
+            // clears the next tick starts a fresh process on its own, with or
+            // without this line -- measured, two process starts in 60 s with
+            // this line removed. Nor can any re-arming retry the process while
+            // the flag is stuck, because the `return` below comes first.
             if (!stallGuard.running)
                 stallGuard.restart();
             return;
