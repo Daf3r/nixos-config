@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { classify, buttonFor, checkFor, changeLines } = require('../logic.js')
+const { classify, buttonFor, checkFor, changeLines, reattachDecision } = require('../logic.js')
 
 const ready = {
   schema: 2, state: 'ready', checked_at: '2026-08-11T06:41:49-06:00',
@@ -74,6 +74,22 @@ test('changeLines renders an added and a removed package readably', () => {
   assert.equal(removed.name, 'retirado')
   assert.match(removed.text, /1\.93\.134/)
   assert.match(removed.text, /\(fuera\)/, 'una entrada sin destino tiene que decir que se va')
+})
+
+test('reattach treats an activating apply as still running', () => {
+  assert.deepEqual(reattachDecision('activating', 'start', false), { kind: 'running' })
+})
+
+test('reattach never treats inactive success as a completed apply', () => {
+  assert.deepEqual(reattachDecision('inactive', 'success', false), { kind: 'absent' })
+})
+
+test('reattach reports a failed unit before the finished watcher path', () => {
+  assert.deepEqual(reattachDecision('failed', 'failed', true), { kind: 'failed' })
+})
+
+test('reattach releases applying only after a watched unit stops cleanly', () => {
+  assert.deepEqual(reattachDecision('inactive', 'success', true), { kind: 'finished' })
 })
 
 // ---------------------------------------------------------------------------

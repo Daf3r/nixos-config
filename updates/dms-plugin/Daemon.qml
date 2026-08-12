@@ -111,6 +111,10 @@ PluginComponent {
     property string lastError: ""
     property bool applying: false
     property var lastStatus: null
+    property bool reattachBusy: false
+    property bool reattachWatching: false
+    property string reattachMode: ""
+    property int reattachIndex: 0
 
     function republish() {
         updState.set({
@@ -122,6 +126,12 @@ PluginComponent {
     }
 
     function poll() {
+        // Startup reattachment and its watcher own the systemctl probe. A
+        // status poll may still run once in the same event loop tick as the
+        // probe starts, so make the ownership explicit instead of letting two
+        // Process instances publish interleaved answers.
+        if (root.reattachBusy)
+            return;
         // A poll still in flight owns the cycle; starting a second process on
         // top of it would leave two collectors racing to publish.
         if (statusProc.running) {
@@ -232,6 +242,138 @@ PluginComponent {
         running: true
         triggeredOnStart: true
         onTriggered: root.poll()
+    }
+
+    // ── Reattach after a DMS restart ────────────────────────────────────────
+    //
+    // The apply itself is a system unit, so restarting the shell does not stop
+    // it. What disappears is only this daemon's in-memory `applying` flag. On
+    // startup ask systemd about both allowed instances. We deliberately do not
+    // interpret `inactive + success` as a completed apply: a unit that has
+    // never run in this boot reports exactly that pair too.
+    function beginReattach() {
+        if (root.reattachBusy || root.applying)
+            return;
+        root.reattachBusy = true;
+        root.reattachIndex = 0;
+        root.reattachMode = "";
+        root.probeReattachUnit();
+    }
+
+    function probeReattachUnit() {
+        if (root.reattachIndex >= 2) {
+            root.reattachBusy = false;
+            root.poll();
+            return;
+        }
+        root.reattachMode = root.reattachIndex === 0 ? "switch" : "boot";
+        reattachProc.command = ["systemctl", "show", "--value",
+                                "-p", "ActiveState", "-p", "Result",
+                                "nixos-upd-apply@" + root.reattachMode + ".service"];
+        reattachProc.running = true;
+    }
+
+    function handleReattachResult(code, output) {
+        const lines = (output || "").trim().split(/\r?\n/);
+        const active = lines.length > 0 ? lines[0] : "";
+        const result = lines.length > 1 ? lines[1] : "";
+        const decision = Logic.reattachDecision(active, result, root.reattachWatching);
+
+        if (decision.kind === "running") {
+            root.reattachBusy = false;
+            root.applying = true;
+            root.lastError = "";
+            root.reattachWatching = true;
+            root.republish();
+            reattachWatch.start();
+            return;
+        }
+
+        if (decision.kind === "finished") {
+            // The unit has left activating. Only now is it safe to release the
+            // panel's applying state and ask the engine for its fresh status.
+            reattachWatch.stop();
+            root.reattachWatching = false;
+            root.reattachBusy = false;
+            root.applying = false;
+            root.republish();
+            root.poll();
+            return;
+        }
+
+        // A failed unit is the one terminal result systemd can report without
+        // the daemon having witnessed the transition. Surface it, but never
+        // turn an ordinary inactive/success pair into a false success.
+        if (decision.kind === "failed") {
+            reattachWatch.stop();
+            root.reattachWatching = false;
+            root.reattachBusy = false;
+            root.applying = false;
+            root.lastError = "la unidad nixos-upd-apply@" + root.reattachMode
+                + ".service termino con fallo al recuperar el estado; mira `systemctl status nixos-upd-apply@"
+                + root.reattachMode + ".service`";
+            root.republish();
+            root.poll();
+            return;
+        }
+
+        if (decision.kind === "unknown") {
+            reattachWatch.stop();
+            root.reattachWatching = false;
+            root.reattachBusy = false;
+            root.lastError = "systemd respondio un estado incompleto al recuperar el apply; mira `systemctl show -p ActiveState -p Result nixos-upd-apply@"
+                + root.reattachMode + ".service`";
+            root.republish();
+            root.poll();
+            return;
+        }
+
+        root.reattachIndex++;
+        root.probeReattachUnit();
+    }
+
+    Process {
+        id: reattachProc
+        command: []
+        stdout: StdioCollector { id: reattachOut }
+        onExited: (code, st) => {
+            const output = reattachOut.text;
+            if (code !== 0) {
+                // An unqueryable unit is not evidence that no apply is running.
+                // Keep the normal status answer, but tell the operator why the
+                // recovery check itself could not establish ownership.
+                reattachWatch.stop();
+                root.reattachWatching = false;
+                root.reattachBusy = false;
+                root.lastError = "no se pudo comprobar si habia un apply tras reiniciar DMS; mira `systemctl show nixos-upd-apply@"
+                    + root.reattachMode + ".service`";
+                root.republish();
+                root.poll();
+                return;
+            }
+            root.handleReattachResult(code, output);
+        }
+    }
+
+    Timer {
+        id: reattachStartup
+        interval: 0
+        repeat: false
+        running: true
+        onTriggered: root.beginReattach()
+    }
+
+    Timer {
+        id: reattachWatch
+        interval: 3000
+        repeat: true
+        onTriggered: {
+            root.reattachBusy = true;
+            reattachProc.command = ["systemctl", "show", "--value",
+                                    "-p", "ActiveState", "-p", "Result",
+                                    "nixos-upd-apply@" + root.reattachMode + ".service"];
+            reattachProc.running = true;
+        }
     }
 
     // ── Applying ─────────────────────────────────────────────────────────────

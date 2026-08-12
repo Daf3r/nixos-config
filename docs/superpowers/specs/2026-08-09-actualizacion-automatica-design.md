@@ -39,7 +39,7 @@ deliberate command.
 - Verify a prepared update actually builds before it is offered.
 - Detect the Brave VA-API regression automatically instead of thermally.
 - Never modify `~/nixos-config` on its own.
-- Emit a stable machine-readable status so a Noctalia bar plugin can render it
+- Emit a stable machine-readable status so a shell bar plugin can render it
   later without the engine changing.
 
 ## Non-goals
@@ -49,7 +49,8 @@ deliberate command.
   the user's primary tool, and npm 12's blocking of install scripts already left
   that binary half-installed once. NixOS cannot roll it back with a generation.
   **The report mentions a new version and the command; it does not run it.**
-- The Noctalia bar plugin itself. Phase 2, see the end.
+- The update bar was originally deferred; it shipped as the DMS plugin described in
+  `2026-08-11-widget-upd-barra-design.md`.
 
 ## Architecture
 
@@ -221,38 +222,16 @@ cheap.
   not `ready`.
 - `status.json`: validate against the schema above after a real run.
 
-## Phase 2
+## Phase 2 — shipped
 
-### The Noctalia bar plugin
+The three deferred pieces are now part of the update engine and its DMS integration:
 
-Deferred deliberately. The plugin only reads `status.json`; the engine does not
-change. That also lets it be written alongside `claude-usage`, which is still
-unstarted, so the Noctalia plugin API is learned once rather than twice.
+- `upd status --json` exposes `changes[]`, `closure_diff` and live `blockers[]`.
+- `reboot_recommended` selects `upd apply --boot` for kernel/driver changes.
+- `updates/dms-plugin/` renders the state in DankMaterialShell and starts the
+  repository and system-unit halves of an apply through polkit.
 
-### `switch` is the wrong verb for a kernel or driver jump
-
-Found by the first real `ready` run, 2026-08-09. That update moved 889 packages,
-including `linux-xanmod` 6.17.12 → 7.1.6, `nvidia-open` 580.119.02 → 595.84,
-`mesa` 25.3.1 → 26.2.0 and `niri` 25.11 → 26.04 — the three components whose
-failure ends the graphical session, all at once.
-
-`upd apply` runs `nh os switch`, which activates in place. Across a simultaneous
-kernel and NVIDIA change that leaves the running kernel's modules out of step
-with the new system: the modules for the booted kernel are no longer in the
-store path the new generation points at, so anything loading a module
-afterwards — plugging in hardware, suspending — can fail until reboot.
-
-The engine cannot see this today. It should: the closure diff already names the
-kernel and driver packages, so a `reboot_recommended` flag in `status.json` and
-`upd apply --boot` (activating at next boot rather than in place) is a small
-addition. Until it exists, the operator has to notice on their own, which is
-exactly the kind of silent gap this design set out to close everywhere else.
-
-### `status.json` still lacks the promised machine-readable change list
-
-The Goals promised `changes` (per-input name/kind/from/to) and `closure_diff`
-(added/removed/changed/size_delta_mb). What ships is `local_pkgs`, an array of
-human prose, and `diff.txt` as raw ANSI text. On the first real run six flake
-inputs moved and the report named none of them. The bar plugin cannot render
-"what changed" without parsing prose, which is the one thing this contract
-exists to avoid.
+The implementation and acceptance checklist live in
+`docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md` and its plan. The
+plugin never reads `status.json` directly: it calls `upd status --json` so branch,
+tree and lock facts are current.

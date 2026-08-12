@@ -591,7 +591,25 @@ case "$cmd" in
     # a config file this engine does not control. Asking explicitly for what the
     # rule means takes the config out of the loop.
     dirty_flags=(--porcelain --untracked-files=normal --ignore-submodules=none)
-    if [ -n "$(git -C "$REPO" status "${dirty_flags[@]}")" ]; then
+    # `git status` can exit 0 with empty stdout after failing to read a
+    # subdirectory, while printing the warning on stderr. Treat that as an
+    # unreadable repository, not as a clean tree: the apply guard must never
+    # guess that it is safe to fast-forward over a filesystem it could not
+    # inspect.
+    tree_err_file="$(mktemp 2>/dev/null)" \
+      || die "no pude crear un fichero temporal para recoger los avisos de git; no aplico a ciegas"
+    tree_out=""
+    tree_rc=0
+    tree_out="$(git -C "$REPO" status "${dirty_flags[@]}" 2>"$tree_err_file")" \
+      || tree_rc=$?
+    tree_err="$(< "$tree_err_file")"
+    rm -f "$tree_err_file"
+    tree_err="${tree_err//$'\n'/ }"
+    tree_err="${tree_err:0:200}"
+    if [ "$tree_rc" -ne 0 ] || [ -n "$tree_err" ]; then
+      die "no puedo leer entero el arbol de $REPO (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no aplico a ciegas"
+    fi
+    if [ -n "$tree_out" ]; then
       echo "el arbol de trabajo tiene cambios sin commitear; no aplico" >&2
       git -C "$REPO" status --short --untracked-files=normal --ignore-submodules=none >&2
       exit 1

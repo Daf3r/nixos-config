@@ -4,6 +4,12 @@ Plan: `docs/superpowers/plans/2026-08-11-widget-upd-barra.md`
 Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 Rama: `upd-barra`, desde `9864df3` en `main`. **Sin integrar.**
 
+> **Actualización 2026-08-12:** lo anterior es el cierre histórico de la sesión
+> de Claude. La revisión de continuación se realiza en el worktree aislado
+> `/home/daf3r/nixos-config-codex-upd-barra`, rama `codex/upd-barra-finish`, sobre
+> `7d2cf1f`. Las tareas 9 y 10 sí están implementadas en ese HEAD; la tarea 11
+> solo conservaba el reenganche y la documentación.
+
 Estado al cerrar la sesión del 2026-08-11: **tareas 1 a 8 de 11 hechas**, más una
 tarea 5b que no estaba en el plan. Cada una con revisión y sus rondas de arreglo
 cerradas, la 6 incluida — su ronda 3, de pulido, cerró en `f45e029`.
@@ -610,3 +616,31 @@ Otra sesión de Claude Code espera a que esta rama se integre para empezar el
 trabajo del `.deb` oficial de ChatGPT: su spec está en
 `docs/superpowers/specs/2026-08-11-chatgpt-deb-oficial-design.md` y toca
 `updates/lib/` y `updates/tests/`, por lo que no deben solaparse.
+
+## Revisión de continuación — 2026-08-12
+
+La revisión se hizo en `/home/daf3r/nixos-config-codex-upd-barra`, rama
+`codex/upd-barra-finish`, sin tocar `upd-barra`.
+
+- Las fases 1–8 mantienen sus suites y contratos; la suite JavaScript del
+  plugin pasa.
+- Las tareas 9 y 10 están presentes en el HEAD: daemon/widget, popout y las
+  acciones separadas de fast-forward y unidad root. El plugin instalado en la
+  sesión era anterior y no prueba este HEAD.
+- La tarea 11 añadió al daemon la consulta de ambas unidades al arrancar y un
+  sondeo de la unidad activa cada 3 segundos. `inactive + success` no se
+  presenta como éxito. Las decisiones tienen regresiones puras para
+  `activating`, `failed`, `inactive + success` y la finalización observada.
+- La antigua Phase 2 de la spec fue reemplazada por el estado enviado. Los dos
+  README ahora explican `status --json`, `apply --ff-only`, `apply --boot` y el
+  plugin DMS.
+
+La revisión también corrigió la deuda que el cierre histórico dejaba anotada:
+`upd apply` ahora captura stderr y el código de `git status`, por lo que un
+subdirectorio ilegible ya no puede pasar como árbol limpio; el caso tiene una
+regresión en `updates/tests/upd.bats`.
+
+Sigue pendiente la aceptación que no se puede demostrar desde este worktree:
+build con el daemon de Nix, switch, DMS activo, click en el popout y las dos
+rutas de polkit. El build local no llegó a evaluar porque el sandbox negó el
+socket `/nix/var/nix/daemon-socket/socket`.

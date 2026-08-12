@@ -10,6 +10,18 @@
 
 Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 
+## Estado actualizado — 2026-08-12
+
+La implementación de las tareas 1–10 está en `7d2cf1f`. Esta revisión se está
+cerrando en el worktree `codex/upd-barra-finish`: el reenganche del daemon tras
+reiniciar DMS ya está implementado y sus decisiones puras tienen regresiones en
+`updates/dms-plugin/tests/logic.test.js`. La verificación de build/switch real
+queda separada de la revisión estática porque requiere acceso al daemon de Nix,
+una sesión DMS activa y autenticación polkit.
+
+La tarea 11 no publica ni integra por sí misma: el commit y el switch siguen
+siendo decisiones del operador.
+
 ## Global Constraints
 
 - Target repo: `/home/daf3r/nixos-config`. Flake attribute: `daf3r-starter`.
@@ -1163,7 +1175,7 @@ git commit -m "plugin: la logica pura del widget, con sus pruebas"
 
 ---
 
-### Task 9: The bar item
+### Task 9: The bar item — implemented in `82524ab` and follow-up fixes
 
 **Files:**
 - Create: `updates/dms-plugin/plugin.json`, `updates/dms-plugin/Daemon.qml`, `updates/dms-plugin/Widget.qml`
@@ -1387,7 +1399,7 @@ git commit -m "plugin: el icono de estado en la barra"
 
 ---
 
-### Task 10: The panel and the apply
+### Task 10: The panel and the apply — implemented in `7d2cf1f`
 
 **Files:**
 - Create: `updates/dms-plugin/Popout.qml`
@@ -1636,7 +1648,7 @@ git commit -m "plugin: el panel, con el boton que aplica"
 - Modify: `docs/superpowers/specs/2026-08-09-actualizacion-automatica-design.md` (its Phase 2 section)
 - Modify: `README.md` and `README.es.md` if they describe `upd`'s subcommands
 
-- [ ] **Step 0: The reattach after a `dms restart` mid-apply**
+- [x] **Step 0: The reattach after a `dms restart` mid-apply**
 
 Assigned here explicitly, because for one round it was assigned to nobody: Task
 7 took the `ActiveState`/`Result` watcher out of Task 10 saying it "belongs in
@@ -1667,11 +1679,11 @@ render whatever it says, which is the same thing it does at every other startup.
 So the reattach is a *resume of the running case*, and there is deliberately no
 attempt to reconstruct the outcome of an apply that already ended.
 
-- [ ] **Step 1: Retire the Phase 2 section**
+- [x] **Step 1: Retire the Phase 2 section**
 
 The 2026-08-09 spec lists three deferred items: the bar plugin, `switch` being the wrong verb, and the missing machine-readable change list. All three are now implemented. Replace that section with a pointer to `2026-08-11-widget-upd-barra-design.md` and a one-line statement of what shipped. Leaving a "deferred" section describing work that is done is the same stale-state problem the engine exists to prevent, one level up.
 
-- [ ] **Step 2: Update the READMEs**
+- [x] **Step 2: Update the READMEs**
 
 Check whether they document `upd`'s subcommands:
 

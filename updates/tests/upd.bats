@@ -932,6 +932,23 @@ EOF
   [ ! -s "$NH_MARKER" ]
 }
 
+@test "apply refuses a tree git cannot read instead of calling it clean" {
+  # Git can return 0 with no porcelain when a directory below the work tree is
+  # unreadable, leaving the old stdout-only guard with a false clean verdict.
+  # The apply side must match blockers_live and surface the warning as an
+  # uncheckable repository.
+  make_rig
+  mkdir "$REPO/secreto"
+  chmod 000 "$REPO/secreto"
+
+  run upd apply
+  chmod 700 "$REPO/secreto"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no puedo leer entero el arbol"* ]]
+  [[ "$output" == *"secreto"* ]]
+  [ ! -s "$NH_MARKER" ]
+}
+
 @test "apply refuses a repository it cannot open, without blaming the HEAD" {
   # Measured before the guard existed, with $REPO/.git removed: `git status`
   # printed nothing on stdout, so the dirty-tree guard announced a clean tree,

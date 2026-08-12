@@ -100,6 +100,21 @@ function checkFor(status) {
   return { label: 'Comprobar ahora', enabled: true, reason: '' }
 }
 
+// Interpret the two values returned by `systemctl show` when the daemon starts
+// again. This is deliberately pure: the dangerous distinction is not QML, it
+// is that `inactive + success` means "not running", never "it succeeded".
+function reattachDecision(active, result, watching) {
+  if (!active || !result)
+    return { kind: 'unknown' }
+  if (active === 'activating' || active === 'active')
+    return { kind: 'running' }
+  if (active === 'failed' || result === 'failed')
+    return { kind: 'failed' }
+  if (watching)
+    return { kind: 'finished' }
+  return { kind: 'absent' }
+}
+
 function buttonFor(status) {
   const c = classify(status)
   if (c.tone === 'unknown') {
@@ -169,4 +184,4 @@ function changeLines(status) {
 // the throwing line -- so the failure is a warning in the log today and a
 // silent dependency on evaluation order for as long as it is left there.
 if (typeof module !== 'undefined')
-  module.exports = { classify, buttonFor, checkFor, changeLines, SCHEMA }
+  module.exports = { classify, buttonFor, checkFor, changeLines, reattachDecision, SCHEMA }
