@@ -272,40 +272,81 @@ let
       fi
 
       # --- the thing being checked ------------------------------------------
-      # The script prints its own euid first, so the log carries the proof that
-      # it ran as root. Without it, deleting the `unshare` from this line would
-      # leave the run as an ordinary user, nh would have nothing to complain
-      # about, and the check would pass while testing nothing at all.
-      unshare -Ur sh -c 'echo "euid=$(id -u)"; exec ${applyScript} boot' \
-        > real.log 2>&1 || true
-      if ! grep -qx "euid=0" real.log; then
-        echo "check: the run under test was not root, so nh was never going to"
-        echo "check: refuse it and this proves nothing."
-        cat real.log
-        exit 1
-      fi
-      if grep -qF "$bail" real.log; then
-        echo "check: nh refuses the command line this unit would run as root."
-        echo "check: this is the failure of 2026-08-11, back again -- the unit"
-        echo "check: died in 48 ms and the switch never happened."
-        echo "--- what it printed ---"
-        cat real.log
-        exit 1
-      fi
+      # Both instances the polkit rules name, not just one. `switch` and `boot`
+      # are separate arms of the script's `case`, so checking only `boot` left
+      # `switch` free to be broken -- and the mirror of that was measured: with
+      # only `boot` checked, deleting `boot` from the `case` shipped a broken
+      # @boot unit with the build green.
+      for mode in switch boot; do
+        # The script prints its own euid first, so the log carries the proof
+        # that it ran as root. Without it, deleting the `unshare` from this line
+        # would leave the run as an ordinary user, nh would have nothing to
+        # complain about, and the check would pass while testing nothing.
+        unshare -Ur sh -c 'echo "euid=$(id -u)"; exec '${applyScript}' "$1"' _ "$mode" \
+          > real.log 2>&1 || true
+        if ! grep -qx "euid=0" real.log; then
+          echo "check: the $mode run was not root, so nh was never going to"
+          echo "check: refuse it and this proves nothing."
+          cat real.log
+          exit 1
+        fi
 
-      # `--bypass-root-check` also gets past the refusal, so the assertion above
-      # cannot tell the two apart -- measured, it stayed green when the flag was
-      # swapped. What does tell them apart is that nh announces the second one,
-      # and the announcement is the thing worth refusing: it means the strategy
-      # is still `auto` and nh will go looking for doas/sudo/run0/pkexec while
-      # already root and without a TTY.
-      if grep -qF "Bypassing root check" real.log; then
-        echo "check: this command line silences nh's root refusal instead of"
-        echo "check: telling nh there is nothing to elevate. Use"
-        echo "check: --elevation-strategy none, not --bypass-root-check."
-        cat real.log
-        exit 1
-      fi
+        # The named failures come first, and the order is load-bearing rather
+        # than tidy. Reverting the flag makes nh bail at the root check, so it
+        # never reaches the flake and the catch-all below would fire on it --
+        # a red build carrying the wrong diagnosis, which is the defect this
+        # branch keeps finding in its own guards. Measured that way round
+        # before it was reordered.
+        if grep -qF "$bail" real.log; then
+          echo "check: nh refuses the $mode command line as root."
+          echo "check: this is the failure of 2026-08-11, back again -- the unit"
+          echo "check: died in 48 ms and the switch never happened."
+          echo "--- what it printed ---"
+          cat real.log
+          exit 1
+        fi
+
+        # `--bypass-root-check` also gets past the refusal, so the assertion
+        # above cannot tell the two apart -- measured, it stayed green when the
+        # flag was swapped. What does tell them apart is that nh announces the
+        # second one, and the announcement is the thing worth refusing: it means
+        # the strategy is still `auto` and nh will go looking for
+        # doas/sudo/run0/pkexec while already root and without a TTY.
+        if grep -qF "Bypassing root check" real.log; then
+          echo "check: the $mode command line silences nh's root refusal instead"
+          echo "check: of telling nh there is nothing to elevate. Use"
+          echo "check: --elevation-strategy none, not --bypass-root-check."
+          cat real.log
+          exit 1
+        fi
+
+        # And last, the positive one, which is what stops the three above from
+        # being satisfied by a log nh never wrote. Every one of them is a
+        # negative -- "the log does not say X" -- and an empty log passes them
+        # all. Measured, before this existed: pointing the script at a
+        # non-existent nh binary, and deleting `boot` from the script's own
+        # `case`, both left the build green with this check announcing that nh
+        # accepted the command line. It had not run.
+        #
+        # The anchor is nh's own complaint about the flake path, which proves
+        # four things at once: nh ran, it got past the root check, it reached
+        # installable resolution, and it was handed *this* repository rather
+        # than one out of NH_FLAKE or a mangled argument. A bare "Flake
+        # reference" proves the first three; carrying the path costs nothing and
+        # covers the fourth.
+        #
+        # It depends on ${repo} not existing inside the sandbox, which is the
+        # same precondition asserted at the top, for the same reason.
+        if ! grep -qF "Flake reference" real.log \
+           || ! grep -qF ${lib.escapeShellArg repo} real.log; then
+          echo "check: the $mode run never reached nh's flake resolution, so"
+          echo "check: nothing above it was actually exercised. nh may not have"
+          echo "check: run at all, or may have been handed another flake."
+          echo "--- what it printed ---"
+          cat real.log
+          exit 1
+        fi
+      done
 
       # --- and that the git config is found where the command points at it ---
       # Narrower than it looks, and the wording matters: this proves the file is
@@ -335,9 +376,9 @@ let
         exit 1
       fi
 
-      echo "check: nh accepts this command line as root without being told to"
-      echo "check: ignore its own refusal, and the safe.directory exemption is"
-      echo "check: readable at the path the command exports"
+      echo "check: nh ran both modes as root, reached ${repo}, and did not have"
+      echo "check: to be told to ignore its own refusal; and the safe.directory"
+      echo "check: exemption is readable at the path the command exports"
       install -m 0555 ${applyScript} $out
     '';
 
