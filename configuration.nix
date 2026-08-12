@@ -14,6 +14,7 @@
     ./storage.nix
     ./memory.nix
     ./monitor.nix
+    ./diagnostics.nix
     ./updates.nix
   ];
 
