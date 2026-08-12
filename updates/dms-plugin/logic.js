@@ -16,14 +16,17 @@ function classify(status) {
              summary: `status.json declara schema ${status.schema}, y este plugin entiende ${SCHEMA}` }
   }
   // The same reading upd.sh's `warn_count` already does, in its own words:
-  // `(.warnings // []) | if type == "array" then length else 1 end`. Absent and
-  // null are zero findings; a `warnings` that is present but is not a list is a
-  // producer bug, and counting it as one finding is what keeps a malformed
-  // status.json from rendering as an all-clear on the panel. Two readers of one
-  // file that disagree about what counts as clean is a bug waiting for a bad
-  // morning, so this does not get to be cleverer than the shell.
+  // `(.warnings // []) | if type == "array" then length else 1 end`. A
+  // `warnings` that is present but is not a list is a producer bug, and
+  // counting it as one finding is what keeps a malformed status.json from
+  // rendering as an all-clear on the panel. Two readers of one file that
+  // disagree about what counts as clean is a bug waiting for a bad morning, so
+  // this does not get to be cleverer than the shell -- including on `false`,
+  // which jq's `//` swallows along with null, and which this got wrong for one
+  // round while claiming to copy the rule.
   const w = status.warnings
-  const warned = Array.isArray(w) ? w.length > 0 : (w !== undefined && w !== null)
+  const absent = w === undefined || w === null || w === false
+  const warned = Array.isArray(w) ? w.length > 0 : !absent
   switch (status.state) {
     case 'current':
       return { state: 'current', icon: 'check_circle', tone: warned ? 'warn' : 'ok',
@@ -70,13 +73,26 @@ function buttonFor(status) {
   if (blockers.length > 0) {
     // The engine's own wording, passed through untouched. Rewording it here
     // would mean maintaining two descriptions of the same refusal.
+    //
+    // The fallback is not decoration. blockers.sh makes the detail the whole
+    // message for a human -- literally what goes next to the disabled button --
+    // so a blocker that arrives without one would leave a dead Aplicar and no
+    // reason at all: the one outcome a user can neither act on nor report. The
+    // code is a poor substitute for a sentence, and still better than silence.
     return { label: 'Aplicar', action: 'none', enabled: false,
-             reason: blockers.map(b => b.detail).join('; ') }
+             reason: blockers.map(b => b.detail
+               || `bloqueo \`${b.code || 'sin codigo'}\` sin explicacion; mira \`upd status\``).join('; ') }
   }
-  return status.reboot_recommended
-    ? { label: 'Aplicar al arrancar', action: 'apply-boot', enabled: true,
-        reason: `pide reinicio: ${(status.reboot_reason || []).join(', ')}` }
-    : { label: 'Aplicar', action: 'apply', enabled: true, reason: '' }
+  if (!status.reboot_recommended) {
+    return { label: 'Aplicar', action: 'apply', enabled: true, reason: '' }
+  }
+  // Why the button sends them to a reboot instead of a switch. The engine
+  // always fills the list, so the empty branch is only ever reached by a
+  // malformed status -- but "pide reinicio:" trailing into nothing reads as the
+  // panel having broken, which is a worse answer than the shorter sentence.
+  const why = Array.isArray(status.reboot_reason) ? status.reboot_reason : []
+  return { label: 'Aplicar al arrancar', action: 'apply-boot', enabled: true,
+           reason: why.length > 0 ? `pide reinicio: ${why.join(', ')}` : 'pide reinicio' }
 }
 
 function changeLines(status) {

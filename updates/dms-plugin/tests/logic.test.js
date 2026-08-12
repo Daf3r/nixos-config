@@ -160,6 +160,105 @@ test('the real ready status summarises the changes a human would count', () => {
   assert.equal(changeLines(live).some(l => l.name === 'brave-origin'), false)
 })
 
+// ---------------------------------------------------------------------------
+// The other four terminal states. The first round of this suite tested `ready`
+// deeply and left `current`, `check_failed` and the unknown-state branch with
+// no test at all, and `build_failed` with only its tone -- so `buttonFor` was
+// never once called with anything but a `ready`. Eight mutants lived in that
+// gap, including a live "Aplicar" over an update that does not compile.
+// ---------------------------------------------------------------------------
+
+test('no state other than ready ever offers to apply', () => {
+  // The worst of the survivors: turning the non-ready button into an enabled
+  // `apply` passed the whole suite. An Aplicar over a `build_failed` is an
+  // offer to switch to a system that failed to build.
+  for (const state of ['current', 'build_failed', 'check_failed']) {
+    const b = buttonFor({ ...ready, state })
+    assert.equal(b.action, 'check', `${state} deberia ofrecer comprobar`)
+    assert.equal(b.enabled, true, `${state} deberia dejar comprobar`)
+    assert.notEqual(b.label, 'Aplicar')
+  }
+})
+
+test('a clean current is the only state that reads as ok', () => {
+  const c = classify({ ...ready, state: 'current' })
+  assert.equal(c.tone, 'ok')
+  assert.equal(c.summary, 'todo al dia')
+})
+
+test('current with warnings is visually distinct from current without', () => {
+  // The morning state, and the one a user reads fastest. Pinning only the
+  // `ready` half of this rule left `current` free to paint findings as clean.
+  const clean = classify({ ...ready, state: 'current' })
+  const warned = classify({ ...ready, state: 'current', warnings: [{ code: 'x', detail: 'y' }] })
+  assert.equal(clean.tone, 'ok')
+  assert.notEqual(warned.tone, 'ok')
+})
+
+test('check_failed is an error and shows what the engine said', () => {
+  const c = classify({ ...ready, state: 'check_failed', error: 'no pude escribir el diff' })
+  assert.equal(c.tone, 'error')
+  assert.notEqual(c.tone, 'ok')
+  assert.match(c.summary, /no pude escribir el diff/)
+})
+
+test('check_failed with no error message is still an error', () => {
+  const c = classify({ ...ready, state: 'check_failed' })
+  assert.equal(c.tone, 'error')
+  assert.ok(c.summary.length > 0, 'un fallo sin mensaje sigue necesitando una linea')
+})
+
+test('a state this plugin does not know is unknown, never ok', () => {
+  // The third axis, and the one that was missing: the suite covered an unknown
+  // `schema` and a null status, never an unknown `state`. It is not
+  // hypothetical -- upd.sh reserves exit 2 for a status.json carrying a state
+  // its reader does not know, so the two readers can meet the same file.
+  const c = classify({ ...ready, state: 'reticulando_splines' })
+  assert.equal(c.tone, 'unknown')
+  assert.notEqual(c.tone, 'ok')
+  assert.match(c.summary, /reticulando_splines/)
+})
+
+test('an unknown state offers no button that acts on it', () => {
+  const b = buttonFor({ ...ready, state: 'reticulando_splines' })
+  assert.equal(b.enabled, false)
+  assert.equal(b.action, 'none')
+})
+
+// ---------------------------------------------------------------------------
+// Malformed input from the producer, on the two fields that drive the button.
+// ---------------------------------------------------------------------------
+
+test('a blocker with no detail still explains why the button is dead', () => {
+  // blockers.sh:80-84 makes the detail the whole message for a human -- what
+  // the panel puts next to the disabled button. If it arrives empty the button
+  // must not go quiet: a dead Aplicar with no reason is the one outcome a user
+  // cannot act on, and cannot even report.
+  const b = buttonFor({ ...ready, blockers: [{ code: 'dirty_tree' }] })
+  assert.equal(b.enabled, false)
+  assert.ok(b.reason.length > 0, 'un boton apagado sin motivo no se puede ni reportar')
+  assert.match(b.reason, /dirty_tree/)
+})
+
+test('a blocker with neither code nor detail still explains itself', () => {
+  const b = buttonFor({ ...ready, blockers: [{}] })
+  assert.equal(b.enabled, false)
+  assert.ok(b.reason.length > 0)
+})
+
+test('warnings false is not a warning, because jq reads it as absent', () => {
+  // jq's `//` catches false as well as null, so `(.warnings // [])` on a false
+  // counts zero. Claiming to copy the shell's rule and then diverging on the
+  // one value nobody tests is how two readers drift apart.
+  assert.equal(classify({ ...ready, warnings: false }).tone, classify(ready).tone)
+})
+
+test('a reboot with no reasons given does not trail an empty list', () => {
+  const b = buttonFor({ ...ready, reboot_recommended: true, reboot_reason: [] })
+  assert.equal(b.action, 'apply-boot')
+  assert.doesNotMatch(b.reason, /:\s*$/, 'un motivo cortado en dos puntos parece un fallo de la app')
+})
+
 test('a reboot-recommended real status says which packages asked for it', () => {
   // reboot_reason on this machine: the kernel and the NVIDIA pair. The button
   // is the one place the user finds out why they are being sent to a reboot
