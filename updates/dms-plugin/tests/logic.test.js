@@ -1,6 +1,6 @@
 const { test } = require('node:test')
 const assert = require('node:assert')
-const { classify, buttonFor, changeLines } = require('../logic.js')
+const { classify, buttonFor, checkFor, changeLines } = require('../logic.js')
 
 const ready = {
   schema: 2, state: 'ready', checked_at: '2026-08-11T06:41:49-06:00',
@@ -494,4 +494,110 @@ test('a reboot-recommended real status says which packages asked for it', () => 
   assert.equal(b.action, 'apply-boot')
   assert.match(b.reason, /nvidia-open/)
   assert.match(b.reason, /linux-xanmod/)
+})
+
+// ---------------------------------------------------------------------------
+// `checkFor`, and the panel that reads it.
+//
+// The panel draws the check TWICE over: leading, in every state that is not
+// `ready`, and beside "Aplicar" when it is. The first version of Popout.qml had
+// the second one wired to `enabled: !applying` -- so the fix recorded above,
+// that a check must not be offered while the engine holds its lock, survived
+// everywhere except in the place a user actually presses. Pulling the rule into
+// its own function is what put it back under test; these pin it there.
+// ---------------------------------------------------------------------------
+
+test('checkFor offers the check on every state the engine is not busy in', () => {
+  for (const state of ['ready', 'current', 'build_failed', 'check_failed']) {
+    const c = checkFor({ ...ready, state })
+    assert.equal(c.enabled, true, `${state}: nada impide comprobar`)
+    assert.equal(c.label, 'Comprobar ahora')
+    assert.equal(c.reason, '')
+  }
+})
+
+test('checkFor refuses only for engine_running, in the engine words', () => {
+  const busy = checkFor({ ...ready, blockers: [enMarcha] })
+  assert.equal(busy.enabled, false)
+  assert.equal(busy.reason, enMarcha.detail)
+  assert.equal(busy.label, 'Comprobar ahora', 'lo apagado es el boton, no su nombre')
+  for (const code of ['dirty_tree', 'wrong_branch', 'pending_reboot']) {
+    assert.equal(checkFor({ ...ready, blockers: [{ code, detail: 'da igual lo que diga' }] }).enabled, true,
+      `${code} para un apply, no una comprobacion`)
+  }
+})
+
+test('checkFor finds engine_running wherever it sits, not only first', () => {
+  // Same ordering fact as buttonFor's: blockers.sh appends the two git facts
+  // before it looks at the lock, so on a machine being worked on the lock is
+  // the third entry. A reader that only inspects blockers[0] passes every
+  // one-element case above and fails exactly here.
+  const c = checkFor({ ...ready, blockers: [
+    { code: 'dirty_tree', detail: 'el arbol tiene cambios sin commitear' },
+    { code: 'wrong_branch', detail: 'la rama no es main' },
+    enMarcha,
+  ]})
+  assert.equal(c.enabled, false)
+  assert.equal(c.reason, enMarcha.detail)
+})
+
+test('checkFor does not offer a check over a status it could not read', () => {
+  for (const bad of [null, undefined, { schema: 99, state: 'ready' }, { ...ready, state: 'reticulando_splines' }]) {
+    const c = checkFor(bad)
+    assert.equal(c.enabled, false, 'un estado ilegible no es una invitacion a actuar sobre el')
+    assert.ok(c.reason.trim().length > 0, 'y sigue debiendo una explicacion')
+  }
+})
+
+test('the leading button and the check are the same button in every non-ready state', () => {
+  // The panel hides its second button when the two labels match, so that they
+  // are never drawn side by side saying the same word. If buttonFor ever
+  // renamed its non-ready label the panel would silently start showing two
+  // identical buttons -- one live and one dark, in the engine_running case.
+  const casos = [
+    ['current limpio', { ...ready, state: 'current' }],
+    ['current ocupado', { ...ready, state: 'current', blockers: [enMarcha] }],
+    ['build_failed', { ...ready, state: 'build_failed' }],
+    ['check_failed', { ...ready, state: 'check_failed' }],
+    ['sin lista de bloqueos', { ...onDisk, state: 'current' }],
+  ]
+  for (const [nombre, status] of casos) {
+    const b = buttonFor(status)
+    const c = checkFor(status)
+    assert.equal(b.label, c.label, `${nombre}: el boton que encabeza ES la comprobacion`)
+    assert.equal(b.enabled, c.enabled, `${nombre}: y no puede estar vivo cuando ella no lo esta`)
+    assert.equal(b.reason, c.reason, `${nombre}: ni dar otra razon que ella`)
+  }
+})
+
+test('a dark check button never leaves the panel without its reason', () => {
+  // The invariant Popout.qml leans on, and the reason it draws ONE explanation
+  // line instead of one per button. That line shows `buttonFor(...).reason`,
+  // and it is hidden when it would merely repeat the headline. So for every
+  // status where the check is refused, its sentence has to be reachable in one
+  // of those two places -- otherwise the user meets a dead button with nothing
+  // next to it, which is the one outcome they can neither act on nor report.
+  const universo = [
+    ['nada publicado', null],
+    ['schema ajeno', { schema: 99, state: 'ready' }],
+    ['estado desconocido', { ...ready, state: 'reticulando_splines' }],
+    ['ready y ocupado', { ...ready, blockers: [enMarcha] }],
+    ['ready, sucio y ocupado', { ...ready, blockers: [
+      { code: 'dirty_tree', detail: 'el arbol tiene cambios sin commitear' }, enMarcha] }],
+    ['current y ocupado', { ...ready, state: 'current', blockers: [enMarcha] }],
+    ['build_failed y ocupado', { ...ready, state: 'build_failed', blockers: [enMarcha] }],
+    ['ocupado y sin detalle', { ...ready, state: 'current', blockers: [{ code: 'engine_running' }] }],
+  ]
+  let apagados = 0
+  for (const [nombre, status] of universo) {
+    const c = checkFor(status)
+    assert.equal(c.enabled, false, `${nombre}: este caso existe para probar un boton apagado`)
+    apagados++
+    assert.ok(c.reason.trim().length > 0, `${nombre}: sin motivo no se puede ni reportar`)
+    const enLaLinea = buttonFor(status).reason.includes(c.reason)
+    const enElTitular = classify(status).summary === c.reason
+    assert.ok(enLaLinea || enElTitular,
+      `${nombre}: el motivo no aparece ni en la linea de explicacion ni en el titular`)
+  }
+  assert.equal(apagados, universo.length, 'un filtro que no encuentra nada no puede leerse como un aprobado')
 })

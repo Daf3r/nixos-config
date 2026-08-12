@@ -4,10 +4,12 @@
 // looks like; the classification of a real status still happens once, in the
 // daemon, and arrives here already decided.
 //
-// There is no `popoutContent` here yet, and its absence is the whole of what
-// "no buttons in this task" means: PluginComponent turns a click into a popout
-// only when that property is set, so the pill is inert until Task 10 declares
-// the panel.
+// `popoutContent` at the bottom is what turns a click on the pill into the
+// panel: PluginComponent only builds a PluginPopout when that property is set.
+// The panel itself is Popout.qml, and this file is the only place that can wire
+// it to the daemon -- both plugin global vars are declared here because
+// PluginGlobalVar reads the plugin id off its own `parent`, and only a direct
+// child of the PluginComponent has one. Popout.qml's header has the measurement.
 
 import QtQuick
 import qs.Common
@@ -45,6 +47,36 @@ PluginComponent {
                 applying: false,
                 lastError: ""
             })
+    }
+
+    // The other half of the channel: what the panel asks the daemon to DO. Same
+    // rule about the parent as updState above -- a direct child of the
+    // PluginComponent, never inside the popout, where `parent` is a Loader with
+    // no pluginId and `set()` would log a warning and silently do nothing.
+    //
+    // A timestamp rides along so the value genuinely changes on every press.
+    // PluginService fires globalVarChanged unconditionally today, so nothing
+    // depends on it -- but two identical presses producing an identical object
+    // is the kind of thing a future dedupe would swallow without a sound.
+    PluginGlobalVar {
+        id: updCommand
+        varName: "updCommand"
+        defaultValue: null
+    }
+
+    function requestApply(mode) {
+        updCommand.set({
+            action: "apply",
+            mode: mode,
+            at: Date.now()
+        });
+    }
+
+    function requestCheck() {
+        updCommand.set({
+            action: "check",
+            at: Date.now()
+        });
     }
 
     readonly property var view: (updState.value && updState.value.view) ? updState.value.view : root.unknownView
@@ -139,6 +171,36 @@ PluginComponent {
                 size: root.iconSizeLarge
                 color: root.toneColor
             }
+        }
+    }
+
+    // 460 rather than the 400 default because the widest thing the panel draws
+    // is a blocker detail -- "`/home/daf3r/nixos-config` esta en la rama
+    // 'upd-barra' y el motor prepara desde 'main'; haz `git -C ... switch main`"
+    // -- and those wrap rather than elide, so a narrow panel buys nothing and
+    // costs lines.
+    //
+    // `popoutHeight` is only the first frame. PluginPopout replaces it with a
+    // binding on the loaded item's implicitHeight the moment the Loader
+    // finishes (PluginPopout.qml, Loader.onLoaded), so it is a starting
+    // estimate, not a ceiling: 260 is roughly the headline, six change rows and
+    // the button row, which is what this machine shows today.
+    popoutWidth: 460
+    popoutHeight: 260
+
+    popoutContent: Component {
+        Popout {
+            // Handed the whole published object rather than reading the global
+            // var itself. See Popout.qml's header for why it cannot read it.
+            published: updState.value
+
+            // One tone->colour map for both surfaces. A second copy inside the
+            // panel would let the pill and the panel disagree about the same
+            // state after one edit.
+            toneColor: root.toneColor
+
+            onApplyRequested: mode => root.requestApply(mode)
+            onCheckRequested: root.requestCheck()
         }
     }
 }

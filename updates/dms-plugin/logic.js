@@ -56,38 +56,62 @@ function blockerDetail(b) {
   return b.detail || `bloqueo \`${b.code || 'sin codigo'}\` sin explicacion; mira \`upd status\``
 }
 
+// Whether asking the engine to look again is on offer, on its own.
+//
+// It has its own function because the panel draws the check TWICE over: as the
+// leading button in every state that is not `ready`, and as a second button
+// beside "Aplicar" when it is. Those two have to agree, and the first version of
+// the panel made them disagree in exactly the way that matters -- the leading
+// button honoured `engine_running` while the one next to Aplicar was
+// unconditionally live, so the fix recorded below survived everywhere except in
+// the place a user actually presses. Rules that live in the QML are rules no
+// test can reach; this one lives here.
+function checkFor(status) {
+  const c = classify(status)
+  if (c.tone === 'unknown') {
+    // Nothing readable to check against, and the same answer buttonFor gives:
+    // an unreadable state is not an invitation to act on it.
+    return { label: 'Comprobar ahora', enabled: false, reason: c.summary }
+  }
+  // `engine_running` is the one blocker that speaks about a *check*, and until
+  // it was pulled out here it was only ever consulted inside the `ready` branch
+  // of buttonFor -- so the states that offer "Comprobar ahora" were precisely
+  // the ones not asking. Measured: a `current` status with the engine holding
+  // the lock drew a live button, and pressing it hands the user a run that waits
+  // on a lock it cannot see. A button that offers to fail is worse than one that
+  // says why it cannot.
+  //
+  // Only `engine_running` of the six. A dirty tree, a checked-out branch or a
+  // pending reboot stop an *apply* and have nothing to say about a check, and
+  // disabling on them would leave a dead button over a machine where checking
+  // works fine.
+  //
+  // Nor does an absent list disable it, and that is a deliberate difference from
+  // buttonFor's `ready` branch rather than an oversight. There the cost of
+  // guessing wrong is an Aplicar the engine refuses; here it is a dead button
+  // over a machine where the check would have succeeded, and between those two
+  // the dead button is the worse answer.
+  const running = Array.isArray(status.blockers)
+    ? status.blockers.find(b => b.code === 'engine_running')
+    : undefined
+  if (running) {
+    return { label: 'Comprobar ahora', enabled: false, reason: blockerDetail(running) }
+  }
+  return { label: 'Comprobar ahora', enabled: true, reason: '' }
+}
+
 function buttonFor(status) {
   const c = classify(status)
   if (c.tone === 'unknown') {
     return { label: 'Sin estado', action: 'none', enabled: false, reason: c.summary }
   }
   if (status.state !== 'ready') {
-    // `engine_running` is the one blocker that also speaks about a *check*, and
-    // until now it was only ever consulted inside the `ready` branch below --
-    // so the states that offer "Comprobar ahora" were precisely the ones not
-    // asking. Measured: a `current` status with the engine holding the lock
-    // drew a live button, and pressing it hands the user a run that waits on a
-    // lock it cannot see. A button that offers to fail is worse than one that
-    // says why it cannot.
-    //
-    // Only `engine_running` of the six. A dirty tree, a checked-out branch or a
-    // pending reboot stop an *apply* and have nothing to say about a check, and
-    // disabling on them would leave a dead button over a machine where checking
-    // works fine.
-    //
-    // Nor does an absent list disable it, and that is a deliberate difference
-    // from the `ready` branch below rather than an oversight. There the cost of
-    // guessing wrong is an Aplicar the engine refuses; here it is a dead button
-    // over a machine where the check would have succeeded, and between those
-    // two the dead button is the worse answer.
-    const running = Array.isArray(status.blockers)
-      ? status.blockers.find(b => b.code === 'engine_running')
-      : undefined
-    if (running) {
-      return { label: 'Comprobar ahora', action: 'none', enabled: false,
-               reason: blockerDetail(running) }
-    }
-    return { label: 'Comprobar ahora', action: 'check', enabled: true, reason: '' }
+    // The leading button in every non-ready state IS the check, so it says
+    // whatever checkFor says. `action` is the only thing added: 'none' is what
+    // stops the panel from firing a command behind a button it drew as dead.
+    const check = checkFor(status)
+    return { label: check.label, action: check.enabled ? 'check' : 'none',
+             enabled: check.enabled, reason: check.reason }
   }
   // Missing is not empty, and the difference decides whether a button is live.
   // `blockers` exists only in `upd status --json`, which computes it on the
@@ -145,4 +169,4 @@ function changeLines(status) {
 // the throwing line -- so the failure is a warning in the log today and a
 // silent dependency on evaluation order for as long as it is left there.
 if (typeof module !== 'undefined')
-  module.exports = { classify, buttonFor, changeLines, SCHEMA }
+  module.exports = { classify, buttonFor, checkFor, changeLines, SCHEMA }
