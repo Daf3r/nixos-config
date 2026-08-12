@@ -89,11 +89,12 @@ in
       claude-desktop = inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.default;
     })
 
-    # ChatGPT Desktop, wrapped for the same keyring reason as Claude above.
+    # ChatGPT Desktop, from OpenAI's official Linux .deb and wrapped for the
+    # same keyring reason as Claude above.
     # It shells out to the `codex` CLI at runtime and finds it on PATH — see the
     # home.sessionPath note near the top of this file, which exists for this.
-    (pkgs.callPackage ./pkgs/codex-desktop-keyring.nix {
-      codex-desktop = inputs.codex-desktop-linux.packages.${pkgs.stdenv.hostPlatform.system}.codex-desktop;
+    (pkgs.callPackage ./pkgs/chatgpt-desktop-keyring.nix {
+      chatgpt-desktop = pkgs.callPackage ./pkgs/chatgpt-desktop.nix { };
     })
   ];
 
