@@ -46,12 +46,47 @@ function classify(status) {
   }
 }
 
+// What a blocker is allowed to say when it arrives with nothing in it.
+// blockers.sh makes `detail` the whole message for a human -- literally what
+// goes next to the disabled button -- so an empty one still owes the reader the
+// admission and somewhere to go. The code is a poor substitute for a sentence,
+// and still better than silence. Extracted so the two callers below cannot
+// drift into two different answers for the same empty blocker.
+function blockerDetail(b) {
+  return b.detail || `bloqueo \`${b.code || 'sin codigo'}\` sin explicacion; mira \`upd status\``
+}
+
 function buttonFor(status) {
   const c = classify(status)
   if (c.tone === 'unknown') {
     return { label: 'Sin estado', action: 'none', enabled: false, reason: c.summary }
   }
   if (status.state !== 'ready') {
+    // `engine_running` is the one blocker that also speaks about a *check*, and
+    // until now it was only ever consulted inside the `ready` branch below --
+    // so the states that offer "Comprobar ahora" were precisely the ones not
+    // asking. Measured: a `current` status with the engine holding the lock
+    // drew a live button, and pressing it hands the user a run that waits on a
+    // lock it cannot see. A button that offers to fail is worse than one that
+    // says why it cannot.
+    //
+    // Only `engine_running` of the six. A dirty tree, a checked-out branch or a
+    // pending reboot stop an *apply* and have nothing to say about a check, and
+    // disabling on them would leave a dead button over a machine where checking
+    // works fine.
+    //
+    // Nor does an absent list disable it, and that is a deliberate difference
+    // from the `ready` branch below rather than an oversight. There the cost of
+    // guessing wrong is an Aplicar the engine refuses; here it is a dead button
+    // over a machine where the check would have succeeded, and between those
+    // two the dead button is the worse answer.
+    const running = Array.isArray(status.blockers)
+      ? status.blockers.find(b => b.code === 'engine_running')
+      : undefined
+    if (running) {
+      return { label: 'Comprobar ahora', action: 'none', enabled: false,
+               reason: blockerDetail(running) }
+    }
     return { label: 'Comprobar ahora', action: 'check', enabled: true, reason: '' }
   }
   // Missing is not empty, and the difference decides whether a button is live.
@@ -72,16 +107,12 @@ function buttonFor(status) {
   const blockers = status.blockers
   if (blockers.length > 0) {
     // The engine's own wording, passed through untouched. Rewording it here
-    // would mean maintaining two descriptions of the same refusal.
-    //
-    // The fallback is not decoration. blockers.sh makes the detail the whole
-    // message for a human -- literally what goes next to the disabled button --
-    // so a blocker that arrives without one would leave a dead Aplicar and no
-    // reason at all: the one outcome a user can neither act on nor report. The
-    // code is a poor substitute for a sentence, and still better than silence.
+    // would mean maintaining two descriptions of the same refusal. Every one of
+    // them, including codes this plugin has never heard of: blockers.sh states
+    // outright that the vocabulary grew from four to six while it was being
+    // written and can grow again.
     return { label: 'Aplicar', action: 'none', enabled: false,
-             reason: blockers.map(b => b.detail
-               || `bloqueo \`${b.code || 'sin codigo'}\` sin explicacion; mira \`upd status\``).join('; ') }
+             reason: blockers.map(blockerDetail).join('; ') }
   }
   if (!status.reboot_recommended) {
     return { label: 'Aplicar', action: 'apply', enabled: true, reason: '' }

@@ -190,6 +190,83 @@ test('no state other than ready ever offers to apply', () => {
   }
 })
 
+// ---------------------------------------------------------------------------
+// `engine_running` outside the ready branch.
+//
+// The gap this closes, measured before it was closed: `blockers` was only ever
+// read inside the `ready` branch, so a `current` status taken while the engine
+// held the lock drew a live "Comprobar ahora". The blocker was right there in
+// the same document, and the button ignored it.
+// ---------------------------------------------------------------------------
+
+const enMarcha = { code: 'engine_running', detail: 'hay una comprobacion en marcha ahora mismo; espera a que termine' }
+
+test('with the engine holding the lock, no state offers to check', () => {
+  // Every state that reaches the check button, not just the one that is easy
+  // to reach: `current` is the ordinary morning state, and the two failures are
+  // exactly when a user reaches for "comprobar otra vez".
+  for (const state of ['current', 'build_failed', 'check_failed']) {
+    const b = buttonFor({ ...ready, state, blockers: [enMarcha] })
+    assert.equal(b.enabled, false, `${state}: el motor esta corriendo, el boton no puede estar vivo`)
+    assert.equal(b.action, 'none', `${state}: no puede quedar una accion que el motor va a rechazar`)
+  }
+})
+
+test('the disabled check button says the engine is busy, in the engine words', () => {
+  // Same contract as the blockers on the apply side: the sentence belongs to
+  // blockers.sh and this only shows it. A second wording here would be a second
+  // description of the same refusal, drifting from the first.
+  const b = buttonFor({ ...ready, state: 'current', blockers: [enMarcha] })
+  assert.equal(b.reason, enMarcha.detail)
+  assert.match(b.label, /Comprobar/, 'la etiqueta sigue nombrando la operacion; lo apagado es el boton')
+})
+
+test('an engine_running with no detail still explains why checking is off', () => {
+  const b = buttonFor({ ...ready, state: 'current', blockers: [{ code: 'engine_running' }] })
+  assert.equal(b.enabled, false)
+  assert.match(b.reason, /engine_running/)
+  assert.match(b.reason, /upd status/)
+})
+
+test('the blockers that only stop an apply do not stop a check', () => {
+  // The other half of the rule, and the one that keeps this from creeping into
+  // "any blocker kills every button". None of these three has anything to say
+  // about running a check, and a dead "Comprobar ahora" over a machine that
+  // would have checked fine is a worse answer than no rule at all.
+  for (const code of ['dirty_tree', 'wrong_branch', 'pending_reboot']) {
+    const b = buttonFor({ ...ready, state: 'current', blockers: [{ code, detail: 'da igual lo que diga' }] })
+    assert.equal(b.action, 'check', `${code} no impide comprobar`)
+    assert.equal(b.enabled, true, `${code} no impide comprobar`)
+  }
+})
+
+test('a non-ready status with no blockers list still offers to check', () => {
+  // Deliberately the opposite answer from the `ready` branch on the same input,
+  // and pinned here so nobody makes the two "consistent" by accident. On the
+  // apply side an absent list means nobody asked, and guessing draws an Aplicar
+  // the engine refuses. On the check side guessing the other way draws a dead
+  // button over a machine where checking works, which is the worse of the two.
+  const b = buttonFor({ ...onDisk, state: 'current' })
+  assert.equal(b.action, 'check')
+  assert.equal(b.enabled, true)
+})
+
+test('a ready with the engine running still talks about applying, not checking', () => {
+  // The regression this invites: hoisting the engine_running test above the
+  // state dispatch. It would answer "Comprobar ahora" for a ready update, and
+  // it would drop the other blockers from the sentence -- a user told only
+  // about the lock, who waits for it to clear and finds the button still dead
+  // for the dirty tree nobody mentioned.
+  const b = buttonFor({ ...ready, blockers: [
+    { code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' },
+    enMarcha,
+  ]})
+  assert.equal(b.label, 'Aplicar')
+  assert.equal(b.enabled, false)
+  assert.match(b.reason, /sin commitear/)
+  assert.match(b.reason, /en marcha/)
+})
+
 test('a clean current is the only state that reads as ok', () => {
   const c = classify({ ...ready, state: 'current' })
   assert.equal(c.tone, 'ok')
@@ -332,16 +409,19 @@ test('a healthy state never borrows the icon of a broken one, or the other way r
   assert.notEqual(classify(ready).icon, classify({ ...ready, state: 'build_failed' }).icon)
 })
 
-test('none of these six paths leaves the button dead and mute', () => {
+test('none of these eight paths leaves the button dead and mute', () => {
   // A dead button with no reason is the one outcome a user can neither act on
   // nor report.
   //
-  // The list is written out, not derived, and the name of this test says six
-  // rather than "every": a seventh path added to buttonFor with an empty reason
-  // would not be caught here. An earlier version of this comment claimed it
-  // would, which was measured false. Deriving the real set means enumerating
-  // the return paths of a function from outside it, and that costs more than
-  // this test is worth -- so the honest move is the narrower promise.
+  // The list is written out, not derived, and the name of this test counts
+  // rather than saying "every": a path added to buttonFor with an empty reason
+  // would not be caught here unless it is also added below. An earlier version
+  // of this comment claimed it would, which was measured false. Deriving the
+  // real set means enumerating the return paths of a function from outside it,
+  // and that costs more than this test is worth -- so the honest move is the
+  // narrower promise, and the price of it is that the count is maintained by
+  // hand. It went from six to eight when `engine_running` grew a branch of its
+  // own outside the ready state.
   //
   // Both properties are asserted per case, and that is the point of the loop
   // over a filter: the first version collected the cases that were disabled
@@ -355,6 +435,8 @@ test('none of these six paths leaves the button dead and mute', () => {
     ['sin lista de bloqueos', onDisk],
     ['bloqueo con detalle', { ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol tiene cambios' }] }],
     ['bloqueo sin detalle', { ...ready, blockers: [{ code: 'dirty_tree' }] }],
+    ['motor corriendo, fuera de ready', { ...ready, state: 'current', blockers: [enMarcha] }],
+    ['motor corriendo y sin detalle', { ...ready, state: 'current', blockers: [{ code: 'engine_running' }] }],
   ]
   for (const [nombre, status] of apagados) {
     const b = buttonFor(status)
