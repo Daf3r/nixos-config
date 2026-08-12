@@ -34,8 +34,16 @@ curl -sSL --max-time 120 "$INDEX_URL" > "$index"
 latest="$(brave_latest_version < "$index")"
 current="$(sed -n 's/^ *version = "\(.*\)";/\1/p' "$target" | head -n1)"
 
+# One JSON object on stdout, whether the pin moved or not. The engine drops it
+# straight into status.json's `changes[]`, where a reader tells "moved" from
+# "already current" by comparing `from` against `to` -- schema 1 put a sentence
+# here instead ("brave-origin 1.93.134 (current)"), and a bar plugin cannot
+# render a sentence without parsing it back apart. Reporting the unchanged case
+# too is deliberate: the alternative is silence, and silence is what a bump that
+# never ran looks like.
 if [ "$latest" = "$current" ]; then
-  echo "brave-origin $current (current)"
+  jq -nc --arg f "$current" --arg t "$current" \
+    '{name: "brave-origin", kind: "local_pkg", from: $f, to: $t}'
   exit 0
 fi
 
@@ -43,4 +51,5 @@ hex="$(brave_sha256_for "$latest" < "$index")"
 sri="$(nix hash convert --hash-algo sha256 --to sri "$hex")"
 
 nixpin_set "$target" "$latest" "$sri"
-echo "brave-origin $current -> $latest"
+jq -nc --arg f "$current" --arg t "$latest" \
+  '{name: "brave-origin", kind: "local_pkg", from: $f, to: $t}'

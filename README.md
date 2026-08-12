@@ -29,6 +29,14 @@ flakeup               # nix flake update
 `networking.hostName`, which is why `--flake ~/nixos-config` resolves `daf3r-starter`
 without spelling out the attribute.
 
+### Update engine and DMS bar
+
+`upd check` prepares an update without applying it. The machine-readable surface is
+`upd status --json`; it includes the prepared changes and blockers computed live.
+`upd apply --ff-only` fast-forwards the engine branch and `upd apply --boot` stages the
+generation for the next boot. The `nixos-upd` DankMaterialShell plugin shows that state
+in the bar and offers checking or applying it through polkit.
+
 ---
 
 ## The thing to know before changing anything

@@ -49,8 +49,11 @@ target="$repo/pkgs/t3code-app.nix"
 latest="$(curl -sSL --max-time 60 "$API" | t3code_latest_version)"
 current="$(sed -n 's/^ *version = "\(.*\)";/\1/p' "$target" | head -n1)"
 
+# One JSON object on stdout, moved or not; see the same block in
+# bump-brave-origin.sh for why this is not prose any more.
 if [ "$latest" = "$current" ]; then
-  echo "t3code-app $current (current)"
+  jq -nc --arg f "$current" --arg t "$current" \
+    '{name: "t3code-app", kind: "local_pkg", from: $f, to: $t}'
   exit 0
 fi
 
@@ -58,4 +61,5 @@ url="https://github.com/pingdotgg/t3code/releases/download/v${latest}/T3-Code-${
 sri="$(nix store prefetch-file --json "$url" | jq -er '.hash')"
 
 nixpin_set "$target" "$latest" "$sri"
-echo "t3code-app $current -> $latest"
+jq -nc --arg f "$current" --arg t "$latest" \
+  '{name: "t3code-app", kind: "local_pkg", from: $f, to: $t}'

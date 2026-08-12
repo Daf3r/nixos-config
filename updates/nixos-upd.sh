@@ -27,6 +27,10 @@ LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)}"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/status.sh
 source "$LIB_DIR/status.sh"
+# shellcheck source=lib/closure.sh
+source "$LIB_DIR/closure.sh"
+# shellcheck source=lib/inputs.sh
+source "$LIB_DIR/inputs.sh"
 
 REPO="${REPO:-/home/daf3r/nixos-config}"
 BRANCH="${BRANCH:-main}"
@@ -346,23 +350,49 @@ git -C "$WT" checkout -q -B auto/update FETCH_HEAD >>"$LOG" 2>&1 \
 
 # --- bump the two locally-packaged apps ------------------------------------
 # A failing bump leaves that package where it is and does not stop the run --
-# but it must not be silent either. local_pkgs is free-form prose meant for a
-# human, so the only machine-detectable signal a failure used to leave was a
-# substring match on "(bump failed)", which is no contract for a reader to gate
-# on. A reader watching `warnings` -- which is what Task 8's `upd` does -- saw a
-# clean `ready` while a package quietly stayed behind at its old version. Same
-# class as the VA-API check above: the check not running has to look different
-# from the check passing.
-if ! brave_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
-  brave_line="brave-origin (bump failed)"
+# but it must not be silent either. Both signals are needed and they are not
+# the same one: the `warnings` entry is what a reader gates on (a clean `ready`
+# used to hide a package quietly staying at its old version), and the fallback
+# object is what keeps `changes[]` uniform so a reader never has to cope with a
+# missing element. `from` and `to` are empty because there is nothing
+# trustworthy to put in them, which is not the same as the package being known
+# to have stayed put: the bump scripts call nixpin_set *before* they print
+# their JSON, so a failure between those two leaves the pin rewritten -- and
+# then committed by the staging further down -- while this entry says nothing
+# moved. Nothing here can tell those apart, and the `warnings` entry is what
+# covers it. That is the other half of why both signals exist rather than one.
+# Same class as the VA-API check above: the check not running has to look
+# different from the check passing.
+if ! brave_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
+  brave_json='{"name":"brave-origin","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
   warn local_bump_failed "brave-origin could not be bumped; it stays at the version pinned in pkgs/brave-origin.nix (see $LOG)"
 fi
-if ! t3code_line="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-t3code-app.sh" --repo "$WT" 2>>"$LOG")"; then
-  t3code_line="t3code-app (bump failed)"
+if ! t3code_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-t3code-app.sh" --repo "$WT" 2>>"$LOG")"; then
+  t3code_json='{"name":"t3code-app","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
   warn local_bump_failed "t3code-app could not be bumped; it stays at the version pinned in pkgs/t3code-app.nix (see $LOG)"
 fi
 
 # --- flake inputs -----------------------------------------------------------
+# Snapshot the lock the update is measured *from*, and take it from FETCH_HEAD
+# rather than from the working tree. The placement is the whole of it: on the
+# second consecutive run without an apply, $WT still holds yesterday's already
+# updated lock until the reset above rewrites it, so a snapshot taken any
+# earlier reports what moved since *yesterday's prepared update* instead of
+# what moved since the running system. That understates by exactly the part the
+# user has not applied yet -- nixpkgs A->B on Monday, B->C on Tuesday, and the
+# report says B->C to someone still running A -- and it is wrong in the
+# quietest way available: a real input, a real short rev, a plausible row.
+# Naming FETCH_HEAD instead of copying $WT/flake.lock makes the ordering
+# structural: moved above the fetch, this fails loudly instead of lying.
+#
+# On failure the half-written file is removed rather than left: an empty
+# lock.before is unparseable, and a stale one from an earlier run would be
+# silently diffed against as if it were today's baseline.
+if ! git -C "$WT" show FETCH_HEAD:flake.lock > "$STATE_DIR/lock.before" 2>>"$LOG"; then
+  rm -f "$STATE_DIR/lock.before" || true
+  warn lock_snapshot_failed "could not snapshot the previous flake.lock, so status.json will not name which inputs moved (see $LOG)"
+fi
+
 nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake update failed"
 
 # --- build ------------------------------------------------------------------
@@ -497,8 +527,16 @@ else
 fi
 
 # --- what changed -----------------------------------------------------------
-diff_txt="$(nix store diff-closures /run/current-system "$WT/result" 2>>"$LOG")" \
-  || diff_txt="(nix store diff-closures failed; see $LOG)"
+# `diff_ok` exists so the two failures downstream stay told apart. Before
+# schema 2 this text only ever reached a human through `upd diff`, and the
+# prose below was the whole report of a failed diff-closures; now it is parsed,
+# and feeding that sentence to closure_parse would come back as "the format
+# moved under us" -- a warning pointing at the wrong thing entirely.
+diff_ok=1
+if ! diff_txt="$(nix store diff-closures /run/current-system "$WT/result" 2>>"$LOG")"; then
+  diff_ok=0
+  diff_txt="(nix store diff-closures failed; see $LOG)"
+fi
 # Not bare. diff.txt is a convenience for the reader; the build succeeded and
 # the commit below is real. Aborting here under errexit would leave the previous
 # run's status.json in place -- a stale `ready`, with an old checked_at, naming
@@ -507,6 +545,56 @@ diff_txt="$(nix store diff-closures /run/current-system "$WT/result" 2>>"$LOG")"
 # a warning and the run reports what actually happened.
 if ! printf '%s\n' "$diff_txt" > "$STATE_DIR/diff.txt" 2>/dev/null; then
   warn diff_write_failed "could not write $STATE_DIR/diff.txt; the closure diff is unavailable to the reader"
+fi
+
+# --- the same diff, as data -------------------------------------------------
+# Every branch here ends with a warning or with real data, and never with a
+# quiet empty diff. An empty closure_diff renders as "nothing changes" in the
+# panel, which is the one thing a run that just built a different closure must
+# never say; the warning is what makes an unparsed diff look different from an
+# identical one.
+#
+# closure_parse fails all-or-nothing -- one line of a shape it does not know,
+# including a size unit some future nix invents, and it returns 1 with nothing
+# on stdout. That 1 is emphatically not "no updates". Its own diagnostic goes
+# to $LOG, which the warning points at.
+closure_json='{"added":[],"removed":[],"changed":[],"size_delta_mb":0}'
+if [ "$diff_ok" -ne 1 ]; then
+  warn closure_diff_failed "\`nix store diff-closures\` failed, so status.json cannot say which packages this update moves (see $LOG)"
+elif ! closure_json="$(printf '%s\n' "$diff_txt" | closure_parse 2>>"$LOG")"; then
+  closure_json='{"added":[],"removed":[],"changed":[],"size_delta_mb":0}'
+  warn closure_parse_failed "could not parse the closure diff, so the package list is empty; \`nix store diff-closures\` may have changed format (see $LOG)"
+fi
+
+# Not a bare assignment. closure_reboot lets jq's own status through (5 on
+# input that is not an object) rather than mapping everything onto 1, so under
+# `set -e` an unguarded call would take this run down after the build, with no
+# status written at all. Whatever it answers, the warning goes with it: on its
+# own, "no reboot needed" is exactly what a reboot check that never ran also
+# looks like.
+#
+# The fallback asks closure_reboot itself what an empty diff means instead of
+# spelling `{"reboot_recommended":false,"reboot_reason":[]}` out here. A
+# literal would be a second place that knows those two key names, and a rename
+# in closure.sh would walk straight past it without a sound -- the exact
+# duplication the `+ $reboot` merge below exists to avoid. If even that call
+# fails, the keys are left out rather than invented: `upd show` already reads
+# `.reboot_recommended // false`, and an absent key sitting next to a warning
+# says strictly more than a confident `false` sitting next to one.
+if ! reboot_json="$(printf '%s' "$closure_json" | closure_reboot 2>>"$LOG")"; then
+  warn reboot_check_failed "could not decide whether this update needs a reboot; treat \`upd apply\` as if it might (see $LOG)"
+  reboot_json="$(printf '%s' '{"added":[],"removed":[],"changed":[]}' | closure_reboot 2>>"$LOG")" \
+    || reboot_json='{}'
+fi
+
+# Which flake inputs moved. Absent lock.before means the snapshot above already
+# warned, so this stays quiet rather than saying the same thing twice.
+inputs_json='[]'
+if [ -f "$STATE_DIR/lock.before" ]; then
+  if ! inputs_json="$(inputs_diff "$STATE_DIR/lock.before" "$WT/flake.lock" 2>>"$LOG")"; then
+    inputs_json='[]'
+    warn inputs_diff_failed "could not read which flake inputs moved out of the two lock files, so status.json will not name them (see $LOG)"
+  fi
 fi
 
 # --- record it --------------------------------------------------------------
@@ -537,16 +625,23 @@ else
     || fail check_failed "could not commit the prepared update"
 fi
 
+# `$reboot` is merged with `+` rather than spelled out field by field, so the
+# two keys are whatever closure_reboot decided they are and there is no second
+# place that can disagree with it about their names.
 ready_body="$(jq -n \
-  --arg brave "$brave_line" \
-  --arg t3 "$t3code_line" \
+  --argjson brave "$brave_json" \
+  --argjson t3 "$t3code_json" \
+  --argjson inputs "$inputs_json" \
+  --argjson closure "$closure_json" \
+  --argjson reboot "$reboot_json" \
   --arg log "$LOG" \
   --argjson warnings "$warnings" \
   --argjson unmanaged "$unmanaged" \
   '{build: {ok: true, log: $log},
     branch: "auto/update",
-    local_pkgs: [$brave, $t3],
+    changes: ($inputs + [$brave, $t3]),
+    closure_diff: $closure,
     warnings: $warnings,
-    unmanaged: $unmanaged}')" \
+    unmanaged: $unmanaged} + $reboot')" \
   || fail check_failed "the update is prepared but its status body could not be rendered"
 finish "ready" "$ready_body"

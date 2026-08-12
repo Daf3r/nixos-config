@@ -1,0 +1,22 @@
+codex-desktop: 26.803.41515 → 26.803.81509, [31;1m25.3 KiB[0m
+codex-desktop-keyring: 26.803.41515, 26.803.41515-fish → 26.803.81509, 26.803.81509-fish
+gcc: 16.1.0 → 16.2.0
+initrd-linux-xanmod: [31;1m52.3 KiB[0m
+kitty: [31;1m51.2 KiB[0m
+libXNVCtrl: 595.84 → 595.91.07
+libxmp: 4.7.1 → 4.7.2
+lua-language-server: 3.18.2, 3.18.2-fish → 3.19.0, 3.19.0-fish, [31;1m27.8 KiB[0m
+nerd-fonts-jetbrains-mono: 3.4.0+2.304, 3.4.0+2.304-fish → 3.5.0+2.304, 3.5.0+2.304-fish, [31;1m5.9 MiB[0m
+nix-direnv: 3.1.2 → 3.2.0
+nixos-system-daf3r-starter: 26.11.20260807.f13ff45 → 26.11.20260809.279b4a8
+noctalia: [31;1m171.1 KiB[0m
+nvidia-open: 595.84-7.1.6 → 595.91.07-7.1.6
+nvidia-settings: 595.84, 595.84_fish → 595.91.07, 595.91.07_fish
+nvidia-x11: 595.84, 595.84_fish → 595.91.07, 595.91.07_fish
+samba: 4.23.8 → 4.23.10, [31;1m65.7 KiB[0m
+source: [31;1m195.2 KiB[0m
+t3code: 0.0.32, 0.0.32-fhsenv, 0.0.32-fish → 0.0.33, 0.0.33-fhsenv, 0.0.33-fish, [31;1m317.4 KiB[0m
+wireplumber: [31;1m2.1 MiB[0m
+somethingnew: ∅ → 1.2.3
+multiver: 1.0, 1.0-fish → 2.0, 2.0-fish, 1.5 MiB
+biggrowth: 4.5 → 4.6, 1.2 GiB

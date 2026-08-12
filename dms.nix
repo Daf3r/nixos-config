@@ -110,5 +110,21 @@
       enable = true;
       src = "${inputs.dms-plugins}/claude-usage";
     };
+
+    # The bar half of the update engine in ./updates. Unlike claude-usage this
+    # is NOT a flake input: a path relative to this flake's own tree is fine
+    # under pure evaluation — what fails is an absolute path — so the engine and
+    # its reader move in the same commit and iterating costs one switch, with no
+    # push and no `nix flake update`.
+    #
+    # The directory is the whole plugin source, tests included. They ride along
+    # into the store because `src` is copied wholesale, and they are harmless
+    # there: DMS discovers plugins by looking for a plugin.json, and there is
+    # only one, at the top. `node --test` over them is not part of any
+    # derivation — it is the loop a human runs while editing logic.js.
+    plugins.nixos-upd = {
+      enable = true;
+      src = ./updates/dms-plugin;
+    };
   };
 }

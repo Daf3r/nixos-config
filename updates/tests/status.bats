@@ -12,7 +12,7 @@ teardown() {
 @test "status_write produces valid json with the envelope fields" {
   run status_write "$WORK/s.json" "ready" '{"changes":[]}'
   [ "$status" -eq 0 ]
-  jq -e '.schema == 1' "$WORK/s.json"
+  jq -e '.schema == 2' "$WORK/s.json"
   jq -e '.state == "ready"' "$WORK/s.json"
   jq -e '.checked_at | type == "string"' "$WORK/s.json"
 }
@@ -139,11 +139,11 @@ teardown() {
   # jq's `+` gives the right-hand operand precedence. If the body were on
   # the right (`{schema:...} + $body`), a body carrying its own `schema`,
   # `state`, or `checked_at` key would silently win over the envelope —
-  # and the envelope is the only thing a future reader (Task 8's `[ "$schema"
-  # = "1" ]` gate, `upd apply`'s `.state == "ready"` gate) can trust. A body
-  # is caller-supplied data; it must never be able to forge the contract.
+  # and the envelope is the only thing a reader (`upd.sh`'s `[ "$schema" =
+  # "$SCHEMA" ]` gate, `upd apply`'s `.state == "ready"` gate) can trust. A
+  # body is caller-supplied data; it must never be able to forge the contract.
   status_write "$WORK/s.json" "ready" '{"schema":99,"state":"pwned","checked_at":"nope","x":1}'
-  jq -e '.schema == 1' "$WORK/s.json"
+  jq -e '.schema == 2' "$WORK/s.json"
   jq -e '.state == "ready"' "$WORK/s.json"
   jq -e '.checked_at != "nope"' "$WORK/s.json"
   jq -e '.x == 1' "$WORK/s.json"
@@ -155,6 +155,16 @@ teardown() {
   # pass all of them. Use a different state and check it lands verbatim.
   status_write "$WORK/s.json" "build_failed" '{}'
   jq -e '.state == "build_failed"' "$WORK/s.json"
+}
+
+@test "status_write still refuses a body that would forge the envelope" {
+  # The envelope must win over the body -- unchanged from schema 1, retested
+  # because the schema bump touches that exact jq expression. The test above
+  # forges all three envelope keys at once; this one forges the schema with a
+  # *plausible* neighbouring value and a state a reader acts on differently,
+  # which is the shape a producer bug would really take.
+  status_write "$WORK/s.json" "ready" '{"schema":99,"state":"current"}'
+  jq -e '.schema == 2 and .state == "ready"' "$WORK/s.json"
 }
 
 @test "status_write refuses to write when the target path already exists as a directory" {

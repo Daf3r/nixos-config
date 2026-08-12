@@ -10,6 +10,18 @@
 
 Spec: `docs/superpowers/specs/2026-08-11-widget-upd-barra-design.md`
 
+## Estado actualizado — 2026-08-12
+
+La implementación de las tareas 1–10 está en `7d2cf1f`. Esta revisión se está
+cerrando en el worktree `codex/upd-barra-finish`: el reenganche del daemon tras
+reiniciar DMS ya está implementado y sus decisiones puras tienen regresiones en
+`updates/dms-plugin/tests/logic.test.js`. La verificación de build/switch real
+queda separada de la revisión estática porque requiere acceso al daemon de Nix,
+una sesión DMS activa y autenticación polkit.
+
+La tarea 11 no publica ni integra por sí misma: el commit y el switch siguen
+siendo decisiones del operador.
+
 ## Global Constraints
 
 - Target repo: `/home/daf3r/nixos-config`. Flake attribute: `daf3r-starter`.
@@ -676,118 +688,90 @@ git commit -m "updates: status.json pasa a schema 2, con los cambios en estructu
 
 ---
 
-### Task 5: `upd status --json`
+### Task 5: `upd status --json` — done in `c53dc4d`, revised in `ee4ebd3`
+
+> **This section was rewritten after the fact**, in the second review round, and
+> now describes what is in the tree rather than what was designed. Six things
+> came out different, each of them measured against the machine before it was
+> changed rather than argued; the evidence is in
+> `.superpowers/sdd/2026-08-11-widget-upd-barra/task-5-report.md`.
+>
+> It is written this way because the previous version of this section was about
+> to do damage: Task 6 is written by reading this file, and until this edit the
+> code block below still said `_UPD_BOOTED_SYSTEM`, a name that was deliberately
+> retired. The source of truth is `updates/upd.sh:267-394`; what follows is what
+> Task 6 and the plugin tasks need in order not to reintroduce any of it.
 
 **Files:**
-- Modify: `updates/upd.sh` (new `status` case in the `case "$cmd"` block)
-- Modify: `updates/tests/upd.bats`
+- Modified: `updates/upd.sh` (new `status` arm in the `case "$cmd"` block, between `show)` and `diff)`)
+- Modified: `updates/tests/upd.bats`
 
 **Interfaces:**
-- Produces: `upd status --json` on stdout — the `status.json` object plus `blockers: [{code, detail}]`. Exit 0 whenever it could produce an object, including when blockers exist; exit 1 only if the status file is unreadable or of an unknown schema.
+- Produces: `upd status --json` on stdout — the `status.json` object **exactly as the engine wrote it**, plus `blockers: [{code, detail}]`. No filtering of any kind: `show` drops the `from == to` rows out of `changes[]` because a human does not need them, this arm does not, because the consumer counts and groups on its own and two differently-filtered readings of one file is how the two come to disagree.
+- Exit 0 whenever there is an object to emit, blockers and all. Exit 1 when there is none — a status file that is missing, unparseable, or of a schema this reader does not understand — and in that case **stdout is empty and the refusal goes to stderr**. That pairing is the contract: it is what lets a consumer tell "nothing to apply" from "no answer", and a half-built object would be read as the first.
+- `upd status` takes `--json` and nothing else. Both a missing and an extra argument are refused, for the reason `apply --boot` was refused in Task 3: an option accepted and ignored is indistinguishable from an option that worked.
+
+**The blocker vocabulary** — six codes, not the four the design named:
+
+| `code` | When |
+|---|---|
+| `dirty_tree` | `$REPO` has uncommitted or untracked changes |
+| `wrong_branch` | `$REPO` is on a branch other than `$BRANCH`, or on a detached HEAD |
+| `engine_running` | the engine holds `$STATE_DIR/lock` right now |
+| `pending_reboot` | the system profile and `/run/current-system` are different generations, **in either direction** |
+| `lock_uncheckable` | the lock could not be opened at all, or `flock` is missing — *not* the same as the engine holding it |
+| `repo_uncheckable` | `$REPO` could not be opened as a git repository, **or git could not read all of its work tree**, **or its warnings could not be captured**, or `git` is missing |
+
+Consumers must treat an **unknown** `code` as a blocker and render its `detail`, never as noise to skip: this vocabulary grew by two during implementation and can grow again. The logic sketched for Task 8 already does the right thing (any blocker disables the button, the reason is the `detail`s joined); what must not appear is a `switch` on `code` whose `default` shows nothing.
+
+**What differs from the original design, and why**
+
+1. **The `flock` block has three outcomes, not two.** The single `if ! (exec 9>"$STATE_DIR/lock" && flock -n 9)` cannot tell "the engine holds it" from "I could not open it at all", and answers the first for both. Measured with a non-existent `$STATE_DIR` and again with a read-only one: `engine_running`, both times. That state is permanent — a lock file left owned by root after a change of `User=` in the unit is the live way to reach it — so the panel would keep a dead button for ever, blaming a check that is not running. `apply` already separates the two cases (`updates/upd.sh:451-456`); so does this.
+2. **A guard in front of the two git calls.** Both fail silently in the same way: `git status` in a directory that is not a repository prints nothing on stdout, which reads as a clean tree, and `symbolic-ref` failing there is indistinguishable from a real detached HEAD. Two confident statements about a repository that was never opened, the second of which sends the reader off to `git switch` something that does not exist.
+3. **`$#` is validated, not just `$2`.** See the interface note above.
+4. **`_UPD_SYSTEM_PROFILE`, not `_UPD_BOOTED_SYSTEM`.** `/nix/var/nix/profiles/system` is the *profile*; NixOS spells the booted system `/run/booted-system`. The old name is a trap with a concrete cost: whoever aligns the default with the name ends up comparing `/run/booted-system` against `/run/current-system`, which differ after any plain switch onto a new kernel, and turns the blocker into a permanent one for a condition `reboot_recommended` already reports from the closure diff. **`_UPD_CURRENT_SYSTEM` keeps its name** — that one is exact. Neither variable is set by anything but the tests.
+5. **`pending_reboot`'s `detail` names the disagreement, not a direction.** `nixos-rebuild test` and `nh os test` activate without writing the profile, leaving it on the *older* generation while `/run/current-system` is on the newer one — the same inequality with the opposite sign. Blocking is right for both; "there is a generation staged for the next boot" is false for one of them. The code keeps its name (it is the dominant case and it is interface for Tasks 8-10); only the wording is neutral.
+6. **There is no `--help` in `upd.sh`.** The original Step 3 said to add `status` "to the usage text in the `*)` arm and to the `--help` output". The second does not exist: `upd --help` falls into `*)`, prints the usage and exits 1. There is one text, and it is the one that was edited. Adding a real `--help` with exit 0 would be an interface change nobody asked for.
 
 - [ ] **Step 1: Write the failing tests**
 
-```bash
-@test "upd status --json reports a dirty tree as a blocker" {
-  touch "$REPO/scratch.txt"
-  run upd_main status --json
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
-}
+Fifteen of them, in a `--- status --json ---` section of `updates/tests/upd.bats` (`:394-630`). Rather than reproduce them here — a copy in this file is a copy that goes stale, which is what this whole section is a correction of — what matters for the tasks that come after:
 
-@test "upd status --json reports the wrong branch as a blocker" {
-  git -C "$REPO" switch -c experimento
-  run upd_main status --json
-  echo "$output" | jq -e '.blockers | map(.code) | index("wrong_branch")'
-}
-
-@test "upd status --json has no blockers on a clean main" {
-  run upd_main status --json
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers == []'
-}
-
-@test "upd status --json reports a pending reboot" {
-  # A `boot` apply does not move /run/current-system, so the next check would
-  # report `ready` again and the same update would be applied twice.
-  _UPD_BOOTED_SYSTEM="$BATS_TMPDIR/a" _UPD_CURRENT_SYSTEM="$BATS_TMPDIR/b" \
-    run upd_main status --json
-  echo "$output" | jq -e '.blockers | map(.code) | index("pending_reboot")'
-}
-
-@test "upd status --json passes the engine's own message through" {
-  touch "$REPO/scratch.txt"
-  run upd_main status --json
-  echo "$output" | jq -e '.blockers[] | select(.code == "dirty_tree") | .detail | length > 0'
-}
-```
+- The harness is **`upd_status`** (`updates/tests/upd.bats:123-128`), a sibling of the file's existing `upd` helper. Not `upd_main`, which this plan invented and which `upd.bats` has never had; the note under Task 4 already says to follow the file's own style, and that is what was done.
+- It pins the two system paths through **`env`**, not through an assignment prefix in front of `run`. The prefix does reach the child — measured, it works through bash's rule that temporary assignments to a *function* call are exported for its duration — but `env` says so without depending on it, and it is the form the file already uses for `BRANCH`.
+- It sets **`GIT_CEILING_DIRECTORIES="$WORK"`**. `rev-parse --is-inside-work-tree` walks up the parents, so a `$TMPDIR` inside a git repository would make the `repo_uncheckable` test assert the opposite of what it names. Verified by building that scenario on purpose: with the ceiling green, without it red.
+- The refusal test uses **`run --separate-stderr`** and asserts `[ -z "$output" ]`. A bare `run` merges the two streams, so an assertion about "nothing on stdout" made on `$output` really only says the *concatenation* does not parse — measured: with `jq -n '{blockers:[]}'` inserted before `require_readable_status`, stdout carried the half-object and the test stayed green. **Do not "fix" this to `[ -z "$stdout" ]`**: `run --separate-stderr` defines `$output` and `$stderr` and no `$stdout` at all, so that assertion passes on an undefined variable, always. The file declares `bats_require_minimum_version 1.5.0` for the flag.
+- Both directions of `pending_reboot` have a test. One of them would pass on a `detail` that branches by direction; the pair does not.
 
 - [ ] **Step 2: Run and watch them fail**
 
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: five failures — `upd` prints its usage and exits 1 on the unknown `status` command.
+Run: `nix run nixpkgs#bats -- tests/` from `updates/`
+Observed: fourteen failures (the fifteenth test arrived with the review round), the rest of the suite untouched — `upd` prints its usage and exits 1 on the unknown `status` command.
 
 - [ ] **Step 3: Implement**
 
-Add to `updates/upd.sh` before the `*)` arm. The two `_UPD_*_SYSTEM` variables exist so the reboot check is testable without a second generation:
+`updates/upd.sh:267-394`, added before the `*)` arm. Read it there rather than from a copy. Its shape, in order: argument validation → `[ -f "$STATUS" ]` → `require_readable_status` → `blockers='[]'` and a jq-based `add_blocker` → the git guard and the two live git facts → the three-way lock check → the profile comparison → `jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"`.
 
-```bash
-  status)
-    # The plugin's only entry point. It exists rather than letting the plugin
-    # read status.json because two of the conditions that stop an apply are not
-    # in that file and cannot be: the state of the user's working tree, and the
-    # branch it has checked out. Both change long after the nightly run wrote
-    # its status, and today they surface only as an exit 1 from `apply` — fine
-    # for a command, useless for a panel whose button would be doomed before it
-    # is drawn.
-    [ "${2:-}" = "--json" ] || die "uso: upd status --json"
-    [ -f "$STATUS" ] || die "no hay ninguna comprobacion todavia"
-    require_readable_status
+Also add `status` to the usage text in the `*)` arm (`updates/upd.sh:605-613`), and extend the exit-code taxonomy in the file header (`:27-38`) — a dirty tree is exit 1 when it stops an `apply` and exit 0 with a `blockers[]` entry when `status --json` reports it, and the header said only the first.
 
-    blockers='[]'
-    add_blocker() { # $1 code, $2 detail
-      blockers="$(printf '%s' "$blockers" | jq -c --arg c "$1" --arg d "$2" '. + [{code: $c, detail: $d}]')"
-    }
-
-    if [ -n "$(git -C "$REPO" status --porcelain --untracked-files=normal --ignore-submodules=none 2>/dev/null)" ]; then
-      add_blocker dirty_tree "el arbol de trabajo tiene cambios sin commitear; no aplico"
-    fi
-
-    cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD 2>/dev/null)" || cur_branch=""
-    if [ -z "$cur_branch" ]; then
-      add_blocker wrong_branch "$REPO esta con el HEAD desprendido; ponlo en una rama antes de aplicar"
-    elif [ "$cur_branch" != "$BRANCH" ]; then
-      add_blocker wrong_branch "$REPO esta en la rama '$cur_branch' y el motor prepara desde '$BRANCH'"
-    fi
-
-    if ! (exec 9>"$STATE_DIR/lock" && flock -n 9) 2>/dev/null; then
-      add_blocker engine_running "hay una comprobacion en marcha ahora mismo"
-    fi
-
-    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/nix/var/nix/profiles/system}" 2>/dev/null || true)"
-    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null || true)"
-    if [ -n "$booted" ] && [ -n "$current" ] && [ "$booted" != "$current" ]; then
-      add_blocker pending_reboot "ya hay una generacion aplicada para el proximo arranque; reinicia antes de aplicar otra"
-    fi
-
-    jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"
-    ;;
-```
-
-Add `status` to the usage text in the `*)` arm and to the `--help` output.
+One invariant this arm depends on and now states in place (`updates/upd.sh:340-349`): **`$STATE_DIR/lock` carries no content.** Both probes open it for writing, which truncates it, and this is the one subcommand a panel will poll on a timer. If the lock ever has to carry a PID or a timestamp, it needs a second file.
 
 - [ ] **Step 4: Run the tests**
 
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: PASS.
+`nix run nixpkgs#bats -- tests/` → 135 ok, 0 not ok. `shellcheck -x -- *.sh lib/*.sh` → empty.
+Beyond the suite: every test was checked counterfactually, by breaking the production line it claims to cover on a copy outside the repository and confirming it goes red — 18 mutations, 18 killed. Two of those mutations restore this plan's original `flock` block and its missing repository guard, so a later "simplification" back to the design turns the suite red at the exact spot.
 
 - [ ] **Step 5: Verify against the live machine**
 
+**Not** `upd status --json` from `$PATH`: that binary is the installed one, built before this change, and it does not know the subcommand. Until a `nh os switch` it has to be the script from the checkout, with the variables the store wrapper supplies:
+
 ```bash
-upd status --json | jq '.state, .reboot_recommended, .blockers'
+env REPO=/home/daf3r/nixos-config BRANCH=main STATE_DIR=/var/lib/nixos-upd \
+    LIB_DIR=/home/daf3r/nixos-config/updates/lib \
+    bash updates/upd.sh status --json | jq '{state, reboot_recommended, blockers}'
 ```
 
-Expected: `blockers` is `[]` on a clean main. Then dirty the tree with `touch ~/nixos-config/borrame.txt`, run it again, confirm `dirty_tree` appears, and `rm ~/nixos-config/borrame.txt`.
+And `blockers` is **not** `[]` on a working branch: the engine prepares from `main`, so `wrong_branch` is the correct answer and the sign that it works. Both were run — with `BRANCH=main` the two real blockers appear (`dirty_tree`, `wrong_branch`) and with `BRANCH=upd-barra` on a clean tree the list is empty, exit 0 in both cases, against the real schema-2 `status.json`.
 
 - [ ] **Step 6: Commit**
 
@@ -796,196 +780,217 @@ git add updates/upd.sh updates/tests/upd.bats
 git commit -m "upd: subcomando status --json con los bloqueos en vivo"
 ```
 
----
-
-### Task 6: Split `apply` into its two halves
-
-**Files:**
-- Modify: `updates/upd.sh` (the `apply)` arm)
-- Modify: `updates/tests/upd.bats`
-
-**Interfaces:**
-- Produces: `upd apply --ff-only` — every guard the current `apply` runs, plus the fast-forward, and then stops without calling `nh`. Bare `upd apply` keeps its current behaviour exactly: guards, fast-forward, `nh os switch`. New `upd apply --boot` does the same with `nh os boot`.
-
-- [ ] **Step 1: Write the failing tests**
-
-```bash
-@test "upd apply --ff-only fast-forwards and does not switch" {
-  run upd_main apply --ff-only
-  [ "$status" -eq 0 ]
-  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$WT" rev-parse auto/update)" ]
-  [ ! -f "$BATS_TMPDIR/nh-was-called" ]
-}
-
-@test "upd apply --ff-only refuses a dirty tree exactly like apply does" {
-  touch "$REPO/scratch.txt"
-  run upd_main apply --ff-only
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"sin commitear"* ]]
-}
-
-@test "upd apply --boot calls nh os boot, not switch" {
-  run upd_main apply --boot
-  [ "$status" -eq 0 ]
-  [[ "$(cat "$BATS_TMPDIR/nh-was-called")" == *"boot"* ]]
-}
-```
-
-The existing `upd.bats` already stubs `nh` — reuse that stub and have it record its arguments to `$BATS_TMPDIR/nh-was-called`. Read the file first; do not add a second stubbing mechanism.
-
-- [ ] **Step 2: Run and watch them fail**
-
-Run: `nix run nixpkgs#bats -- updates/tests/upd.bats`
-Expected: the three new tests fail; `--ff-only` and `--boot` are treated as an unknown command.
-
-- [ ] **Step 3: Implement**
-
-In the `apply)` arm, parse the mode at the top and gate only the last two lines:
-
-```bash
-  apply)
-    mode="switch"
-    case "${2:-}" in
-      --ff-only) mode="ff-only" ;;
-      --boot)    mode="boot" ;;
-      "")        mode="switch" ;;
-      *)         die "uso: upd apply [--boot|--ff-only]" ;;
-    esac
-```
-
-Everything from the tool preflight down to `git -C "$REPO" merge --ff-only "$target"` is unchanged. Replace the final `nh os switch "$REPO"` with:
-
-```bash
-    # --ff-only exists for the bar plugin: the repository half runs as daf3r,
-    # and the root half is a systemd unit started separately. Doing the merge as
-    # root would leave root-owned objects in .git and break the next commit made
-    # by hand.
-    if [ "$mode" = "ff-only" ]; then
-      echo "fast-forward hecho; no aplico (--ff-only)"
-      exit 0
-    fi
-    nh os "$mode" "$REPO"
-```
-
-- [ ] **Step 4: Run the tests**
-
-Run: `nix run nixpkgs#bats -- updates/tests/`
-Expected: PASS, including every pre-existing apply guard test — those are the regression surface for this change.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add updates/upd.sh updates/tests/upd.bats
-git commit -m "upd: apply --ff-only y apply --boot"
-```
+Explicit paths, never `git add -A`: there is an untracked file from another session in this tree.
 
 ---
 
-### Task 7: The root unit and the polkit rules
+### Task 5b: extract the blocker calculation to `updates/lib/` — done
+
+> **Added to this plan in the same commit that did the work** — the one that
+> adds `updates/lib/blockers.sh` — and deliberately not folded into Task 6. daf3r decided the order: extract first, rewrite `apply` second. A task
+> that extracts and rewrites at once leaves nobody able to say which of the two
+> broke something when something breaks — and the two touch the same file.
+>
+> The other half of the reason is that extracting *after* Task 6 would mean
+> touching `apply` twice: once to split it, once again when the neighbouring arm
+> moves out from under it. This way Task 6 opens a file where `status` is nine
+> lines and a function call, and nothing it does to `apply` can disturb the
+> blocker logic by accident.
 
 **Files:**
-- Modify: `updates.nix`
+- Added: `updates/lib/blockers.sh`
+- Modified: `updates/upd.sh` (the `status)` arm shrinks; `LIB_DIR` and one `source` at the top)
+- Added: `updates/tests/blockers.bats` (review rounds: the clauses of the contract the end-to-end tests cannot reach)
+- Modified: `updates/tests/upd.bats` — **one test added**, none changed; see Step 2
+- Not modified: `updates.nix` — verified against the store, not by reading it
 
 **Interfaces:**
-- Produces: `nixos-upd-apply@switch.service` and `nixos-upd-apply@boot.service`, startable by daf3r with a password prompt. `nixos-upd.service` startable by daf3r with no prompt.
+- Produces: `blockers_live REPO BRANCH LOCK SYSTEM_PROFILE RUNNING_SYSTEM` — a JSON array of `{code, detail}` on stdout, `[]` when nothing is in the way. An error it can *foresee* is itself a blocker rather than a failure, because "I could not check" and "there is nothing to report" are different answers and the panel must not confuse them. Not an unconditional zero, but for a narrower reason than this said for one round: **errexit does not act inside a command substitution that is part of an assignment**, which is how it is called, so a failure in the middle of it never aborted anything — only the status of the last command, the `jq`, reaches the caller, and `upd.sh` turns that into its documented "exit 1, empty stdout, no answer" with a `|| die`. Every other foreseeable failure, `$TMPDIR` included, has a branch of its own and comes back as a blocker. Nothing is written to stderr on any path — checked by a test, not intended.
+- Consumes: nothing. It reads no globals and no environment; the five things it needs are its five arguments. That is the point of the boundary — the caller owns *this machine's* layout (where the repository is, where the lock lives, which two system paths mean "profile" and "running system"), and the function owns the question "what would stop an apply?".
+- The defaults for the two system paths stay in `upd.sh` (`:305-307`) along with the `_UPD_SYSTEM_PROFILE` / `_UPD_CURRENT_SYSTEM` overrides the tests use. They are facts about NixOS's layout, not about the question.
 
-- [ ] **Step 1: Add the unit**
+**Why this piece and not another:** it is the only part of the `status` arm that can be named in a sentence and asked a question. What is left in the arm is the shape of a subcommand — which arguments it accepts, which file it reads, what it prints — and that is inseparable from `upd.sh` by definition.
 
-In `updates.nix`, alongside the existing `systemd.services.nixos-upd`:
+**It is a refactor: no behaviour changes.** The net is the 135 tests that already existed.
 
-```nix
-  # The root half of an apply. It does one thing: activate. The git
-  # fast-forward has already happened, as daf3r, via `upd apply --ff-only` --
-  # if root did the merge, .git would end up with root-owned objects and the
-  # user's next commit would fail.
-  #
-  # A unit rather than a child of the shell, so a `dms restart` in the middle of
-  # a twenty-minute switch does not orphan it and its result stays queryable
-  # afterwards. Instance name is the nh verb, and nothing else is accepted.
-  systemd.services."nixos-upd-apply@" = {
-    description = "Apply the prepared system update (%i)";
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = "${pkgs.writeShellScript "nixos-upd-apply" ''
-        set -euo pipefail
-        case "$1" in
-          switch|boot) ;;
-          *) echo "nixos-upd-apply: unknown mode '$1'" >&2; exit 1 ;;
-        esac
-        exec ${pkgs.nh}/bin/nh os "$1" /home/daf3r/nixos-config
-      ''} %i";
-      # nh shells out to nix, which needs these on a system unit's minimal PATH.
-      Environment = "PATH=/run/current-system/sw/bin:/run/wrappers/bin";
-    };
-  };
+- [x] **Step 1: Move it**
+
+`updates/upd.sh:292-386` (as it stood at `ee4ebd3`) becomes `blockers_live` in `updates/lib/blockers.sh`, with `$REPO`/`$BRANCH`/`$STATE_DIR/lock` and the two resolved system paths as parameters instead of globals. The `add_blocker` helper does not survive the move: instead of growing a JSON string one `jq` call per blocker, the function accumulates flat `code, detail` pairs in a bash array and makes **one** `jq -n --args … -- "${found[@]}"` call at the end. One process instead of N, and the same escaping guarantee for quotes, backslashes, newlines, `$`, backticks, unicode and embedded JSON — **but only with the `--`**, which the first version of this section claimed was unnecessary and the review disproved. jq keeps parsing options after `--args`, so a value beginning with a dash was read as one: measured, `--json` and `-x` exit 2, and `--args` is accepted and yields `detail: null`. Reachable through a `$repo` whose name starts with a dash, which `git -C` accepts.
+
+`updates/upd.sh` gains the `LIB_DIR` resolution and the `source` that the other three entry points already have (`:51-57`), sourced unconditionally like they do: the file only defines functions.
+
+- [x] **Step 2: Run the suite without touching it**
+
+`nix run nixpkgs#bats -- tests/` from `updates/` → 135 ok, 0 not ok at the move itself; 144 after two review rounds added nine. `shellcheck -x -- *.sh lib/*.sh` → empty.
+
+**No existing test was modified, at any point.** That is the acceptance criterion for the move and not merely an outcome: the 15 `status --json` tests drive the subcommand, never the internals, so a move that needed a test edited would have been a move that changed behaviour. Nothing in `upd.bats` names `add_blocker` or `blockers_live`. The tests *added* afterwards are a different matter and are listed in Step 5.
+
+- [x] **Step 3: Re-run the mutations on the extracted code**
+
+A refactor that leaves a mutant alive that used to die has lost coverage without the suite noticing, so all 18 mutations from Task 5 were re-pointed at the file each line now lives in and re-run, plus two new ones on the boundary the refactor creates (the five-argument call): swapping `$REPO` and `$BRANCH`, and passing `$STATE_DIR` where the lock file goes. 20 mutations, 20 killed — and 28 after Steps 5 and 6. Intentionally *not* included: swapping the profile and the running system, which is a **equivalent mutant** (the comparison is `!=`, so it is unobservable).
+
+- [x] **Step 4: Prove the new file reaches the store**
+
+`updates.nix` copies `./lib` wholesale, so in principle nothing there needs editing — but "in principle" is what this repository has been caught by before, so it was checked against the store and not by reading the `.nix`:
+
+```
+$ ls $out/libexec/nixos-upd/lib/
+blockers.sh  brave.sh  closure.sh  inputs.sh  nixpin.sh  status.sh  t3code.sh
+$ $out/bin/upd status --json | jq -c '{state, blockers: [.blockers[].code]}'
+{"state":"ready","blockers":["dirty_tree","wrong_branch"]}
 ```
 
-Verify the `nh` attribute name against the pinned nixpkgs before building — if `pkgs.nh` does not exist under that name the build fails loudly, which is the desired failure.
+And `git add` before believing any of it: flake evaluation only sees tracked files, so a new file left untracked is a green build over a file that was never there.
 
-- [ ] **Step 2: Add the polkit rules**
+- [x] **Step 5: The review round**
 
-```nix
-  # Two levels on purpose.
-  #
-  # The check only builds -- it can never change the running system -- so
-  # demanding a password for it is friction with nothing bought. The apply gets
-  # auth_admin every time, and deliberately NOT auth_admin_keep: a five-minute
-  # grace period on the one action that changes the system is exactly what we do
-  # not want.
-  #
-  # A polkit rule can be syntactically fine and silently authorise nothing --
-  # that already happened on this machine with gamemode. The acceptance test is
-  # starting the unit and seeing the prompt, not reading this block.
-  security.polkit.extraConfig = '''
-    polkit.addRule(function(action, subject) {
-      if (action.id != "org.freedesktop.systemd1.manage-units") return undefined;
-      if (subject.user != "daf3r") return undefined;
-      var unit = action.lookup("unit");
-      if (unit == "nixos-upd.service") return polkit.Result.YES;
-      if (unit == "nixos-upd-apply@switch.service" ||
-          unit == "nixos-upd-apply@boot.service") return polkit.Result.AUTH_ADMIN;
-      return undefined;
-    });
-  ''';
-```
+Three findings, all of them the same shape as the ones Task 5 kept closing — a check that cannot conclude being reported as a clean result — plus the documentation that had drifted:
 
-(The `'''` above is this document's quoting; in the `.nix` file use Nix's `''` string delimiters.)
+1. **`jq` and the leading dash**, above. Fixed with `--`, verified over the five failing cases, the normal case and everything that already worked.
+2. **The header promised two things the code did not do.** "Nothing to stderr" was false (`git status`'s warnings went straight through) and "never fails" was false (finding 1). Both are now stated in the form they can be kept, and both are tested.
+3. **`git status` failing read as "clean tree"** — the third copy of the defect the `flock` arm and the repository guard had already closed. In a work tree git cannot fully read (a directory the user cannot open) it warns on stderr, **exits 0, and prints nothing on stdout**, so `[ -n "$(…)" ]` was false and no `dirty_tree` was reported. It now answers `repo_uncheckable`, which is why that row grew in Task 5's table above.
 
-- [ ] **Step 3: Build**
+`updates/tests/blockers.bats` exists for the clauses the end-to-end suite cannot reach: an argument beginning with a dash, and stderr staying empty. Everything else stays in `upd.bats` — duplicating it would mean two places to update and one of them drifting. One test was added to `upd.bats` for the `|| die` seam, injected through `$LIB_DIR` the way `nixos-upd.bats` already stubs `closure_reboot`; without it the guard would be code nobody ever ran, which this repository has a commit about.
 
-Run: `nix build .#nixosConfigurations.daf3r-starter.config.system.build.toplevel --no-link`
-Expected: builds. A red bats suite or a missing `pkgs.nh` stops it here.
+- [x] **Step 6: The second review round**
 
-- [ ] **Step 4: Apply and verify by hand — this is the acceptance test**
+One finding, and it is the same header again: with an unwritable `$TMPDIR` the function broke all three of its own clauses at once — `mktemp` leaked its complaint to stderr plus two more from bash behind it, and the function returned 0 while the header claimed that case propagated. The *verdict* was right (`repo_uncheckable`, because the redirection failed and git never ran) but right by accident. `mktemp` is now silenced and has its own branch, with a test asserting all three promises: empty stderr, exit 0, and a blocker rather than silence.
 
-The switch must be run by daf3r (needs root):
+The cause is worth carrying into Task 6: **errexit does not act inside a command substitution that is part of an assignment**. Measured on bash 5.3.15. Nothing in `blockers_live` was ever being aborted by `set -e`, which is why every failure it can foresee has an explicit branch — and why `apply`, which is written in the same style, should not assume otherwise either.
 
-```bash
-nh os switch ~/nixos-config
-```
+Two smaller things from the same round: `tr … | head -c 200` was a race under `pipefail`, not a pipeline (`head` exits at its 200th byte and `tr` takes a SIGPIPE — reproduced at 1 failure in 10 identical runs over 64 KB), replaced by expansions that also spawn nothing in the path the panel polls; and `blockers.bats` now sets `set -euo pipefail` in its `setup`, so the library is measured in the shell it actually runs in.
 
-Then, with the graphical session running:
+**What Task 6 inherits:** an `apply` arm nothing else in this file reaches into, and a `status` arm that is nine lines and a call. The two can now be worked on at the same time without colliding. If Task 6 needs a blocker of its own — say, `apply --boot` wanting to refuse when a generation is already staged — the place to add it is `blockers_live`, and its `detail` should be written for a human reading it off a panel, because that is where it will end up.
 
-```bash
-systemctl start nixos-upd.service
-```
+---
 
-Expected: **no prompt**, the unit runs, `systemctl status nixos-upd.service` shows it executed.
+### Task 6: Split `apply` into its two halves — done
 
-```bash
-systemctl start nixos-upd-apply@boot.service
-```
+> Rewritten after the fact, like Task 5's section above it, and for the same
+> reason: the source of truth is the tree, and a copy of the code in this file
+> is a copy that goes stale. What follows is the shape of what landed and the
+> decisions that are not visible in a diff. `updates/upd.sh`, the `apply)` arm.
 
-Expected: the **DMS polkit modal appears** asking for a password. Cancel it. Confirm with `systemctl is-active nixos-upd-apply@boot.service` that it did not run, and that `readlink /nix/var/nix/profiles/system` is unchanged.
+**Files:**
+- Modified: `updates/upd.sh` — the `apply)` arm, **and the `ready)` advisory and its footer in `show`**, which the brief did not list. See below.
+- Modified: `updates/tests/upd.bats`
 
-If no modal appears, the rule did not take effect — check `journalctl -u polkit -b` and do not proceed to Task 8 until it does. A silently-ineffective polkit rule is the known failure mode here.
+**Interfaces:**
+- `upd apply` — unchanged: guards, fast-forward, `nh os switch`.
+- `upd apply --boot` — the same with `nh os boot`, which writes the profile and leaves `/run/current-system` alone. This is what the reboot advisory now tells people to type, and what `status --json` reports as `pending_reboot` afterwards.
+- `upd apply --ff-only` — every guard, plus the fast-forward, and then stops without calling `nh`. Exit 0 and a line saying what it did and did not do.
+- One mode at a time, from a closed list. `--ff`, `--frobnicate` and `--boot --ff-only` are all refused, naming what arrived.
 
-- [ ] **Step 5: Commit**
+**Why `--ff-only` exists at all:** the bar plugin's work is split by *who runs it*. The repository half must run as daf3r — a merge done as root leaves root-owned objects in `.git` and breaks the next commit made by hand — and the activation half is a root systemd unit started separately. `--ff-only` is the first of those two, and it is the reason the `nh` preflight is skipped in that mode: demanding a tool the run will never invoke would refuse exactly where the mode is meant to be used.
 
-```bash
-git add updates.nix
-git commit -m "updates: unidad de apply con root y reglas polkit acotadas"
-```
+**Three things the brief did not have**
+
+1. **The `ready)` advisory had to move back to `--boot`, in this same commit.** Task 4 removed the flag from that advice *because* it did not exist: `apply` accepted `--boot`, ignored it, and activated hot, so the warning against hot activation was sending people into it. Leaving the advice as it was now that the flag works would be the same defect inverted. The rule both rounds are instances of: **advice may name a flag exactly as long as the flag behaves, and the two move in the same commit.**
+2. **The footer under it had to move too**, which only showed up by running the thing: the advisory said `upd apply --boot` and four lines below `aplicar: upd apply` printed on the same screen — two instructions, the contradictory one last. It is now conditional on the same `reboot_recommended` the advisory reads.
+3. **`state="$(jq -r '.state …')"` had no `|| …` guard** while the six assignments below it do. At the top level errexit *does* act, so a failing jq killed `apply` with jq's status and jq's message — measured at exit 5, with no line of upd.sh's own. It now `die`s. Not `|| state=""` like its neighbours: that falls into the branch below and says "no hay ninguna actualizacion lista (estado: )", which names the wrong problem.
+
+**Testing notes**
+
+- The suite already stubs `nh` through `$NH_MARKER`; the brief's `$BATS_TMPDIR/nh-was-called` would have been a second mechanism, and the brief itself says not to add one.
+- **Two existing tests were inverted**, both of which had predicted their own inversion in a comment: the `--boot` half of "apply refuses an argument it does not know" (its `--frobnicate` half stays, and is what keeps the guard covered across the change), and the `!= "--boot"` assertion in the reboot advisory test.
+- A test that asserts a tool is missing **cannot get there by deleting the stub**: removing `$WORK/bin/nh` only uncovers the machine's real `nh` further down `$PATH`. Measured — the first version of that test fast-forwarded the throwaway repository and then ran the real `nh os switch` on it. It now builds a `$PATH` containing everything `apply` uses except `nh`, and asserts that premise before relying on it.
+- 17 mutations, 17 killed. **One survived first**: with the footer also naming `--boot`, deleting the flag from the advisory left the advisory's test green, because the assertion looked for `--boot` anywhere in the output. Two places that can satisfy one assertion means it covers neither; it is now anchored to the advisory's own sentence.
+
+**What Task 7 inherits:** `upd apply --ff-only`, which is the repository half of what the root unit will complete, and an `apply` whose mode is parsed once at the top and used in exactly one place at the bottom.
+
+---
+
+### Task 7: The root unit and the polkit rules — done
+
+> Rewritten after the fact, like Tasks 5 and 6 above, and for the same reason:
+> the source of truth is the tree, and a copy of the code in this file is a copy
+> that goes stale. What follows is the shape of what landed and the decisions
+> that are not visible in a diff. `updates.nix`, and the `apply)` arm of
+> `updates/upd.sh`.
+
+**Files:**
+- Modified: `updates.nix` — the unit, the polkit rules, and a git config the brief did not have.
+- Modified: `updates/upd.sh` — **the `apply)` arm**, which the brief did not list. See below.
+- Modified: `updates/tests/upd.bats` — two new tests, and the fifth contract pair anchored at last.
+- Modified: this plan's Task 10, and the spec's §2 and flow, against measurement.
+
+**Interfaces:**
+- `nixos-upd-apply@switch.service` and `nixos-upd-apply@boot.service` — root oneshots that run `nh os switch|boot ${repo}` and nothing else. Startable by daf3r with a password prompt every time. Any other instance name is refused by the unit's own script, not only by polkit.
+- `nixos-upd.service` — startable by daf3r with no prompt.
+
+**Four things the brief did not have**
+
+1. **Root cannot open daf3r's repository, and the unit dies before `nh` starts.**
+   Not a hypothesis: `nix flake metadata /home/daf3r/nixos-config` resolves to
+   `git+file://`, so the apply reads the repository through nix's git fetcher,
+   which is libgit2 — and libgit2 refuses a repository whose owner is not the
+   calling euid. Reproduced end to end with `nix flake metadata` on a root-owned
+   repository: `repository path '…' is not owned by current user (libgit2 error
+   code = 7)`. The reason nobody meets this by hand is `sudo`, which libgit2
+   accepts via `$SUDO_UID`; a systemd unit has none. The unit therefore carries
+   its own `XDG_CONFIG_HOME` holding a single `safe.directory` line — scoped to
+   this one unit rather than to `/etc/gitconfig`. `GIT_CONFIG_GLOBAL` was tried
+   first and does nothing: it is git(1)'s variable and libgit2 ignores it.
+2. **`upd apply` blamed the HEAD for a repository that was not there**, and its
+   detached-HEAD guard had no test anywhere in the suite — Task 6 measured both
+   and left them here. With `$REPO/.git` removed, `git status` printed nothing on
+   stdout so the dirty-tree guard announced a clean tree, and `symbolic-ref`
+   then failed exactly as it does on a real detached HEAD. `apply` now opens
+   with the same `rev-parse --is-inside-work-tree` check `lib/blockers.sh` opens
+   with, which is what made the **fifth contract pair anchorable** after Task 6
+   deliberately left it unanchored.
+3. **The unit's outcome has to reach whoever started it**, and `--no-block` threw
+   it away. Measured: blocking `systemctl start` on a oneshot exits 1 when the
+   unit fails; `--no-block` exits 0 before it has run. And the
+   `ActiveState`/`Result` poll that `--no-block` forced cannot recover the
+   difference, because a unit that has never run and one that finished
+   successfully both report `inactive`/`success`. Task 10's snippet in this file
+   read that pair as a completed apply. Corrected here and in the spec, in the
+   same commit as the unit.
+4. **No `TimeoutStartSec`, and that is a decision.** The obvious guard — a
+   twenty-minute switch killed by the manager's 90-second default — does not
+   apply: `Type=oneshot` disables the start timeout, and every oneshot on this
+   machine that sets none reports `TimeoutStartUSec=infinity`. Measured before
+   adding anything, and nothing added.
+
+**Testing notes**
+
+- The unit and the rules are `.nix`, so the bats suite cannot reach them. What
+  stands in for it: the generated `nixos-upd-apply@.service`, its script and its
+  git config were read out of the built system rather than out of the source;
+  the script was run against `--frobnicate`, `switchh`, `""` and no argument at
+  all; and the generated `10-nixos.rules` was evaluated in a JS harness that
+  registers the callbacks the way polkitd does and asks them about eleven
+  concrete pairs — including the other user, the other action, the other unit,
+  and `nixos-upd-apply@test.service`, none of which the rule may widen to.
+- The two `Environment=PATH=` lines in the generated unit — NixOS's default and
+  ours — were checked rather than reasoned about: the later assignment wins,
+  demonstrated with a throwaway user unit.
+- 7 mutations, 7 killed, all on a copy of `updates/` under `/tmp`. The one that
+  matters is `|| cur_branch=""` on the detached-HEAD guard: it survived all 156
+  tests before this task and now kills exactly one, the new test written for it.
+
+**What Task 8 inherits:** a unit whose failure is legible to a blocking caller,
+polkit rules verified by evaluation rather than by reading, and an `apply` whose
+five refusals all say what they mean.
+
+**The acceptance test ran, failed, and then passed.** It is worth reading in that
+order, because the first run is the whole argument for insisting on it: the unit
+died in 48 ms on `Don't run nh os as root`, a refusal nothing in the suite could
+have seen, because bats stubs `nh` and a stub accepts whatever it is handed. The
+build-time check described above exists because of that run.
+
+The second run passed both halves — polkit denied on cancel (the unit produced no
+journal entries at all, which is the proof) and allowed after authentication, and
+the unit finished with `Result=success` and `Adding configuration to bootloader`.
+That last line is the evidence, and it replaces a criterion this plan briefly
+carried that proved nothing: `readlink /nix/var/nix/profiles/system` having
+changed, which it had — because of the `nh os switch` in the step before, not
+because of the apply.
+
+With it, the one thing the build-time check cannot reach is now known to work:
+libgit2 opening a repository root does not own. A sandbox has neither that
+repository nor a foreign owner, so only the machine could answer it.
 
 ---
 
@@ -1170,7 +1175,7 @@ git commit -m "plugin: la logica pura del widget, con sus pruebas"
 
 ---
 
-### Task 9: The bar item
+### Task 9: The bar item — implemented in `82524ab` and follow-up fixes
 
 **Files:**
 - Create: `updates/dms-plugin/plugin.json`, `updates/dms-plugin/Daemon.qml`, `updates/dms-plugin/Widget.qml`
@@ -1394,7 +1399,7 @@ git commit -m "plugin: el icono de estado en la barra"
 
 ---
 
-### Task 10: The panel and the apply
+### Task 10: The panel and the apply — implemented in `7d2cf1f`
 
 **Files:**
 - Create: `updates/dms-plugin/Popout.qml`
@@ -1454,7 +1459,18 @@ Then add to `Daemon.qml`:
                 root.republish()
                 return
             }
-            unitProc.command = ["systemctl", "start", "--no-block",
+            // No --no-block. Amended in Task 7 against measurement, and the
+            // measurement is in that task's report and in the spec: --no-block
+            // returns 0 before the unit has run, and the ActiveState/Result
+            // poll it forced cannot make up the difference, because a unit that
+            // has *never run* and one that *finished successfully* both say
+            // `inactive` / `success`. The watcher below used to treat that pair
+            // as a completed apply -- so the panel could announce success over
+            // an `nh` that had not started. Blocking, the exit status is the
+            // answer: 0 the apply finished and succeeded, non-zero it failed or
+            // the polkit prompt was cancelled. A Process does not block the UI
+            // thread, so this costs nothing.
+            unitProc.command = ["systemctl", "start",
                                 "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
             unitProc.running = true
         }
@@ -1464,46 +1480,21 @@ Then add to `Daemon.qml`:
         id: unitProc
         stderr: StdioCollector { id: unitErr }
         onExited: (code, st) => {
+            root.applying = false
             if (code !== 0) {
-                root.applying = false
                 root.lastError = unitErr.text      // includes a cancelled polkit prompt
                 root.republish()
                 return
             }
-            unitWatch.running = true
+            root.poll()   // poll() republishes with the fresh status
         }
     }
 
-    // --no-block returns as soon as the job is queued, so completion has to be
-    // watched for. A switch can take twenty minutes; the shell must not pretend
-    // it is done when it is only started.
-    Timer {
-        id: unitWatch
-        interval: 3000
-        repeat: true
-        onTriggered: watchProc.running = true
-    }
-
-    Process {
-        id: watchProc
-        command: ["systemctl", "show", "-p", "ActiveState", "-p", "Result", "--value",
-                  "nixos-upd-apply@" + ffProc.pendingMode + ".service"]
-        stdout: StdioCollector {
-            onStreamFinished: {
-                const lines = text.trim().split("\n")
-                if (lines[0] === "failed" || (lines[0] === "inactive" && lines[1] !== "success")) {
-                    root.applying = false
-                    unitWatch.running = false
-                    root.lastError = "la unidad termino en " + lines[1]
-                    root.republish()
-                } else if (lines[0] === "inactive" && lines[1] === "success") {
-                    root.applying = false
-                    unitWatch.running = false
-                    root.poll()   // poll() republishes with the fresh status
-                }
-            }
-        }
-    }
+    // What is deliberately NOT here any more: the 3-second ActiveState/Result
+    // watcher. It is still the only way to recover an outcome after a
+    // `dms restart` mid-apply, and if that reattach path is wanted it belongs
+    // in Task 11 with `inactive`/`success` read as "not running" -- never as
+    // "succeeded", which is the reading that made it wrong here.
 
     function check() {
         checkProc.running = true
@@ -1653,14 +1644,46 @@ git commit -m "plugin: el panel, con el boton que aplica"
 ### Task 11: Close the loop
 
 **Files:**
+- Modify: `updates/dms-plugin/Daemon.qml` — the reattach path (Step 0 below)
 - Modify: `docs/superpowers/specs/2026-08-09-actualizacion-automatica-design.md` (its Phase 2 section)
 - Modify: `README.md` and `README.es.md` if they describe `upd`'s subcommands
 
-- [ ] **Step 1: Retire the Phase 2 section**
+- [x] **Step 0: The reattach after a `dms restart` mid-apply**
+
+Assigned here explicitly, because for one round it was assigned to nobody: Task
+7 took the `ActiveState`/`Result` watcher out of Task 10 saying it "belongs in
+Task 11", and then neither this task's steps nor the ledger's inheritance list
+mentioned it. The spec kept promising the behaviour (§2, and step 6 of the
+flow), so it was a designed behaviour with no owner — which is how a spec and a
+tree drift apart.
+
+The behaviour: with the blocking `systemctl start`, the apply's outcome lives in
+that process. A `dms restart` while a switch is running kills the panel's
+knowledge of it, not the switch — the unit survives, which is why it is a unit.
+On startup, then, the daemon has to ask whether an apply is in flight:
+
+```
+systemctl show -p ActiveState -p Result nixos-upd-apply@switch.service
+systemctl show -p ActiveState -p Result nixos-upd-apply@boot.service
+```
+
+**The one reading rule, measured in Task 7 and not negotiable:** `activating`
+means an apply is running and the panel should show it; `failed` means it
+failed; and `inactive` + `success` means **not running** — never "succeeded". A
+unit that has never run in this boot reports exactly the same pair as one that
+finished an hour ago, so treating it as success is how the panel would announce
+an apply that never happened.
+
+What "not running" should make the panel do is poll `upd status --json` and
+render whatever it says, which is the same thing it does at every other startup.
+So the reattach is a *resume of the running case*, and there is deliberately no
+attempt to reconstruct the outcome of an apply that already ended.
+
+- [x] **Step 1: Retire the Phase 2 section**
 
 The 2026-08-09 spec lists three deferred items: the bar plugin, `switch` being the wrong verb, and the missing machine-readable change list. All three are now implemented. Replace that section with a pointer to `2026-08-11-widget-upd-barra-design.md` and a one-line statement of what shipped. Leaving a "deferred" section describing work that is done is the same stale-state problem the engine exists to prevent, one level up.
 
-- [ ] **Step 2: Update the READMEs**
+- [x] **Step 2: Update the READMEs**
 
 Check whether they document `upd`'s subcommands:
 
