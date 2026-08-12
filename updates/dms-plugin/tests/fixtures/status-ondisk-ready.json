@@ -1,0 +1,248 @@
+{
+  "build": {
+    "ok": true,
+    "log": "/var/lib/nixos-upd/last.log"
+  },
+  "branch": "auto/update",
+  "changes": [
+    {
+      "name": "codex-desktop-linux",
+      "kind": "input",
+      "from": "05bbbc6",
+      "to": "76ea570"
+    },
+    {
+      "name": "dms-plugins",
+      "kind": "input",
+      "from": "e5aecdc",
+      "to": "874dcea"
+    },
+    {
+      "name": "home-manager",
+      "kind": "input",
+      "from": "367f7ef",
+      "to": "f404edb"
+    },
+    {
+      "name": "nixpkgs",
+      "kind": "input",
+      "from": "f13ff45",
+      "to": "2fcb964"
+    },
+    {
+      "name": "noctalia",
+      "kind": "input",
+      "from": "cc1e476",
+      "to": "0b1398d"
+    },
+    {
+      "name": "brave-origin",
+      "kind": "local_pkg",
+      "from": "1.93.134",
+      "to": "1.93.134"
+    },
+    {
+      "name": "t3code-app",
+      "kind": "local_pkg",
+      "from": "0.0.32",
+      "to": "0.0.33"
+    }
+  ],
+  "closure_diff": {
+    "added": [
+      {
+        "name": "perl5.42.0-GD",
+        "to": "2.86"
+      }
+    ],
+    "removed": [
+      {
+        "name": "nixos-upd",
+        "from": "ε"
+      },
+      {
+        "name": "nixos-upd-apply",
+        "from": "ε"
+      },
+      {
+        "name": "unit-nixos-upd-apply",
+        "from": ".service"
+      }
+    ],
+    "changed": [
+      {
+        "name": "codex-desktop",
+        "from": "26.803.41515",
+        "to": "26.803.81509"
+      },
+      {
+        "name": "codex-desktop-keyring",
+        "from": "26.803.41515, 26.803.41515-fish",
+        "to": "26.803.81509, 26.803.81509-fish"
+      },
+      {
+        "name": "fc",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "gcc",
+        "from": "16.1.0",
+        "to": "16.2.0"
+      },
+      {
+        "name": "heroic",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "initrd-linux-xanmod",
+        "from": "7.1.6",
+        "to": "7.1.8"
+      },
+      {
+        "name": "iputils",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "kitty",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "libXNVCtrl",
+        "from": "595.84",
+        "to": "595.91.07"
+      },
+      {
+        "name": "libxmp",
+        "from": "4.7.1",
+        "to": "4.7.2"
+      },
+      {
+        "name": "linux-xanmod",
+        "from": "7.1.6",
+        "to": "7.1.8"
+      },
+      {
+        "name": "lua-language-server",
+        "from": "3.18.2, 3.18.2-fish",
+        "to": "3.19.0, 3.19.0-fish"
+      },
+      {
+        "name": "nerd-fonts-jetbrains-mono",
+        "from": "3.4.0+2.304, 3.4.0+2.304-fish",
+        "to": "3.5.0+2.304, 3.5.0+2.304-fish"
+      },
+      {
+        "name": "networkmanager",
+        "from": "1.56.0, 1.56.0-fish",
+        "to": "1.58.0, 1.58.0-fish"
+      },
+      {
+        "name": "nix-direnv",
+        "from": "3.1.2",
+        "to": "3.2.0"
+      },
+      {
+        "name": "nixos-manual",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "nixos-system-daf3r-starter",
+        "from": "26.11.20260807.f13ff45",
+        "to": "26.11.20260810.2fcb964"
+      },
+      {
+        "name": "noctalia",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "noto-fonts",
+        "from": "2026.07.01",
+        "to": "2026.08.01"
+      },
+      {
+        "name": "nvidia-open",
+        "from": "595.84-7.1.6",
+        "to": "595.91.07-7.1.8"
+      },
+      {
+        "name": "nvidia-settings",
+        "from": "595.84, 595.84_fish",
+        "to": "595.91.07, 595.91.07_fish"
+      },
+      {
+        "name": "nvidia-x11",
+        "from": "595.84, 595.84_fish",
+        "to": "595.91.07, 595.91.07_fish"
+      },
+      {
+        "name": "papirus-icon-theme",
+        "from": "20250501, 20250501-fish",
+        "to": "20260801, 20260801-fish"
+      },
+      {
+        "name": "perl",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "samba",
+        "from": "4.23.8",
+        "to": "4.23.10"
+      },
+      {
+        "name": "source",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "steam",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "steam-run",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "t3code",
+        "from": "0.0.32, 0.0.32-fhsenv, 0.0.32-fish",
+        "to": "0.0.33, 0.0.33-fhsenv, 0.0.33-fish"
+      },
+      {
+        "name": "unifont",
+        "from": "",
+        "to": ""
+      },
+      {
+        "name": "upower",
+        "from": "1.91.2, 1.91.2_fish",
+        "to": "1.91.3, 1.91.3_fish"
+      },
+      {
+        "name": "wireplumber",
+        "from": "",
+        "to": ""
+      }
+    ],
+    "size_delta_mb": 49.19
+  },
+  "warnings": [],
+  "unmanaged": [],
+  "reboot_recommended": true,
+  "reboot_reason": [
+    "initrd-linux-xanmod",
+    "linux-xanmod",
+    "nvidia-open",
+    "nvidia-x11"
+  ],
+  "schema": 2,
+  "checked_at": "2026-08-11T17:26:18-06:00",
+  "state": "ready"
+}
