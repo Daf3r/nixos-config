@@ -1,8 +1,31 @@
 diff --git a/hermes_cli/linux_desktop_entry.py b/hermes_cli/linux_desktop_entry.py
-index 2558102..9902cc2 100644
+index 2558102..6a6c748 100644
 --- a/hermes_cli/linux_desktop_entry.py
 +++ b/hermes_cli/linux_desktop_entry.py
-@@ -66,7 +66,13 @@ def resolve_exec_command() -> str:
+@@ -57,6 +57,22 @@ def icon_path(project_root: Path) -> Path:
+     return project_root / "apps" / "desktop" / "assets" / "icon.png"
+ 
+ 
++def _installed_shim() -> str | None:
++    """Absolute path of the installed ``hermes`` shim, or None.
++
++    PATH alone is not a reliable way to find it. The installer writes the
++    shim to ``~/.local/bin``, and on a host whose login shell never adds
++    that directory to PATH, ``shutil.which`` comes up empty even though
++    the shim is sitting right there. So look in the install directory
++    directly once PATH has failed.
++    """
++    candidates = (shutil.which("hermes"), str(Path.home() / ".local" / "bin" / "hermes"))
++    for candidate in candidates:
++        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
++            return candidate
++    return None
++
++
+ def resolve_exec_command() -> str:
+     """Build the absolute ``Exec=`` command line for ``hermes desktop``.
+ 
+@@ -66,7 +82,13 @@ def resolve_exec_command() -> str:
      """
      from hermes_cli.relaunch import resolve_hermes_bin
  
@@ -13,7 +36,7 @@ index 2558102..9902cc2 100644
 +    # the menu entry then dies with ModuleNotFoundError before any window
 +    # appears, and with Terminal=false nothing is shown. The shim execs the
 +    # venv interpreter, so it works from a launcher with no PATH of its own.
-+    bin_path = shutil.which("hermes") or resolve_hermes_bin()
++    bin_path = _installed_shim() or resolve_hermes_bin()
      if bin_path:
          argv = [str(Path(bin_path).resolve()), "desktop"]
      else:
@@ -71,3 +94,60 @@ index 4abb7bf..35f814b 100644
      sudo = shutil.which("sudo")
      if not sudo:
          print("✗ Hermes Desktop requires sudo to configure Electron's Linux sandbox helper.")
+diff --git a/tests/hermes_cli/test_linux_desktop_entry.py b/tests/hermes_cli/test_linux_desktop_entry.py
+index 37087e3..e8ea50d 100644
+--- a/tests/hermes_cli/test_linux_desktop_entry.py
++++ b/tests/hermes_cli/test_linux_desktop_entry.py
+@@ -14,6 +14,11 @@ from hermes_cli import linux_desktop_entry as lde
+ def xdg_home(tmp_path, monkeypatch) -> Path:
+     data_home = tmp_path / "xdg-data"
+     monkeypatch.setenv("XDG_DATA_HOME", str(data_home))
++    # Resolving Exec looks for the installed shim under ``~/.local/bin``, so
++    # an unset HOME lets the developer's own installation decide what these
++    # tests see. Point it at an empty directory: what each test asserts about
++    # Exec should come from what that test sets up, nothing else.
++    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+     monkeypatch.setattr(lde.sys, "platform", "linux")
+     return data_home
+ 
+@@ -88,6 +93,40 @@ def test_exec_falls_back_to_interpreter_module(tmp_path, xdg_home, monkeypatch):
+     assert Path(exec_line.split(" ")[0]).is_absolute()
+ 
+ 
++def test_exec_prefers_local_bin_shim_when_it_is_not_on_path(
++    tmp_path, xdg_home, monkeypatch
++):
++    """The installed shim wins even when PATH never picked up its directory.
++
++    The installer drops the shim in ``~/.local/bin``, but a login shell
++    that never adds that directory to PATH leaves ``shutil.which`` with
++    nothing to find. The fallback then hands back the checkout
++    entrypoint, whose ``#!/usr/bin/env python3`` shebang resolves to the
++    system interpreter -- which has none of Hermes' dependencies. The
++    menu entry dies with ModuleNotFoundError before any window appears,
++    and ``Terminal=false`` means the traceback is never shown: clicking
++    the icon does nothing at all.
++    """
++    root = _make_project(tmp_path)
++    home = tmp_path / "home"
++    shim = home / ".local" / "bin" / "hermes"
++    shim.parent.mkdir(parents=True)
++    shim.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
++    shim.chmod(0o755)
++
++    monkeypatch.setenv("HOME", str(home))
++    monkeypatch.setattr(lde.shutil, "which", lambda _name: None)
++    monkeypatch.setattr(
++        "hermes_cli.relaunch.resolve_hermes_bin", lambda: str(root / "hermes")
++    )
++    monkeypatch.setattr(lde, "refresh_desktop_databases", lambda _dir: [])
++
++    entry = lde.install_desktop_entry(root)
++    values = _parse(entry.read_text(encoding="utf-8"))
++
++    assert values["Exec"] == f"{shim} desktop"
++
++
+ def test_install_is_idempotent_and_skips_cache_refresh(tmp_path, xdg_home, monkeypatch):
+     root = _make_project(tmp_path)
+     monkeypatch.setattr("hermes_cli.relaunch.resolve_hermes_bin", lambda: "/usr/bin/hermes")

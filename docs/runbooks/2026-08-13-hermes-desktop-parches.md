@@ -24,7 +24,16 @@ sistema y muere antes de pintar nada:
 ModuleNotFoundError: No module named 'yaml'
 ```
 
-El arreglo prefiere el shim del PATH, que sí arrastra el intérprete del venv.
+El arreglo prefiere el shim, que sí arrastra el intérprete del venv. **No basta
+con `shutil.which("hermes")`**, que fue el primer intento y volvió a fallar el
+mismo día: si la sesión gráfica arrancó antes del switch que puso
+`~/.local/bin` en `home.sessionPath`, las apps lanzadas desde ella heredan el
+PATH viejo y `which` no encuentra nada. Por eso `_installed_shim()` mira la
+ruta de instalación **directamente** cuando el PATH falla.
+
+Ese fue el fallo real del 2026-08-13: el PATH ya estaba declarado y aplicado
+(switch de las 08:07), pero la sesión de niri era de las 07:03, y la entrada
+que Hermes regeneró a las 08:16 volvió a salir rota.
 
 ## 2. El helper del sandbox pedía sudo en cada lanzamiento
 
@@ -66,6 +75,23 @@ env -i HOME=/home/daf3r USER=daf3r \
 niri msg windows | grep Hermes   # debe listar App ID "Hermes"
 ```
 
+## El blindaje: la entrada ya no la escribe Hermes
+
+Los parches viven en un checkout que se actualiza solo, así que no son defensa
+suficiente. Desde el 2026-08-13 `hermes.desktop` está declarado en `home.nix`
+(`xdg.desktopEntries.hermes`) y es un **symlink de solo lectura al store**.
+
+Hermes sigue intentando reescribirlo en cada lanzamiento y falla con `OSError`,
+que su propio código ya trata como no fatal —"a convenience, never a reason to
+fail a launch"—, así que la app arranca igual y la entrada correcta sobrevive.
+El parche 1 pasa a ser red de seguridad para si algún día se quita la
+declaración.
+
+Consecuencia práctica: **editar `~/.local/share/applications/hermes.desktop` a
+mano ya no sirve de nada**. Se cambia en `home.nix` y se aplica con un switch.
+El fichero que había antes queda como `hermes.desktop.backup`
+(`backupFileExtension` del flake).
+
 ## Si un `hermes update` los pierde
 
 `hermes update` hace stash de los cambios locales y los reaplica, así que lo
@@ -78,10 +104,28 @@ git apply ~/nixos-config/docs/runbooks/2026-08-13-hermes-desktop.patch
 hermes desktop --force-build
 ```
 
-El síntoma de que se perdió el parche 1 es que el icono deja de abrir mientras
-`hermes desktop` en terminal sigue funcionando. El del parche 2 es que aparece
-un `✗ Failed to configure Electron's Linux sandbox helper` — ese sí se ve, pero
-solo desde la terminal.
+El síntoma de que se perdió el parche 1 **ya no es visible**: con la entrada
+declarada en `home.nix`, el icono sigue abriendo aunque el parche desaparezca.
+Se comprueba a mano:
+
+```fish
+cd ~/.hermes/hermes-agent
+git diff --stat hermes_cli/          # vacío = se perdieron los dos
+git stash list                       # ahí estarán si hubo conflicto
+```
+
+El del parche 2 sí se ve: `✗ Failed to configure Electron's Linux sandbox
+helper`, pero solo desde la terminal.
+
+El parche 1 trae su propio test de regresión
+(`test_exec_prefers_local_bin_shim_when_it_is_not_on_path`). Para correrlo hace
+falta pytest, que el venv de Hermes no trae:
+
+```fish
+cd ~/.hermes/hermes-agent
+~/.hermes/bin/uv pip install --python venv/bin/python pytest
+venv/bin/python -m pytest tests/hermes_cli/test_linux_desktop_entry.py -q
+```
 
 ## Lo que corresponde hacer con esto
 
@@ -92,3 +136,7 @@ Son candidatos a PR en `NousResearch/hermes-agent` — pequeños, reproducibles 
 con la causa aislada. Ojo: el área del `chrome-sandbox` ya estaba saturada en
 2026-08 (ocho PRs abiertos solapados, ninguno mergeado), así que el primero es
 mejor apuesta que el segundo.
+
+**Decidido el 2026-08-13: no se manda nada upstream por ahora.** El blindaje de
+`home.nix` quita la urgencia, y los parches quedan documentados aquí. Si algún
+día se reabre, el diff ya está listo en el `.patch` de al lado.
