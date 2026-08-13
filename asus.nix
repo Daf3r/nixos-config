@@ -29,6 +29,29 @@
   # this to true and re-read ./gpu.nix at the same time — the two must agree.
   services.supergfxd.enable = false;
 
+  # asus-shutdown is a guard that asusctl's own package ships as a unit; nothing
+  # here declares it, services.asusd above is what links it in. It sits idle for
+  # the whole session and applies deferred GPU settings on the way down, so it
+  # only exits when a real shutdown is under way — on SIGTERM it logs "Deferring
+  # exit until deferred shutdown apply reaches a safe completion point" and stays
+  # put. Its unit also carries SendSIGKILL=no, so systemd is forbidden from
+  # forcing it. The combination means the unit cannot be restarted on a live
+  # system at all: any switch that changes it (a new asusctl store path is
+  # enough) burns two 45s stop timeouts, marks the unit failed, and then cannot
+  # start the new one because the old process still holds the cgroup — which is
+  # exactly what broke `nh os switch` on 2026-08-13.
+  #
+  # Leaving it alone across a switch is not a workaround but the behaviour the
+  # binary was written for: it is replaced at the next boot, when it exits
+  # cleanly by itself. asDropin is required — without it NixOS would generate a
+  # unit of its own and shadow the package's, which is the one that carries the
+  # actual ExecStart and its sandbox.
+  systemd.services.asus-shutdown = {
+    overrideStrategy = "asDropin";
+    restartIfChanged = false;
+    stopIfChanged = false;
+  };
+
   # asusd persists the Aura *mode and colour* in /etc/asusd/aura_19b6.ron, but
   # not the backlight level — asus::kbd_backlight comes up at 0 on every boot,
   # which reads as "the RGB is dead" even though the mode is set correctly.
