@@ -127,6 +127,38 @@ in
     })
   ];
 
+  # Hermes Agent writes this entry itself on every desktop launch, and it gets
+  # the Exec line wrong: `resolve_hermes_bin` prefers argv[0] over PATH, and
+  # under the ~/.local/bin shim argv[0] is the checkout entrypoint, whose
+  # `#!/usr/bin/env python3` shebang picks the system interpreter — which has
+  # none of Hermes' dependencies. The entry then dies with ModuleNotFoundError
+  # before any window appears, and because it carries Terminal=false nothing is
+  # ever shown: clicking the icon does nothing at all.
+  #
+  # Declaring it here turns the file into a read-only store symlink. Hermes'
+  # rewrite fails on it with OSError, which its installer already treats as
+  # non-fatal ("a convenience, never a reason to fail a launch"), so the launch
+  # still works and the correct entry survives. That matters because Hermes
+  # auto-updates: the local patch that fixes the generator lives in a checkout
+  # whose updater autostashes local changes, and one conflict against upstream
+  # would silently restore the broken entry.
+  xdg.desktopEntries.hermes = {
+    name = "Hermes";
+    genericName = "Hermes Desktop";
+    comment = "Launch Hermes Desktop";
+    # The shim, never the checkout entrypoint: it execs the venv interpreter,
+    # so it works from a launcher that has no PATH of its own.
+    exec = "${config.home.homeDirectory}/.local/bin/hermes desktop";
+    # The icon ships inside the checkout and has no store path to point at.
+    icon = "${config.home.homeDirectory}/.hermes/hermes-agent/apps/desktop/assets/icon.png";
+    terminal = false;
+    categories = [ "Utility" ];
+    settings.StartupNotify = "true";
+    # Electron reports this as its app id; without the match the window is not
+    # associated with this entry.
+    settings.StartupWMClass = "Hermes";
+  };
+
   xdg.configFile = builtins.mapAttrs
     (name: subpath: {
       source = create_symlink "${dotfiles}/${subpath}";
