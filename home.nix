@@ -58,10 +58,18 @@ in
   # its setup wizard, leaving a half-configured install behind. Declaring the
   # directory here makes the installer take its "already on PATH" branch and
   # never touch the fish config at all.
+  # ~/.kimi-code/bin holds Moonshot's Kimi Code CLI, installed on 2026-08-13 by
+  # the third curl | bash installer to hit this same wall: it copies the binary,
+  # then dies with "Permission denied" trying to write the fish config, so the
+  # tool is fully installed and simply unreachable. The binary is dynamically
+  # linked and needs libstdc++, which glibc here does not carry — it runs only
+  # because nix-ld is enabled in ../configuration.nix, and would die with a
+  # loader error without it.
   home.sessionPath = [
     "$HOME/.npm-global/bin"
     "$HOME/.grok/bin"
     "$HOME/.local/bin"
+    "$HOME/.kimi-code/bin"
   ];
 
   home.packages = with pkgs; [
