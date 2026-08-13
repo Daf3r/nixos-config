@@ -42,7 +42,18 @@ in
   # a universal variable sitting in ~/.config/fish/fish_variables — imperative
   # state outside this repo, which a fresh install would not reproduce. Declaring
   # it here does not remove that variable; it just stops being the only source.
-  home.sessionPath = [ "$HOME/.npm-global/bin" ];
+  #
+  # ~/.grok/bin holds xAI's Grok CLI, installed on 2026-08-12 by its own
+  # curl | bash installer rather than by Nix: the binary is statically linked,
+  # so it runs here unpatched, and it keeps itself up to date from the stable
+  # channel. That installer also tries to append a fish_add_path line to
+  # ~/.config/fish/config.fish, which home-manager owns and points at the store,
+  # so it dies on a read-only filesystem before writing anything. Without this
+  # entry the install silently ends with `grok` off PATH.
+  home.sessionPath = [
+    "$HOME/.npm-global/bin"
+    "$HOME/.grok/bin"
+  ];
 
   home.packages = with pkgs; [
     # nodejs is deliberately absent here: ./terminal/nvim.nix already installs
