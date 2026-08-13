@@ -52,6 +52,58 @@
     stopIfChanged = false;
   };
 
+  # asusd applies a platform profile of its own every time it starts and every
+  # time the power source changes, and it used to pick Performance on AC. That
+  # is not a preference the machine can hold onto: it means any switch that
+  # restarts asusd silently overrides whatever profile the session was running
+  # under. It did exactly that on 2026-08-13, and the cost is measurable — same
+  # idle machine, Performance against Balanced:
+  #
+  #   fan       6000/6200 RPM  ->  4600/4800 RPM
+  #   Tctl      80-90 C        ->  71.6 C
+  #   EPP       performance    ->  balance_power
+  #
+  # Balanced is the daily driver now; the gamemode hook below is what raises the
+  # profile for the duration of a game, which is the only time the extra 1400
+  # RPM buys anything.
+  #
+  # Declaring this file has a consequence worth knowing: the module writes it
+  # with mode 0644, so it is a *copy* rather than a store symlink — asusd can
+  # still write to it at runtime, but every switch restores the content below.
+  # Anything set with `asusctl` that lands in this file therefore survives
+  # reboots but NOT a rebuild, which is why the charge threshold is spelled out
+  # here rather than left to `asusctl -c`. Change it here from now on.
+  services.asusd.asusdConfig.text = ''
+    (
+        charge_control_end_threshold: 80,
+        base_charge_control_end_threshold: 0,
+        disable_nvidia_powerd_on_battery: true,
+        ac_command: "",
+        bat_command: "",
+        platform_profile_linked_epp: true,
+        platform_profile_on_battery: Quiet,
+        change_platform_profile_on_battery: true,
+        platform_profile_on_ac: Balanced,
+        change_platform_profile_on_ac: true,
+        profile_quiet_epp: Power,
+        profile_balanced_epp: BalancePower,
+        profile_custom_epp: Performance,
+        profile_performance_epp: Performance,
+        ac_profile_tunings: {
+            Balanced: (
+                enabled: false,
+                group: {},
+            ),
+            Performance: (
+                enabled: false,
+                group: {},
+            ),
+        },
+        dc_profile_tunings: {},
+        armoury_settings: {},
+    )
+  '';
+
   # asusd persists the Aura *mode and colour* in /etc/asusd/aura_19b6.ron, but
   # not the backlight level — asus::kbd_backlight comes up at 0 on every boot,
   # which reads as "the RGB is dead" even though the mode is set correctly.
@@ -70,8 +122,14 @@
     };
   };
 
-  # Cap charging to preserve the battery when the laptop lives on AC. asusctl
-  # persists this across reboots.  Change with: asusctl -c 100
+  # Cap charging to preserve the battery when the laptop lives on AC. This unit
+  # writes the sysfs attribute directly; asusd keeps its own copy of the same
+  # number in asusd.ron, which is now declared above.
+  #
+  # `asusctl -c 100` still works and still survives a reboot, but a rebuild puts
+  # asusd.ron back to 80 and this unit rewrites sysfs at every boot, so a lasting
+  # change means editing BOTH places here. That is the price of declaring the
+  # file, and it is written down so the next raise does not silently revert.
   systemd.services.asus-battery-charge-limit = {
     description = "Limit battery charge to 80%";
     wantedBy = [ "multi-user.target" ];

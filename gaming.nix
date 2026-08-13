@@ -107,10 +107,20 @@
         defaultgov = "powersave"; # what to restore on exit
       };
 
-      # custom = {
-      #   start = "${pkgs.power-profiles-daemon}/bin/powerprofilesctl set performance";
-      #   end = "${pkgs.power-profiles-daemon}/bin/powerprofilesctl set balanced";
-      # };
+      # The platform profile now sits at Balanced on AC (see ../asus.nix for the
+      # fan and temperature numbers that decided it), so Performance has to be
+      # asked for rather than assumed. gamemode is the right place to ask: the
+      # profile is raised for exactly as long as a game holds the lock and drops
+      # back on its own when the game exits, including when it crashes.
+      #
+      # powerprofilesctl rather than asusctl because both daemons drive the same
+      # platform_profile and this is the one that does not need root: gamemoded
+      # runs these as the user. asusd notices the change rather than fighting it
+      # — it logs "watch_platform_profile changed" and follows.
+      custom = {
+        start = "${pkgs.power-profiles-daemon}/bin/powerprofilesctl set performance";
+        end = "${pkgs.power-profiles-daemon}/bin/powerprofilesctl set balanced";
+      };
     };
   };
 
