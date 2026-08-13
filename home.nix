@@ -135,29 +135,33 @@ in
   # before any window appears, and because it carries Terminal=false nothing is
   # ever shown: clicking the icon does nothing at all.
   #
-  # Declaring it here turns the file into a read-only store symlink. Hermes'
-  # rewrite fails on it with OSError, which its installer already treats as
-  # non-fatal ("a convenience, never a reason to fail a launch"), so the launch
-  # still works and the correct entry survives. That matters because Hermes
+  # Writing it here makes the path a read-only store symlink. Hermes' rewrite
+  # then fails with OSError, which its own code already treats as non-fatal
+  # ("a convenience, never a reason to fail a launch"), so the launch still
+  # works and the correct entry survives. That matters because Hermes
   # auto-updates: the local patch that fixes the generator lives in a checkout
   # whose updater autostashes local changes, and one conflict against upstream
   # would silently restore the broken entry.
-  xdg.desktopEntries.hermes = {
-    name = "Hermes";
-    genericName = "Hermes Desktop";
-    comment = "Launch Hermes Desktop";
-    # The shim, never the checkout entrypoint: it execs the venv interpreter,
-    # so it works from a launcher that has no PATH of its own.
-    exec = "${config.home.homeDirectory}/.local/bin/hermes desktop";
-    # The icon ships inside the checkout and has no store path to point at.
-    icon = "${config.home.homeDirectory}/.hermes/hermes-agent/apps/desktop/assets/icon.png";
-    terminal = false;
-    categories = [ "Utility" ];
-    settings.StartupNotify = "true";
-    # Electron reports this as its app id; without the match the window is not
-    # associated with this entry.
-    settings.StartupWMClass = "Hermes";
-  };
+  #
+  # It has to be `xdg.dataFile`, not `xdg.desktopEntries`. That option builds a
+  # package and installs it through home.packages, so the entry lands in
+  # ~/.nix-profile/share/applications while Hermes keeps rewriting the copy in
+  # ~/.local/share/applications — which XDG_DATA_DIRS ranks *higher*, so the
+  # broken one still wins and the menu grows a duplicate icon. Only a file at
+  # the exact path Hermes writes to can stop it.
+  xdg.dataFile."applications/hermes.desktop".text = ''
+    [Desktop Entry]
+    Type=Application
+    Name=Hermes
+    GenericName=Hermes Desktop
+    Comment=Launch Hermes Desktop
+    Exec=${config.home.homeDirectory}/.local/bin/hermes desktop
+    Icon=${config.home.homeDirectory}/.hermes/hermes-agent/apps/desktop/assets/icon.png
+    Terminal=false
+    Categories=Utility;
+    StartupNotify=true
+    StartupWMClass=Hermes
+  '';
 
   xdg.configFile = builtins.mapAttrs
     (name: subpath: {

@@ -79,7 +79,18 @@ niri msg windows | grep Hermes   # debe listar App ID "Hermes"
 
 Los parches viven en un checkout que se actualiza solo, así que no son defensa
 suficiente. Desde el 2026-08-13 `hermes.desktop` está declarado en `home.nix`
-(`xdg.desktopEntries.hermes`) y es un **symlink de solo lectura al store**.
+(`xdg.dataFile."applications/hermes.desktop"`) y es un **symlink de solo lectura
+al store**.
+
+**Tiene que ser `xdg.dataFile`, no `xdg.desktopEntries`.** El primer intento usó
+`xdg.desktopEntries` y no blindó nada: esa opción construye un paquete y lo
+instala por `home.packages`, así que la entrada aterriza en
+`/etc/profiles/per-user/daf3r/share/applications/` mientras Hermes sigue
+reescribiendo la de `~/.local/share/applications/` — que `XDG_DATA_DIRS` ordena
+**por delante**, de modo que la rota seguía ganando y además salía un icono
+duplicado en el menú. Solo un fichero en la ruta exacta que Hermes escribe lo
+detiene. El switch salió verde y el servicio de home-manager también: el fallo
+solo se vio mirando si el fichero era symlink.
 
 Hermes sigue intentando reescribirlo en cada lanzamiento y falla con `OSError`,
 que su propio código ya trata como no fatal —"a convenience, never a reason to
