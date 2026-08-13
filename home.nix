@@ -50,9 +50,18 @@ in
   # ~/.config/fish/config.fish, which home-manager owns and points at the store,
   # so it dies on a read-only filesystem before writing anything. Without this
   # entry the install silently ends with `grok` off PATH.
+  # ~/.local/bin is where Hermes Agent's installer drops its `hermes` launcher.
+  # That installer has the same failure mode as Grok's, but worse: when it finds
+  # ~/.local/bin missing from PATH it tries to append a fish_add_path line to
+  # ~/.config/fish/config.fish, dies on the read-only store symlink, and — since
+  # it runs under `set -e` — aborts before it ever writes ~/.hermes/.env or runs
+  # its setup wizard, leaving a half-configured install behind. Declaring the
+  # directory here makes the installer take its "already on PATH" branch and
+  # never touch the fish config at all.
   home.sessionPath = [
     "$HOME/.npm-global/bin"
     "$HOME/.grok/bin"
+    "$HOME/.local/bin"
   ];
 
   home.packages = with pkgs; [
