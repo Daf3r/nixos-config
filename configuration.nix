@@ -101,6 +101,18 @@
   programs.fish.enable = true;
   programs.nix-ld.enable = true;
 
+  # Prebuilt applications ask /usr/bin/ldd whether this system runs glibc or
+  # musl. The library that does it, detect-libc, ships inside sharp and so
+  # inside most Electron apps; when it cannot read that file it falls back to
+  # process.report.getReport(), and that call traps inside Electron's Node.
+  # The ChatGPT desktop app died with SIGILL about three seconds after start
+  # until this symlink existed — dropping it brings the crash back, and for
+  # every other packaged app carrying sharp too. NixOS already exposes
+  # /usr/bin/env for the same class of reason.
+  systemd.tmpfiles.rules = [
+    "L+ /usr/bin/ldd - - - - ${pkgs.glibc.bin}/bin/ldd"
+  ];
+
   # A friendlier front end for nixos-rebuild. The reason it is worth having:
   # `nh os switch` prints a *diff of the packages that changed* between the
   # running generation and the new one, instead of the wall of store paths
