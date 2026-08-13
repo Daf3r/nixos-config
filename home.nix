@@ -75,6 +75,15 @@ in
     # devshell.
     gcc
 
+    # gnumake is here for the same reason, and gcc alone was not enough. Hermes
+    # Agent's desktop workspace depends on node-pty, which ships no prebuilt
+    # binary for linux-x64 and falls back to `node-gyp rebuild` — that needs a
+    # compiler AND make. Without this, `hermes desktop` and every `hermes
+    # update` die with "gyp ERR! stack Error: not found: make" after minutes of
+    # npm work. Hermes runs npm from its own checkout, outside direnv, so its
+    # bundled dev shell never gets a chance to provide it.
+    gnumake
+
     # python3 is here for the same reason as gcc, not as a language toolchain:
     # Claude Code's security-guidance plugin runs its hooks through
     # `sg-python.sh`, which probes python3, python and `py -3` and gives up if

@@ -101,6 +101,56 @@
   programs.fish.enable = true;
   programs.nix-ld.enable = true;
 
+  # Enabling nix-ld alone only lends foreign binaries glibc, which is enough for
+  # a static-ish CLI and nowhere near enough for a browser engine. Hermes Agent
+  # builds its own Electron app locally with electron-builder, so the result is
+  # an unpatched binary that looks for GTK, X11, NSS, dbus and friends by
+  # soname: `ldd` on it reports about twenty libraries as "not found" and the
+  # app dies on launch. Unlike ChatGPT Desktop — a fixed .deb that
+  # ./pkgs/chatgpt-desktop.nix runs autoPatchelfHook over — this binary is
+  # rebuilt on every `hermes update`, so there is nothing stable to patch and
+  # the libraries have to be waiting for it at runtime instead.
+  #
+  # This list is the Electron runtime set, kept deliberately in step with the
+  # buildInputs of ./pkgs/chatgpt-desktop.nix. Anything else that ships its own
+  # Chromium benefits from it too.
+  programs.nix-ld.libraries = with pkgs; [
+    alsa-lib
+    at-spi2-atk
+    at-spi2-core
+    atk
+    cairo
+    cups
+    dbus
+    expat
+    gdk-pixbuf
+    glib
+    gtk3
+    libdrm
+    libgcc
+    libusb1
+    # libgbm used to come with mesa and now is its own package; Chromium loads
+    # it by soname at startup and refuses to run without it, which is the one
+    # library this list was still missing when the binary was first tried.
+    # libglvnd carries libEGL.so.1 — Hermes' own dev shell documents needing it
+    # on NixOS for the same reason.
+    libgbm
+    libglvnd
+    libX11
+    libXcomposite
+    libXdamage
+    libXext
+    libXfixes
+    libXrandr
+    libxcb
+    libxkbcommon
+    mesa
+    nspr
+    nss
+    pango
+    systemd
+  ];
+
   # Prebuilt applications ask /usr/bin/ldd whether this system runs glibc or
   # musl. The library that does it, detect-libc, ships inside sharp and so
   # inside most Electron apps; when it cannot read that file it falls back to
