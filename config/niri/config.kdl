@@ -348,9 +348,20 @@ binds {
     Mod+K      { spawn "kate"; }
 
     // Brave on both W and B. W is the one asked for; B predates it and costs
-    // nothing to keep.
-    Mod+W      { spawn "brave-origin"; }
-    Mod+B      { spawn "brave-origin"; }
+    // nothing to keep — and having the second key is what makes the split
+    // below possible.
+    //
+    // W is the everyday key and goes through focus-or-spawn, so it jumps to the
+    // Brave that is already open instead of stacking up browser windows. B
+    // keeps the old behaviour explicitly, as the escape hatch for when a
+    // separate window IS what you want; --new-window is spelled out because
+    // plain `brave-origin` on a running instance is what W now intercepts.
+    //
+    // The app-id match is exact, so Brave's PWA windows (app-id
+    // brave-music.apple.com__-Default and friends) are left alone by W — it
+    // will never steal focus to Apple Music.
+    Mod+W      { spawn "focus-or-spawn" "brave-origin" "brave-origin"; }
+    Mod+B      { spawn "brave-origin" "--new-window"; }
 
     // The official client, not vesktop — it is the one in daily use. Note that
     // only vesktop takes Noctalia's palette (see the discord template note in
