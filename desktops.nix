@@ -135,6 +135,11 @@ in
 
     sddmTheme # must be here, not in sddm.extraPackages — see the note above
 
+    # Backs the app keybinds in config/niri/config.kdl that jump to an
+    # already-open window instead of launching a second copy, which niri has no
+    # native action for. See ./pkgs/focus-or-spawn.nix.
+    (callPackage ./pkgs/focus-or-spawn.nix { })
+
     # X11 support for the niri session. niri has no built-in XWayland — there is
     # no enable switch on the module to flip — and instead integrates
     # xwayland-satellite, spawning it on demand when the first X11 client

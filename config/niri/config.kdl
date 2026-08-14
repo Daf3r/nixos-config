@@ -356,20 +356,29 @@ binds {
     // only vesktop takes Noctalia's palette (see the discord template note in
     // ../../noctalia.nix), so this is the window that stays its own colour.
     //
-    // spawn-sh, not spawn, and the difference is the whole binding working or
-    // silently doing nothing. discord in nixpkgs is not a binary but an FHS
-    // sandbox: the wrapper execs `bwrap --die-with-parent`, which arms
-    // PR_SET_PDEATHSIG. Under plain `spawn` niri's intermediate process is gone
-    // by the time Discord finishes starting, the pdeathsig fires, and bwrap
-    // takes the whole app down before a window ever maps — no error, no crash,
-    // nothing in the journal, just a key that appears dead.
+    // Two separate things are going on here, and both are why this is not a
+    // plain `spawn "discord"`.
     //
-    // spawn-sh keeps a shell as bwrap's parent for as long as Discord runs, so
-    // the signal is never delivered. Verified both ways on 2026-08-14:
-    // `niri msg action spawn -- discord` leaves zero processes and no window,
-    // `spawn-sh` maps the window every time. Every other app bound in this file
-    // is a normal binary and unaffected — this is the only bwrap one.
-    Mod+D      { spawn-sh "discord"; }
+    // First, launching. discord in nixpkgs is not a binary but an FHS sandbox:
+    // the wrapper execs `bwrap --die-with-parent`, which arms PR_SET_PDEATHSIG.
+    // Under `spawn` niri's intermediate process is gone by the time Discord
+    // finishes starting, the pdeathsig fires, and bwrap takes the whole app
+    // down before a window ever maps — no error, no crash, nothing in the
+    // journal, just a key that appears dead. focus-or-spawn runs it from a
+    // shell that stays alive as bwrap's parent, so the signal never arrives.
+    //
+    // Second, focusing. With Discord already running, `spawn` looked like it
+    // did nothing: the second instance talks to the first over its singleton
+    // lock and exits without asking for focus. That is Discord's own behaviour,
+    // not the bind's — verified on 2026-08-14 that `spawn` and `spawn-sh` both
+    // leave the focus where it was, even after waiting 25s.
+    //
+    // focus-or-spawn covers both: jump to the window if it exists, anywhere
+    // across workspaces and monitors, and launch it if it does not. All three
+    // paths tested on 2026-08-14. See ../../pkgs/focus-or-spawn.nix.
+    //
+    // The first argument is the app-id niri reports, the rest is the command.
+    Mod+D      { spawn "focus-or-spawn" "discord" "discord"; }
 
     // Wallpaper shuffle moved off Mod+W to make room for the browser.
     Mod+Shift+W { spawn "wallpaper-rotate"; }
