@@ -355,7 +355,21 @@ binds {
     // The official client, not vesktop — it is the one in daily use. Note that
     // only vesktop takes Noctalia's palette (see the discord template note in
     // ../../noctalia.nix), so this is the window that stays its own colour.
-    Mod+D      { spawn "discord"; }
+    //
+    // spawn-sh, not spawn, and the difference is the whole binding working or
+    // silently doing nothing. discord in nixpkgs is not a binary but an FHS
+    // sandbox: the wrapper execs `bwrap --die-with-parent`, which arms
+    // PR_SET_PDEATHSIG. Under plain `spawn` niri's intermediate process is gone
+    // by the time Discord finishes starting, the pdeathsig fires, and bwrap
+    // takes the whole app down before a window ever maps — no error, no crash,
+    // nothing in the journal, just a key that appears dead.
+    //
+    // spawn-sh keeps a shell as bwrap's parent for as long as Discord runs, so
+    // the signal is never delivered. Verified both ways on 2026-08-14:
+    // `niri msg action spawn -- discord` leaves zero processes and no window,
+    // `spawn-sh` maps the window every time. Every other app bound in this file
+    // is a normal binary and unaffected — this is the only bwrap one.
+    Mod+D      { spawn-sh "discord"; }
 
     // Wallpaper shuffle moved off Mod+W to make room for the browser.
     Mod+Shift+W { spawn "wallpaper-rotate"; }
