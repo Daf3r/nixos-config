@@ -133,6 +133,14 @@ in
     (pkgs.callPackage ./pkgs/chatgpt-desktop-keyring.nix {
       chatgpt-desktop = pkgs.callPackage ./pkgs/chatgpt-desktop.nix { };
     })
+
+    # `bwrap` on PATH, requested for ChatGPT Desktop. Nothing in the .deb
+    # references it — the package was grepped and comes up empty — so the caller
+    # is something the app shells out to at runtime rather than the app itself,
+    # the way it already shells out to `codex`. A sandbox helper that is missing
+    # fails the way sandboxes do: the caller either refuses to run the sandboxed
+    # step or silently runs it unsandboxed, and neither says "bwrap".
+    bubblewrap
   ];
 
   # Hermes Agent writes this entry itself on every desktop launch, and it gets
