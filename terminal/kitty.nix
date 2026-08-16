@@ -40,18 +40,16 @@
       hide_window_decorations = "yes"; # niri draws the border
 
       # --- Transparency ---
-      # NOTE: this was tuned against Hyprland's decoration.blur (size 3, passes
-      # 2), which blurred any translucent window, so the setting got the blur
-      # for free. niri 25.11 does support blur but config/niri/config.kdl does
-      # not turn it on, so right now the wallpaper shows through sharp rather
-      # than blurred. Add a `blur` block to the window-rule there if the sharp
-      # version reads as noisy.
+      # Kitty requests the Wayland background-effect blur itself. niri 26.04
+      # provides the compositor side, so this keeps the effect local to kitty
+      # instead of making every translucent window blurry.
       #
       # 0.96 rather than 0.92: enough transparency to keep the depth, little
       # enough that a bright wallpaper cannot lift the background off #131313
       # and wash out the text. The whole point of the monochrome palette is a
       # terminal that stays dark whatever is behind it.
       background_opacity = "0.96";
+      background_blur = 1;
       dynamic_background_opacity = true; # lets kitty adjust opacity at runtime
 
       # --- Cursor ---
