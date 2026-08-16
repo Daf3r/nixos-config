@@ -143,10 +143,10 @@ let
     '';
   };
 
-  # The root half of an apply. It does one thing: activate. The git
-  # fast-forward has already happened, as ${user}, via `upd apply --ff-only` --
-  # if root did the merge, .git would end up with root-owned objects and the
-  # user's next commit would fail.
+  # The root half of an apply. It activates and, only after that succeeds,
+  # finalises the prepared status. The git fast-forward has already happened,
+  # as ${user}, via `upd apply --ff-only` -- if root did the merge, .git would
+  # end up with root-owned objects and the user's next commit would fail.
   #
   # A unit rather than a child of the shell, so a `dms restart` in the middle of
   # a twenty-minute switch does not orphan it and its result stays queryable
@@ -682,6 +682,15 @@ in
     serviceConfig = {
       Type = "oneshot";
       ExecStart = "${applyCommand} %i";
+      # `upd apply --ff-only` cannot clear the status: at that point only the
+      # repository moved and the privileged activation may still fail. This
+      # runs only after ExecStart succeeds, so the DMS click has one honest
+      # boundary: system applied, then prepared changes disappear. Run the
+      # finalizer as the regular user: status_write creates a private temporary
+      # file and the next DMS poll must remain able to read the replacement.
+      # `boot` is a deliberate no-op in finalize because that mode still waits
+      # for reboot.
+      ExecStartPost = "${pkgs.util-linux}/bin/runuser -u ${user} -- ${nixos-upd}/bin/upd finalize %i";
       # nh shells out to nix, which needs these on a system unit's minimal PATH.
       # XDG_CONFIG_HOME is deliberately NOT here: the safe.directory exemption
       # lives inside the script, so that the build-time check runs the same

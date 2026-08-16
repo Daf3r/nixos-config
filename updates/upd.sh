@@ -55,6 +55,8 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${LIB_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)}"
 # shellcheck source=lib/blockers.sh
 source "$LIB_DIR/blockers.sh"
+# shellcheck source=lib/status.sh
+source "$LIB_DIR/status.sh"
 
 # The one schema this reader understands. Kept as a variable so the refusal
 # message below can name both sides of the mismatch. Schema 2 dropped the prose
@@ -120,6 +122,60 @@ require_readable_status() {
     esac
     die "status.json declara schema $schema y este lector solo entiende $SCHEMA; $advice"
   fi
+}
+
+# A successful hot apply has consumed the prepared update. Keep the status file
+# as a `current` report rather than deleting it: the DMS plugin can then render
+# "todo al dia" instead of mistaking a missing file for an unreadable engine.
+# The saved closure diff belongs only to the prepared comparison, so it is
+# removed after the atomic status replacement succeeds. If either cleanup step
+# fails, the applied system is not rolled back; the non-zero result tells the
+# caller that the status needs attention instead of claiming a clean handoff.
+clear_prepared_state() {
+  local body
+
+  body="$(jq -c '{warnings: (.warnings // []), unmanaged: (.unmanaged // [])}' "$STATUS")" \
+    || die "el sistema se aplico, pero no pude leer sus avisos para limpiar el estado preparado"
+  if ! status_write "$STATUS" current "$body"; then
+    die "el sistema se aplico, pero no pude escribir el estado current; no limpio el diff"
+  fi
+  if ! rm -f "$STATE_DIR/diff.txt"; then
+    die "el sistema se aplico, pero no pude eliminar $STATE_DIR/diff.txt"
+  fi
+  echo "estado preparado limpiado; el sistema ya esta aplicado"
+}
+
+# The DMS apply is split in two processes: `upd apply --ff-only` moves the
+# user's branch, and the privileged systemd unit activates it. The latter calls
+# this subcommand after `nh` succeeds, so it must verify that the prepared clone
+# still names the commit now checked out before discarding the status. A nightly
+# check that raced into the gap would otherwise have its newer update erased.
+finalize_switch() {
+  local state prepared repo_head
+
+  [ -f "$STATUS" ] || die "el sistema se aplico, pero no hay status.json que limpiar"
+  require_readable_status
+  state="$(jq -r '.state // "ausente"' "$STATUS")" \
+    || die "el sistema se aplico, pero no pude leer el estado preparado"
+
+  if [ "$state" = "current" ]; then
+    rm -f "$STATE_DIR/diff.txt" \
+      || die "el sistema se aplico, pero no pude eliminar $STATE_DIR/diff.txt"
+    return 0
+  fi
+  [ "$state" = "ready" ] \
+    || die "el sistema se aplico, pero el estado cambio a '$state'; no limpio nada"
+
+  [ -d "$WT/.git" ] \
+    || die "el sistema se aplico, pero no hay clon preparado en $WT; no limpio nada"
+  prepared="$(git -c "safe.directory=$WT" -C "$WT" rev-parse --verify --quiet 'auto/update^{commit}')" \
+    || die "el sistema se aplico, pero no pude leer el commit preparado en $WT"
+  repo_head="$(git -c "safe.directory=$REPO" -C "$REPO" rev-parse --verify --quiet 'HEAD^{commit}')" \
+    || die "el sistema se aplico, pero no pude leer HEAD de $REPO"
+  [ "$prepared" = "$repo_head" ] \
+    || die "el sistema se aplico, pero $WT ya prepara otro commit; no borro ese cambio"
+
+  clear_prepared_state
 }
 
 # `warnings` is an array on all four terminal states -- populated or empty,
@@ -671,6 +727,37 @@ case "$cmd" in
     # exists: `switch` activates in place, `boot` writes the profile and leaves
     # /run/current-system alone. The reboot advice in `show` points here.
     nh os "$mode" "$REPO"
+    if [ "$mode" = "switch" ]; then
+      clear_prepared_state
+    fi
+    ;;
+
+  finalize)
+    if [ "$#" -ne 2 ]; then
+      die "uso: upd finalize switch|boot"
+    fi
+    case "$2" in
+      switch)
+        # The systemd activation unit calls this after a successful `nh os
+        # switch`. It owns the lock while it waits so a concurrent nightly check
+        # cannot replace the prepared clone between the activation and cleanup.
+        if ! exec 9>"$STATE_DIR/lock"; then
+          die "no puedo abrir $STATE_DIR/lock; no limpio el estado preparado"
+        fi
+        flock 9 || die "no pude tomar $STATE_DIR/lock; no limpio el estado preparado"
+        finalize_switch
+        ;;
+      boot)
+        # `nh os boot` only selects the next generation. The running system is
+        # still the old one, so retaining `ready` is intentional: status --json
+        # exposes the pending-reboot blocker and the panel must not claim that
+        # the running system is already current.
+        echo "se conserva el estado preparado: --boot aun espera un reinicio"
+        ;;
+      *)
+        die "uso: upd finalize switch|boot; no entiendo: '$2'"
+        ;;
+    esac
     ;;
 
   check)
@@ -707,6 +794,9 @@ uso: upd [show|status|diff|apply|check]
           --boot     igual, pero para el proximo arranque (`nh os boot`), que
                      es lo que pide el aviso de reinicio
           --ff-only  solo el fast-forward, sin activar nada
+  finalize switch|boot
+          limpia el estado despues de una activacion exitosa; `boot` conserva
+          lo preparado hasta que se reinicie
   check   lanza una comprobacion ahora, en primer plano
 EOF
     exit 1

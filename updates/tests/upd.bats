@@ -675,6 +675,7 @@ EOF
   { printf '# shellcheck shell=bash\n'
     printf 'blockers_live() { return 3; }\n'
   } > "$WORK/lib-roto/blockers.sh"
+  cp "${BATS_TEST_DIRNAME}/../lib/status.sh" "$WORK/lib-roto/status.sh"
 
   run --separate-stderr env REPO="$REPO" STATE_DIR="$STATE" \
     LIB_DIR="$WORK/lib-roto" bash "$UPD" status --json
@@ -792,6 +793,29 @@ EOF
   # And it says so, because a command that silently does half of what its name
   # suggests is the failure mode this subcommand keeps closing.
   [[ "$output" == *"--ff-only"* ]]
+}
+
+@test "finalize switch clears the prepared state after the privileged half" {
+  make_rig
+  printf 'closure diff\n' > "$STATE/diff.txt"
+  run upd apply --ff-only
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.state' "$STATE/status.json")" = "ready" ]
+
+  run upd finalize switch
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.state' "$STATE/status.json")" = "current" ]
+  [ ! -e "$STATE/diff.txt" ]
+}
+
+@test "finalize boot keeps the prepared state until reboot" {
+  make_rig
+  printf 'closure diff\n' > "$STATE/diff.txt"
+
+  run upd finalize boot
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.state' "$STATE/status.json")" = "ready" ]
+  [ -e "$STATE/diff.txt" ]
 }
 
 @test "apply --ff-only runs the same guards as a full apply" {
@@ -1109,8 +1133,9 @@ EOF
   [ ! -s "$NH_MARKER" ]
 }
 
-@test "apply fast-forwards and switches, naming what it applies" {
+@test "apply fast-forwards and switches, clearing the prepared state" {
   make_rig
+  printf 'closure diff\n' > "$STATE/diff.txt"
   prepared="$(git -C "$STATE/wt" rev-parse auto/update)"
   run upd apply
   [ "$status" -eq 0 ]
@@ -1119,6 +1144,20 @@ EOF
   [ "$(git -C "$REPO" rev-parse HEAD)" = "$prepared" ]
   [ "$(cat "$REPO/flake.lock")" = "v2" ]
   [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
+  [ "$(jq -r '.state' "$STATE/status.json")" = "current" ]
+  [ ! -e "$STATE/diff.txt" ]
+}
+
+@test "apply preserves the prepared state when activation fails" {
+  make_rig
+  printf 'closure diff\n' > "$STATE/diff.txt"
+  { printf '#!%s\n' "$BASH"; printf 'exit 17\n'; } > "$WORK/bin/nh"
+  chmod +x "$WORK/bin/nh"
+
+  run upd apply
+  [ "$status" -eq 17 ]
+  [ "$(jq -r '.state' "$STATE/status.json")" = "ready" ]
+  [ -e "$STATE/diff.txt" ]
 }
 
 @test "apply warns, but proceeds, when the built closure is gone" {
