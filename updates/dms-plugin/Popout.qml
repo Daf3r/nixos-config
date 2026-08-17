@@ -33,7 +33,7 @@ import qs.Common
 import qs.Widgets
 import "logic.js" as Logic
 
-Column {
+Item {
     id: root
 
     // DMS fills these two on the popout content item if it declares them (see
@@ -63,7 +63,15 @@ Column {
     // it they measure zero and every blocker reason renders as one unbounded
     // line running off the panel.
     width: parent ? parent.width : 0
-    spacing: Theme.spacingM
+
+    // The popout must not grow past the screen just because a blocker detail or
+    // an error became long. Keep the whole surface usable and let DankFlickable
+    // handle the exceptional case instead of clipping the action row off-screen.
+    readonly property real maxContentHeight: {
+        const screen = root.parentPopout ? root.parentPopout.screen : null;
+        const screenHeight = screen && screen.height > 0 ? screen.height : 900;
+        return Math.max(300, Math.min(520, screenHeight * 0.68));
+    }
 
     // The unknown face comes from logic.js and is not written out here, for the
     // reason Widget.qml gives about the same literal: a hand-copied
@@ -81,10 +89,29 @@ Column {
     readonly property var button: Logic.buttonFor(root.st)
     readonly property var check: Logic.checkFor(root.st)
 
-    // ── The headline: the same icon and the same colour the pill is showing ──
-    // Not decoration. A panel that opened with a different face from the pill
-    // that opened it would leave the user deciding which of the two to believe.
-    Row {
+    implicitHeight: viewport.height
+
+    DankFlickable {
+        id: viewport
+        width: root.width
+        height: Math.min(contentColumn.implicitHeight, root.maxContentHeight)
+        contentWidth: width
+        contentHeight: contentColumn.implicitHeight
+        clip: true
+
+        // When a fresh poll shortens the report, keep the scroll position inside
+        // the new bounds. Without this, the panel can reopen at an empty tail.
+        onContentHeightChanged: contentY = Math.min(contentY, Math.max(0, contentHeight - height))
+
+        Column {
+            id: contentColumn
+            width: viewport.width
+            spacing: Theme.spacingM
+
+            // ── The headline: the same icon and the same colour the pill is showing ──
+            // Not decoration. A panel that opened with a different face from the pill
+            // that opened it would leave the user deciding which of the two to believe.
+            Row {
         width: parent.width
         spacing: Theme.spacingS
 
@@ -102,7 +129,7 @@ Column {
             color: Theme.surfaceText
             font.pixelSize: Theme.fontSizeMedium
             font.weight: Font.Medium
-            wrapMode: Text.Wrap
+            wrapMode: Text.WordWrap
             elide: Text.ElideNone
             anchors.verticalCenter: parent.verticalCenter
         }
@@ -180,7 +207,7 @@ Column {
                 text: "AVISO [" + (warningLine.modelData.code || "sin codigo") + "] " + (warningLine.modelData.detail || "sin explicacion; mira `upd status`")
                 color: Theme.warning
                 font.pixelSize: Theme.fontSizeSmall
-                wrapMode: Text.Wrap
+                wrapMode: Text.WordWrap
                 elide: Text.ElideNone
             }
         }
@@ -191,32 +218,70 @@ Column {
     // cases, so the colour has to tell them apart: a live button with an
     // explanation is information, a dead one is a refusal.
     //
-    // This one line is also what keeps the check button from ever being dark and
-    // mute. `checkFor` only refuses for `engine_running`, and in every state
-    // that can happen in, `buttonFor` puts that same blocker's detail here --
-    // alone when the state is not `ready`, joined with the rest when it is.
-    StyledText {
+    // Put the reason in its own surface rather than leaving a long red paragraph
+    // floating between the change list and the buttons. It gives the warning a
+    // readable hierarchy and, because it is part of the flickable content, it
+    // can never push the action row outside the visible panel.
+    Rectangle {
+        id: blockerCard
         width: parent.width
-        // Not when it would only repeat the headline. On an unreadable status
-        // `classify` and `buttonFor` land on the same sentence -- measured in
-        // the probe, "no se pudo leer el estado" printed twice, three lines
-        // apart -- and a panel that says a thing twice reads as a panel with a
-        // bug rather than as a panel being emphatic.
         visible: root.button.reason !== "" && root.button.reason !== root.view.summary
-        text: root.button.reason
-        color: root.button.enabled ? Theme.surfaceVariantText : Theme.error
-        font.pixelSize: Theme.fontSizeSmall
-        wrapMode: Text.Wrap
-        elide: Text.ElideNone
+        color: Theme.withAlpha(Theme.error, 0.10)
+        border.color: Theme.withAlpha(Theme.error, 0.32)
+        border.width: 1
+        radius: Theme.cornerRadius
+        implicitHeight: blockerContent.implicitHeight + Theme.spacingS * 2
+
+        Column {
+            id: blockerContent
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Theme.spacingS
+            spacing: Theme.spacingXS
+
+            Row {
+                width: parent.width
+                spacing: Theme.spacingXS
+
+                DankIcon {
+                    name: "warning"
+                    size: Theme.iconSizeSmall
+                    color: Theme.error
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+
+                StyledText {
+                    width: parent.width - Theme.iconSizeSmall - Theme.spacingXS
+                    text: root.button.enabled ? "Requiere reinicio" : "No se puede aplicar todavía"
+                    color: Theme.error
+                    font.pixelSize: Theme.fontSizeSmall
+                    font.weight: Font.Medium
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            StyledText {
+                width: parent.width
+                text: root.button.reason
+                color: Theme.surfaceText
+                font.pixelSize: Theme.fontSizeSmall
+                wrapMode: Text.WordWrap
+                elide: Text.ElideNone
+            }
+        }
     }
 
     Row {
+        id: actionRow
+        width: parent.width
         spacing: Theme.spacingS
 
         // Disabled, never hidden. A missing button teaches nothing; a disabled
         // one with "el motor prepara desde 'main'" above it says what to do
         // about it.
         DankButton {
+            width: root.button.label !== root.check.label ? (actionRow.width - actionRow.spacing) / 2 : actionRow.width
             text: root.applying ? "Aplicando..." : root.button.label
             iconName: {
                 if (root.applying)
@@ -254,6 +319,7 @@ Column {
         // copy of the button here would have undone that fix in the one place a
         // user actually presses it.
         DankButton {
+            width: (actionRow.width - actionRow.spacing) / 2
             visible: root.button.label !== root.check.label
             text: root.check.label
             iconName: "refresh"
@@ -281,7 +347,9 @@ Column {
         color: Theme.error
         font.pixelSize: Theme.fontSizeSmall
         isMonospace: true
-        wrapMode: Text.Wrap
+        wrapMode: Text.WordWrap
         elide: Text.ElideNone
+        }
     }
+}
 }

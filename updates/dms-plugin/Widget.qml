@@ -183,10 +183,11 @@ PluginComponent {
     // `popoutHeight` is only the first frame. PluginPopout replaces it with a
     // binding on the loaded item's implicitHeight the moment the Loader
     // finishes (PluginPopout.qml, Loader.onLoaded), so it is a starting
-    // estimate, not a ceiling: 260 is roughly the headline, six change rows and
-    // the button row, which is what this machine shows today.
+    // estimate, not a ceiling. 320 gives the first frame enough room for the
+    // header, the change list and the warning/action area while the flickable
+    // settles on the real content height.
     popoutWidth: 460
-    popoutHeight: 260
+    popoutHeight: 320
 
     popoutContent: Component {
         Popout {
