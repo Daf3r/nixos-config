@@ -22,6 +22,32 @@
     capSysNice = true;
   };
 
+  # ntsync — the kernel implementation of Windows synchronisation primitives
+  # (mutexes, semaphores, events). It replaces the eventfd juggling of esync and
+  # fsync, and it is where a heavily threaded Proton game gains the most, which
+  # is precisely the profile of an Unreal Engine 5 title. Proton-GE has used it
+  # since 10-9 and mainline Proton since 11.
+  #
+  # The xanmod kernel builds it as a module and nothing loads it, so /dev/ntsync
+  # simply did not exist before this line: Proton finds no device, falls back to
+  # fsync and says nothing about it.
+  boot.kernelModules = [ "ntsync" ];
+
+  # Loading the module is only half of it. ntsync registers as a misc device, so
+  # the node comes up root-owned and unreadable by the user, and the kernel patch
+  # that would have made it 0666 by default was dropped in favour of a udev rule
+  # that systemd 261 still does not ship — checked in its own
+  # 50-udev-default.rules, which has no ntsync entry. Without the rule below the
+  # device exists and Proton still cannot open it, which is the same silent
+  # failure mode as gamemode's polkit policy: everything looks configured and
+  # nothing happens.
+  #
+  # `uaccess` rather than a blanket 0666 hands access to whoever is logged in at
+  # the seat, the way systemd would have done it upstream.
+  services.udev.extraRules = ''
+    KERNEL=="ntsync", SUBSYSTEM=="misc", MODE="0660", TAG+="uaccess"
+  '';
+
   # Raises CPU clocks and the game's priority for the duration of a session,
   # then puts everything back. It only does any of this when the game is
   # actually launched through it, so Steam's launch options must say:
