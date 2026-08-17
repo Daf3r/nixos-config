@@ -164,5 +164,14 @@ let
   };
 in
 {
-  environment.systemPackages = [ sysdiag ];
+  environment.systemPackages = [
+    sysdiag
+
+    # `lsof`. Missing the first time it was needed, on 2026-08-17, while checking
+    # whether Proton had actually opened /dev/ntsync — the one question that no
+    # log answers, because falling back to fsync is silent. The walk over
+    # /proc/*/fd that replaced it works, but it is the sort of thing that gets
+    # mistyped under pressure and then reads as "nothing has it open".
+    pkgs.lsof
+  ];
 }
