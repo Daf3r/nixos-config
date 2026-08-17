@@ -43,11 +43,11 @@
     "dms-plugins": {
       "flake": false,
       "locked": {
-        "lastModified": 1786411316,
-        "narHash": "sha256-8QhvXZEDu8L04JfWkOxg+LT7eWgTYfBxv06GzMVSBhU=",
+        "lastModified": 1786899252,
+        "narHash": "sha256-WTBK9gPHw6+TLNg2PyAP1db8iu2da8MvEJGHEkFDyeU=",
         "owner": "Daf3r",
         "repo": "dms-plugins",
-        "rev": "874dcea144fde7c2ebb585953f7cb439e6f01059",
+        "rev": "ae41b5da5817330f0823a801462bef5089c9b337",
         "type": "github"
       },
       "original": {
