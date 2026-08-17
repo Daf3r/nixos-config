@@ -42,10 +42,15 @@
   # failure mode as gamemode's polkit policy: everything looks configured and
   # nothing happens.
   #
-  # `uaccess` rather than a blanket 0666 hands access to whoever is logged in at
-  # the seat, the way systemd would have done it upstream.
+  # 0666 rather than the tidier-looking `MODE="0660", TAG+="uaccess"`, because
+  # that variant was tried on 2026-08-17 and does nothing here: `uaccess` makes
+  # logind put an ACL on devices that belong to a seat, and a virtual misc device
+  # belongs to none, so the node came up `crw-rw---- root root` with getfacl
+  # reporting `other::---` — the rule applied and the user still could not open
+  # it. 0666 is what the rejected kernel patch would have set, and the device
+  # exposes nothing but the calling process's own synchronisation objects.
   services.udev.extraRules = ''
-    KERNEL=="ntsync", SUBSYSTEM=="misc", MODE="0660", TAG+="uaccess"
+    KERNEL=="ntsync", SUBSYSTEM=="misc", MODE="0666"
   '';
 
   # Raises CPU clocks and the game's priority for the duration of a session,
