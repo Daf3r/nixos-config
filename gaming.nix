@@ -1,6 +1,16 @@
 { config, pkgs, ... }:
 
 {
+  # Flatpak, only for Sober (github.com/vinegarhq/sober) — the unofficial
+  # Roblox client. There is no nixpkgs package for it (checked 2026-08-17:
+  # `nix search nixpkgs sober` finds nothing), and Sober is built and tested
+  # against its own Flatpak sandbox permissions, so packaging it by hand in
+  # Nix would mean re-deriving those bwrap flags instead of reusing the ones
+  # upstream already maintains. Install with:
+  #   flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+  #   flatpak install flathub org.vinegarhq.Sober
+  services.flatpak.enable = true;
+
   programs.steam = {
     enable = true;
 
