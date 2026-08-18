@@ -11,6 +11,15 @@
   #   flatpak install flathub org.vinegarhq.Sober
   services.flatpak.enable = true;
 
+  # Enabling the service installs Sober's .desktop file into
+  # /var/lib/flatpak/exports/share/applications, but nothing on NixOS adds
+  # that directory to XDG_DATA_DIRS by default — GNOME and Plasma patch their
+  # own session to do it, niri does not. Without this, `flatpak install`
+  # succeeds and the app launcher still shows nothing, silently.
+  environment.sessionVariables.XDG_DATA_DIRS = [
+    "/var/lib/flatpak/exports/share"
+  ];
+
   programs.steam = {
     enable = true;
 
