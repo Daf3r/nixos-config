@@ -128,10 +128,31 @@ in
   services.xserver.xkb.layout = "us";
 
   environment.systemPackages = with pkgs; [
-    # Noctalia is a native binary and screenshots/clipboard are built in, so no
-    # grim/slurp/wl-clipboard needed. These two are the exceptions:
+    # Noctalia is a native binary and screenshots/clipboard are built in, so the
+    # desktop itself needs no grim/slurp/wl-clipboard. These are the exceptions:
     playerctl # Noctalia has no media-control IPC verb; the media keys use this
     ddcutil # now actually used: noctalia.nix sets brightness.enable_ddcutil
+
+    # Reading from and writing to a *nested* niri instance — one compositor
+    # running as a window inside this session, with its own Wayland socket, so a
+    # program can be watched and driven without touching the real pointer and
+    # keyboard.
+    #
+    # niri advertises zwlr_screencopy_manager_v1, zwlr_virtual_pointer_manager_v1
+    # and zwp_virtual_keyboard_manager_v1 (checked with wayland-info on 26.04),
+    # which is what makes this work at all: every tool below talks to whichever
+    # compositor WAYLAND_DISPLAY points at, so aiming them at the nested socket
+    # keeps their effects inside that window.
+    #
+    # Without these, the only way left to synthesise input is ydotool through
+    # /dev/uinput, which injects at the kernel level: the clicks land on whatever
+    # currently has focus, so the machine is unusable while it runs, and it needs
+    # the user in the `uinput` group. That is precisely what this avoids.
+    grim # captures a frame; unlike niri's own screenshot action it raises no notification
+    slurp # picks the region to capture, once, while calibrating
+    wlrctl # moves and clicks the virtual pointer
+    wtype # types into the virtual keyboard
+    wayland-utils # wayland-info: lists the globals a compositor advertises, for when this breaks
 
     sddmTheme # must be here, not in sddm.extraPackages — see the note above
 
