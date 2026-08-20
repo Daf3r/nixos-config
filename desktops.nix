@@ -127,6 +127,17 @@ in
   # Keyboard layout for the login screen; niri sets its own in config.kdl.
   services.xserver.xkb.layout = "us";
 
+  # Synthesising input on this session. wlrctl, above, can only send a complete
+  # click, and holding a button down is a different thing: a press event, an
+  # arbitrary wait, and a release. ydotool writes to /dev/uinput through a
+  # hardened system service, which is why it can do that at all — and also why
+  # its events land wherever the focus happens to be, this session included.
+  #
+  # Enabling it here creates the `ydotool` group and the ydotoold unit; the user
+  # joins that group in ./configuration.nix. Without either half, ydotool runs
+  # and silently connects to nothing.
+  programs.ydotool.enable = true;
+
   environment.systemPackages = with pkgs; [
     # Noctalia is a native binary and screenshots/clipboard are built in, so the
     # desktop itself needs no grim/slurp/wl-clipboard. These are the exceptions:

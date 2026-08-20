@@ -198,7 +198,10 @@
     # CPU governor, GPU clocks — to this group rather than to every local user.
     # programs.gamemode creates the group but deliberately leaves it empty, so
     # without this line gamemode activates and is denied everything it tries.
-    extraGroups = [ "networkmanager" "wheel" "video" "i2c" "docker" "gamemode" ];
+    # ydotool: the ydotoold socket is created 0660 and owned by this group, so
+    # without the membership every ydotool call fails to connect and synthesises
+    # nothing. See programs.ydotool in ./desktops.nix.
+    extraGroups = [ "networkmanager" "wheel" "video" "i2c" "docker" "gamemode" "ydotool" ];
     shell = pkgs.fish;
   };
 
