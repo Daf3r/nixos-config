@@ -1,4 +1,4 @@
-{ config, pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, ... }:
 let
   # The nixtalia starter had this as "${homeDirectory}/daf3r/config", which
   # resolved to /home/daf3r/daf3r/config — a path that never existed, so every
@@ -14,6 +14,10 @@ let
     nvim = "nvim";
     niri = "niri";
   };
+
+  # Bound here rather than inline because both the package list and the desktop
+  # entry below have to name the exact same store path.
+  hermes-desktop = pkgs.callPackage ./pkgs/hermes-desktop-sandbox.nix { };
 in
 {
   imports = [
@@ -141,6 +145,11 @@ in
     # fails the way sandboxes do: the caller either refuses to run the sandboxed
     # step or silently runs it unsandboxed, and neither says "bwrap".
     bubblewrap
+
+    # Hermes Desktop's launcher asks for sudo from a menu icon that has no way
+    # to answer it, so without this the app stops opening after any update that
+    # rebuilds it. See the package for the whole story.
+    hermes-desktop
   ];
 
   # Hermes Agent writes this entry itself on every desktop launch, and it gets
@@ -165,13 +174,19 @@ in
   # ~/.local/share/applications — which XDG_DATA_DIRS ranks *higher*, so the
   # broken one still wins and the menu grows a duplicate icon. Only a file at
   # the exact path Hermes writes to can stop it.
+  #
+  # Exec points at ./pkgs/hermes-desktop-sandbox.nix rather than at the
+  # ~/.local/bin shim: `hermes desktop` alone demands sudo for its chrome-sandbox
+  # preflight and, finding no terminal behind the icon, exits before any window
+  # appears — the same do-nothing symptom as above, from a different cause. That
+  # wrapper still runs Hermes' own desktop command underneath.
   xdg.dataFile."applications/hermes.desktop".text = ''
     [Desktop Entry]
     Type=Application
     Name=Hermes
     GenericName=Hermes Desktop
     Comment=Launch Hermes Desktop
-    Exec=${config.home.homeDirectory}/.local/bin/hermes desktop
+    Exec=${lib.getExe hermes-desktop}
     Icon=${config.home.homeDirectory}/.hermes/hermes-agent/apps/desktop/assets/icon.png
     Terminal=false
     Categories=Utility;
