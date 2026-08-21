@@ -16,6 +16,7 @@
     ./monitor.nix
     ./diagnostics.nix
     ./updates.nix
+    ./virtualisation.nix
   ];
 
   # No swap device exists on this machine and btrfs makes swapfiles awkward.
