@@ -347,6 +347,20 @@ binds {
     Mod+E      { spawn "dolphin"; }
     Mod+K      { spawn "kate"; }
 
+    // Autoclicker for Sober (Roblox), one click every two seconds. Press to
+    // start, press again to stop — the running instance is found through a pid
+    // file, so a second press never stacks a second clicker.
+    //
+    // It only clicks while Sober is the focused window. That guard is not a
+    // nicety: ydotool synthesises the click below the compositor, so an
+    // unguarded clicker would keep clicking into whatever you alt-tabbed to.
+    // Leaving the game pauses it; coming back resumes it.
+    //
+    // Mod+X and not a bare key on purpose — this is a bind you never want to
+    // hit by accident, and both edges raise a notification so it is never on
+    // without you knowing. See ../../pkgs/autoclick.nix.
+    Mod+X      { spawn "autoclick"; }
+
     // Brave on both W and B. W is the one asked for; B predates it and costs
     // nothing to keep — and having the second key is what makes the split
     // below possible.

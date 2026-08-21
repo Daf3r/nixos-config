@@ -172,6 +172,12 @@ in
     # native action for. See ./pkgs/focus-or-spawn.nix.
     (callPackage ./pkgs/focus-or-spawn.nix { })
 
+    # Backs Mod+X: an autoclicker that only fires while Sober has focus. It
+    # goes through ydotool, so programs.ydotool above and the `ydotool` group
+    # membership in ./configuration.nix are both load-bearing — without them
+    # the key looks dead. See ./pkgs/autoclick.nix.
+    (callPackage ./pkgs/autoclick.nix { })
+
     # X11 support for the niri session. niri has no built-in XWayland — there is
     # no enable switch on the module to flip — and instead integrates
     # xwayland-satellite, spawning it on demand when the first X11 client
