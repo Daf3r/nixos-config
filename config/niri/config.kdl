@@ -195,8 +195,69 @@ hotkey-overlay {
     skip-at-startup
 }
 
+// Movement. niri's defaults are correct and characterless — every animation
+// runs the same critically-damped spring, so nothing ever overshoots and the
+// desktop reads as instant rather than as physical.
+//
+// These are springs with damping-ratio below 1, which means they overshoot and
+// settle. That is the whole point: the overshoot is what makes a window feel
+// like it has mass instead of teleporting. Tuned per animation rather than
+// globally, because the two ends of the range want opposite things.
+//
+// How to read the numbers:
+//   damping-ratio  1.0 = no overshoot ever. Below 1 bounces; 0.7 is a clear
+//                  bounce, 0.9 is a hint of one. Never below 0.6 here — that
+//                  is where "lively" turns into "wobbly" and starts costing
+//                  time on every single window you open.
+//   stiffness      how hard it pulls. Higher = faster. 1000 is snappy, 600 is
+//                  languid.
+//   epsilon        when it decides it has arrived. Leave at 0.0001.
+//
+// Tune by feel, not by table: change one number, save, and niri reloads live.
 animations {
     slowdown 1.0
+
+    // Horizontal scrolling is what you look at all day in a scrollable tiler,
+    // so it gets the most restraint: a whisper of overshoot, high stiffness.
+    // A bouncy scroll is charming twice and irritating for the rest of the day.
+    horizontal-view-movement {
+        spring damping-ratio=0.9 stiffness=800 epsilon=0.0001
+    }
+
+    // Opening a window is a moment, not a transition — this is where the
+    // boldness goes. 0.72 lands with a visible settle.
+    window-open {
+        spring damping-ratio=0.72 stiffness=750 epsilon=0.0001
+    }
+
+    // Closing gets no spring at all. A window on its way out should not bounce
+    // on the way; it should be gone. Fast easing reads as decisive.
+    window-close {
+        duration-ms 130
+        curve "ease-out-quad"
+    }
+
+    // Moving a window between columns: mass, but obedient.
+    window-movement {
+        spring damping-ratio=0.85 stiffness=850 epsilon=0.0001
+    }
+
+    // Resize stays critically damped. Overshoot on a resize means the content
+    // reflows twice, which is visible in a browser and irritating in a
+    // terminal.
+    window-resize {
+        spring damping-ratio=1.0 stiffness=900 epsilon=0.0001
+    }
+
+    workspace-switch {
+        spring damping-ratio=0.88 stiffness=800 epsilon=0.0001
+    }
+
+    // The overview is a deliberate "step back and look" gesture, so it is
+    // allowed to be the slowest thing here — lower stiffness, longer settle.
+    overview-open-close {
+        spring damping-ratio=0.85 stiffness=650 epsilon=0.0001
+    }
 }
 
 // CS2. Launch options: EMPTY. It runs on its own Wayland path and works.

@@ -75,8 +75,10 @@
       name = "Papirus-Dark";
     };
 
+    # Keep in step with Fonts.general in ./qt.nix and with DMS's own
+    # fontFamily, or GTK windows drift away from the rest of the session.
     font = {
-      name = "Noto Sans";
+      name = "IBM Plex Sans";
       size = 10;
     };
 

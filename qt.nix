@@ -47,7 +47,7 @@
 
     Fonts = {
       # Matches gtk.font in ./gtk.nix so Qt and GTK windows agree.
-      general = ''"Noto Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"'';
+      general = ''"IBM Plex Sans,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"'';
       fixed = ''"JetBrainsMono Nerd Font,10,-1,5,400,0,0,0,0,0,0,0,0,0,0,1"'';
     };
   };
@@ -64,7 +64,7 @@
     };
 
     Fonts = {
-      general = ''"Noto Sans,10,-1,5,50,0,0,0,0,0"'';
+      general = ''"IBM Plex Sans,10,-1,5,50,0,0,0,0,0"'';
       fixed = ''"JetBrainsMono Nerd Font,10,-1,5,50,0,0,0,0,0"'';
     };
   };
