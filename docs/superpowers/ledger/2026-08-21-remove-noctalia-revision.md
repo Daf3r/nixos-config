@@ -226,20 +226,34 @@ viven fuera de git**. Una máquina nueva sale con el escritorio en defaults.
 
 ### Transparencia: qué se puede y qué no, verificado
 
-niri **26.04 no tiene blur**. Comprobado, no supuesto: `window-rule { blur }` y
-`layer-rule { blur }` son `unexpected node`; lo que sí acepta es `opacity` (en
-window-rule y en layer-rule) y `shadow`. El recuerdo de "menús transparentes
-que se veían mejor" es de Hyprland, que tenía `decoration:blur` y se eliminó el
-2026-08-07.
+**niri 26.04 SÍ tiene blur**, y la primera conclusión de esta sesión fue
+errónea. Lo que niri no tiene son reglas KDL para configurarlo: `window-rule
+{ blur }` y `layer-rule { blur }` son `unexpected node`, y de ahí salió el
+"no hay blur". Pero implementa el protocolo Wayland
+`ext_background_effect_manager_v1` — `wayland-info` lo lista y `dms blur check`
+responde `supported`. Un cliente que pida el efecto lo obtiene; DMS lo hace.
 
-La consecuencia práctica: **transparencia sin blur se ve peor, no mejor**. Un
-menú de Dolphin o de Brave al 90 % deja ver el escritorio crudo detrás, texto
-incluido, en vez de cristal esmerilado. Lo único que se ve bien translúcido es
-lo que DMS dibuja, porque aplica su propio blur (`blurEnabled`,
-`blurForegroundLayers`). Por eso `popupTransparency` bajó de 0.82 a **0.70** y
-ahí se quedó: bajarlo más es defendible, pero el launcher no entra en
-`dms screenshot` —es una capa overlay— así que nadie pudo mirarlo, y elegir un
-valor de transparencia sin verlo es justo lo que no se hace aquí.
+La lección de método: **mirar la config del compositor no es mirar sus
+capacidades**. La respuesta estaba a un `dms blur check`, no en la sintaxis KDL.
+
+Para menús de aplicaciones sigue sin haber blur, pero por otra razón: GTK y Qt
+no piden el efecto todavía. Ahí la transparencia sin blur se ve peor, no mejor.
+
+### El interruptor que sí cambia algo: `blurForegroundLayers`
+
+Bajar `popupTransparency` de 0.82 a 0.70 es un cambio de 12 % de alfa sobre una
+superficie oscura en un esquema monocromo: no se nota. El salto visual está en
+otro sitio, y se lee en `Theme.qml`:
+
+```qml
+floatingSurface: foregroundLayers ? readableSurface : withAlpha(readableSurface, 0)
+transparentBlurLayers: BlurService.enabled && !foregroundLayers
+```
+
+Con `blurForegroundLayers = false` y el blur activo, las superficies de los
+popups pasan a **alfa 0** y el blur del compositor hace todo el trabajo — las
+tarjetas del Control Center caen de `popupTransparency` a 0.16 y 0.08. Eso es
+el cristal esmerilado; lo otro era un gris un poco menos opaco.
 
 ### Trampa: `settings set` no aplica los coerce del spec
 
