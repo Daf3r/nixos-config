@@ -41,7 +41,7 @@ let
   '';
 in
 {
-  imports = [ inputs.noctalia.nixosModules.default ];
+  imports = [ ];
 
   # niri is the only session. Hyprland was the default until 2026-08-07 and was
   # removed once niri had been running as the daily driver long enough to trust;
@@ -59,14 +59,27 @@ in
     useNautilus = false;
   };
 
-  # System side of Noctalia v5. The shell itself, its settings and its autostart
-  # live in the home-manager module (see ./noctalia.nix).
-  programs.noctalia = {
-    enable = true;
-    # Pulls in NetworkManager, Bluetooth, UPower and power-profiles-daemon,
-    # which back the Control Center's network/bluetooth/battery/power widgets.
-    recommendedServices.enable = true;
-  };
+  # Backs DMS's bluetooth/battery/power widgets. These used to arrive
+  # implicitly through Noctalia's recommendedServices; they are declared here
+  # now that that module is gone. NetworkManager is NOT in this list because it
+  # never came from that module — see ./configuration.nix, where it has always
+  # been declared on its own.
+  hardware.bluetooth.enable = true;
+  services.upower.enable = true;
+  services.power-profiles-daemon.enable = true;
+
+  # geoclue2 is deliberately NOT enabled, and this comment is the whole reason
+  # the line is here rather than absent.
+  #
+  # DMS's own NixOS module turns it on with mkDefault, and it is what would let
+  # the weather widget and the night-light schedule find this machine without
+  # being told a location. But it was never running under Noctalia either —
+  # `nix store diff-closures` against the pre-migration system shows geoclue
+  # arriving as a NEW service, not a restored one — so switching it on is a new
+  # decision about sending location data, not part of removing the old shell.
+  #
+  # Turn it on the day the weather widget is actually wanted:
+  #   services.geoclue2.enable = true;
 
   # `dms doctor` reports accountsservice as missing without this, and the user
   # avatar and name in the Settings panel stay blank. DMS's own NixOS module
@@ -139,10 +152,12 @@ in
   programs.ydotool.enable = true;
 
   environment.systemPackages = with pkgs; [
-    # Noctalia is a native binary and screenshots/clipboard are built in, so the
-    # desktop itself needs no grim/slurp/wl-clipboard. These are the exceptions:
-    playerctl # Noctalia has no media-control IPC verb; the media keys use this
-    ddcutil # now actually used: noctalia.nix sets brightness.enable_ddcutil
+    # Brightness of the external monitor over DDC/CI: DMS's brightness IPC
+    # drives the laptop panel through its own backlight driver, but the MSI
+    # needs ddcutil, and hardware.i2c below is what lets it work without root.
+    # Verify with `ddcutil detect`, which should name the monitor on an
+    # /dev/i2c-* bus.
+    ddcutil
 
     # Reading from and writing to a *nested* niri instance — one compositor
     # running as a window inside this session, with its own Wayland socket, so a

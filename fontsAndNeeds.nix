@@ -12,9 +12,7 @@
 
   fonts.fontconfig.enable = true;
   fonts.packages = with pkgs; [
-    # UI text. Noctalia's shell.font_family points at Noto Sans; it draws its
-    # own icons (Tabler glyphs are built into the binary), so it does not need
-    # a Nerd Font.
+    # UI text for GTK and Qt applications.
     noto-fonts
     noto-fonts-cjk-sans
     noto-fonts-color-emoji

@@ -7,7 +7,6 @@ let
   create_symlink = path: config.lib.file.mkOutOfStoreSymlink path;
 
   # Mutable, symlinked out of the store so you can edit them live.
-  # Noctalia is deliberately absent: it is fully declarative in ./noctalia.nix.
   # "foot" was in the starter's list but config/foot never existed, so it only
   # ever produced a dangling symlink.
   configs = {
@@ -23,8 +22,8 @@ in
   imports = [
     ./terminal.nix
     ./apps.nix
-    ./noctalia.nix
-    ./dms.nix # coexists with Noctalia and autostarts nothing — see its header
+    ./dms.nix # the session shell — see its header
+    ./lock-media-pause.nix # pause music when the session locks (old Noctalia hook)
     ./wallpaper.nix
     ./gtk.nix
     ./qt.nix

@@ -39,8 +39,6 @@
 
       # --- Flake maintenance ---
       flakeup = "nix flake update --flake ~/nixos-config";
-      # Bump only Noctalia, leaving nixpkgs pinned:
-      noctup = "nix flake update noctalia --flake ~/nixos-config";
       ngen = "nh os info"; # list generations
 
       # --- git ---

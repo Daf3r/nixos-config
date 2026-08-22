@@ -34,13 +34,6 @@
 
   nix.settings = {
     experimental-features = [ "nix-command" "flakes" ];
-
-    # Prebuilt Noctalia v5 binaries, so a rebuild downloads instead of
-    # compiling a C++ shell from source.
-    substituters = [ "https://noctalia.cachix.org" ];
-    trusted-public-keys = [
-      "noctalia.cachix.org-1:pCOR47nnMEo5thcxNDtzWpOxNFQsBRglJzxWPp3dkU4="
-    ];
   };
 
   networking.hostName = "daf3r-starter"; # must match the nixosConfigurations attribute in flake.nix
@@ -75,8 +68,8 @@
   #
   # "qt5ct" installs qt5ct *and* qt6ct, and the qt6ct plugin registers itself
   # under both the qt5ct and qt6ct keys — so this one value covers Qt5 and Qt6.
-  # The per-application settings (icon theme, the palette Noctalia generates)
-  # live in ./qt.nix.
+  # The per-application settings (icon theme, the matugen palette) live in
+  # ./qt.nix.
   qt = {
     enable = true;
     platformTheme = "qt5ct";

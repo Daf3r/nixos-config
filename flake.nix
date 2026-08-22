@@ -1,24 +1,17 @@
 {
-  description = "daf3r's NixOS — niri + Noctalia v5";
+  description = "daf3r's NixOS — niri + DankMaterialShell";
 
   inputs = {
     nixpkgs.url = "nixpkgs/nixos-unstable";
-
-    # Noctalia v5. Deliberately NOT following our nixpkgs: overriding any of
-    # Noctalia's inputs changes the derivation hash and loses every hit on
-    # noctalia.cachix.org. The `cachix` branch always points at the newest
-    # commit that has already been built and pushed to that cache, so a rebuild
-    # downloads instead of compiling.
-    noctalia.url = "github:noctalia-dev/noctalia/cachix";
 
     # Claude Desktop. Not in nixpkgs. This flake repackages Anthropic's own
     # Linux beta from their Debian repository and refreshes the hash hourly via
     # CI — the alternatives extract and patch the macOS DMG instead, which is a
     # good deal more fragile.
     #
-    # Its nixpkgs is deliberately not made to follow ours, same reasoning as
-    # noctalia above: it is a repackaged binary, and pinning it to a different
-    # nixpkgs than the one it was tested against buys nothing.
+    # Its nixpkgs is deliberately not made to follow ours: it is a repackaged
+    # binary, and pinning it to a different nixpkgs than the one it was tested
+    # against buys nothing.
     claude-desktop.url = "github:poeck/claude-desktop-nix-flake";
 
     # ChatGPT Desktop — the official Linux x86_64 .deb published by OpenAI.
@@ -27,20 +20,19 @@
     # version and hash below are deliberately reviewed together when OpenAI
     # publishes a new build.
 
-    # DankMaterialShell, under evaluation as a replacement for Noctalia — see
-    # ./dms.nix for the reasoning and for how the two coexist on this branch.
+    # DankMaterialShell, the session shell since 2026-08-10 — see ./dms.nix.
     #
-    # This one DOES follow our nixpkgs, unlike the three inputs above, and the
-    # difference is not an oversight: those are pinned loose to keep binary
-    # cache hits (noctalia.cachix.org) or because they are repackaged binaries.
-    # DMS publishes no cache at all — its flake declares no substituters — so
-    # there are no hits to lose, and following means one nixpkgs to download
-    # instead of two. It is a Go binary plus QML, so a local build is cheap;
-    # this is not the Electron situation the old ChatGPT repackager described.
+    # This one DOES follow our nixpkgs, unlike claude-desktop above, and the
+    # difference is not an oversight: that one is pinned loose because it is a
+    # repackaged binary. DMS publishes no cache at all — its flake declares no
+    # substituters — so there are no hits to lose, and following means one
+    # nixpkgs to download instead of two. It is a Go binary plus QML, so a local
+    # build is cheap; this is not the Electron situation the old ChatGPT
+    # repackager described.
     # Pinned to a release tag, NOT to a branch, and that is the point. The
     # default branch builds `1.6-beta`, so tracking it would buy exactly the
-    # pre-release churn this migration was supposed to escape — Noctalia v5 is
-    # beta too. v1.5.3 is the newest tagged release (2026-07-27).
+    # pre-release churn this migration was supposed to escape — the old shell,
+    # Noctalia v5, was beta too. v1.5.3 is the newest tagged release (2026-07-27).
     #
     # A tag never moves, so `nix flake update` cannot bump this: upgrading means
     # editing the version below by hand, on purpose, after reading the release
@@ -114,6 +106,28 @@
         specialArgs = { inherit inputs; };
         modules = [
           ./configuration.nix
+
+          # One `dms` binary for the whole system, and this is what guarantees
+          # it. nixpkgs ALSO packages dms-shell, at its own version, so a bare
+          # `pkgs.dms-shell` in a wrapper script silently resolves to a second
+          # copy: 115 MiB of closure, and scripts talking to a different binary
+          # than the shell that is actually running. Both happened to be 1.5.3
+          # when this was written, which is exactly why it went unnoticed.
+          #
+          # With this overlay `pkgs.dms-shell` IS the pinned input everywhere,
+          # including inside home-manager, which reads the system pkgs because
+          # useGlobalPkgs is set below. The check that catches a regression:
+          #
+          #   nix path-info -r /run/current-system | grep dms-shell
+          #
+          # must name exactly one store path (plus its fish completions).
+          {
+            nixpkgs.overlays = [
+              (_final: prev: {
+                dms-shell = inputs.dms.packages.${prev.stdenv.hostPlatform.system}.dms-shell;
+              })
+            ];
+          }
 
           home-manager.nixosModules.home-manager
           {
