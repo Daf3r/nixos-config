@@ -3,13 +3,13 @@
 [English](README.md) · **Español**
 
 Un flake de NixOS para una sola máquina: **[niri](https://github.com/YaLTeR/niri)** con
-tiling desplazable y **[Noctalia v5](https://docs.noctalia.dev/v5/)** como shell, sobre un
-ASUS ROG Strix G17 (G713PV) con una RTX 4060 y un panel de 240 Hz.
+tiling desplazable y **[DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell)**
+como shell, sobre un ASUS ROG Strix G17 (G713PV) con una RTX 4060 y un panel de 240 Hz.
 
 | | |
 |---|---|
 | **Compositor** | niri 25.11 — tiling desplazable, sesión única |
-| **Shell** | Noctalia v5, totalmente declarativo |
+| **Shell** | DMS (DankMaterialShell) v1.5.3, pineado a tag |
 | **Gestor de sesión** | SDDM (Wayland) + sddm-astronaut |
 | **Terminal** | kitty + fish + starship |
 | **Navegador** | Brave Origin, empaquetado aquí desde el `.deb` de Brave |
@@ -46,9 +46,9 @@ ese estado en la barra y ofrece comprobarlo o aplicarlo mediante polkit.
 No es un cuelgue ni una línea roja en un log: es un `ok` que no hizo nada. Todos estos
 pasaron de verdad, y cada uno costó horas hasta que alguien se dio cuenta:
 
-- Templates de Noctalia escribiendo colores en ficheros que no leía nadie
+- Templates del shell escribiendo colores en ficheros que no leía nadie
 - gamemode informando *"gamemode is active"* mientras polkit denegaba todos sus helpers
-- La barra de Noctalia descartando widgets que se salían de la pantalla estrecha, sin avisar
+- La barra del shell descartando widgets que se salían de la pantalla estrecha, sin avisar
 - niri ignorando un bloque de monitor *entero* porque la frecuencia estaba redondeada
 - Symlinks del starter apuntando a rutas que nunca existieron
 
@@ -63,16 +63,17 @@ los comentarios de este repo son largos a propósito.
 
 | Fichero | Qué contiene |
 |---|---|
-| `configuration.nix` | Básicos del host, zram, usuarios, ajustes de Nix + la caché binaria de Noctalia |
+| `configuration.nix` | Básicos del host, zram, usuarios, ajustes de Nix |
 | `hardware-configuration.nix` | Generado, gitignorado |
-| `desktops.nix` | niri, SDDM, portales xdg, el módulo NixOS de Noctalia |
+| `desktops.nix` | niri, SDDM, portales xdg, los servicios que DMS necesita |
 | `gpu.nix` | NVIDIA RTX 4060 como GPU principal — ver [GPU](#gpu) |
 | `asus.nix` | asusd: perfiles de ventilador, RGB del teclado, tecla ROG, límite de batería |
 | `gaming.nix` | Steam, gamemode, Proton-GE, las reglas de polkit que gamemode necesita |
 | `gamemode.nix` | El comando `game-mode` (escala del panel + VRR) |
 | `keyboard.nix` | keyd — hace que un toque seco de `SUPER` abra el lanzador |
-| `noctalia.nix` | Ajustes de Noctalia v5, declarativos |
-| `wallpaper.nix` | swww + `wallpaper-rotate`, sustituyendo el módulo de fondo de Noctalia |
+| `dms.nix` | Ajustes y plugins de DankMaterialShell |
+| `lock-media-pause.nix` | Pausa la reproducción MPRIS al bloquear la sesión |
+| `wallpaper.nix` | `wallpaper-rotate`, que rota el fondo por el IPC de DMS |
 | `gtk.nix` / `qt.nix` | Cursor, temas, iconos, fuentes — mantenidos en sintonía entre sí |
 | `home.nix` | Punto de entrada de home-manager, symlinks fuera del store |
 | `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Paquetes |
@@ -81,21 +82,22 @@ los comentarios de este repo son largos a propósito.
 | `devshells/` | Toolchains por proyecto — ver [Entornos de desarrollo](#entornos-de-desarrollo) |
 | `config/niri/config.kdl` | Config de niri, editable en vivo |
 | `config/nvim/` | Starter de LazyVim — de terceros, ver abajo |
-| `config/starship.toml` | El prompt; lleva un bloque de paleta generado |
-| `config/noctalia/palettes/` | Paleta de color local, copiada al store |
+| `config/starship.toml` | El prompt; lleva un bloque de paleta congelado |
+| `config/themes/` | Paletas congeladas de la era Noctalia para las herramientas que matugen no cubre |
 
 ### Qué se aplica en vivo y qué necesita rebuild
 
 `config/niri` y `config/nvim` están enlazados **fuera** del store de Nix, así que editarlos
 surte efecto al momento — `~/.config/niri/config.kdl` resuelve de vuelta a este repo.
 
-Todo lo demás necesita `nh os switch`. `starship.toml` se lee vía `$STARSHIP_CONFIG` y el
-JSON de la paleta se copia al store, así que ninguno de los dos es en vivo pese a estar
+Todo lo demás necesita `nh os switch`. `starship.toml` se lee vía `$STARSHIP_CONFIG` y las
+paletas de `config/themes/` se copian al store, así que nada de eso es en vivo pese a estar
 bajo `config/`.
 
-Dos ficheros de aquí los escriben los templates de Noctalia, no una mano:
-`config/starship.toml` recibe un bloque de paleta entre marcadores `NOCTALIA`, y
-`config/niri/noctalia.kdl` se genera entero y está gitignorado.
+Un solo directorio de aquí lo escribe el shell y no una mano: `config/niri/dms/`, que DMS
+genera entero en cada ejecución y está gitignorado. El bloque de paleta de
+`config/starship.toml` lo escribía Noctalia y hoy está congelado — se edita a mano o no
+cambia nadie.
 
 ### Lo que no es mío
 
@@ -133,7 +135,7 @@ este repo es público — clónalo y tendrás una rotación vacía, no un proble
 | `SUPER + Intro` | kitty |
 | `SUPER + B` / `SUPER + W` | Brave Origin |
 | `SUPER + E` / `SUPER + K` / `SUPER + D` | Dolphin · Kate · Discord |
-| `SUPER + SHIFT + W` | Cambiar el fondo de pantalla (swww) |
+| `SUPER + SHIFT + W` | Cambiar el fondo de pantalla |
 | `SUPER + Q` | Cerrar ventana |
 | `SUPER + F` | Pantalla completa |
 | `SUPER + O` | Vista general — todos los escritorios y ventanas, en pequeño |
@@ -180,11 +182,11 @@ Se eligió escala 1.6 porque 2560/1.6 y 1440/1.6 son ambos enteros, así que no 
 por escalado fraccional. Dos consecuencias, y las dos ya han causado bugs:
 
 - **El portátil es la pantalla estrecha, no la ancha.** Todo lo que se dispone en
-  horizontal — la barra de Noctalia sobre todo — tiene ahí 1600 píxeles lógicos frente a los
-  1920 del MSI. El desbordamiento es invisible desde el MSI, y Noctalia descarta los widgets
-  que se salen sin decir nada.
-- **Noctalia v5.0.0 dimensiona mal su superficie de fondo con escalas fraccionales**, que es
-  por lo que `wallpaper.nix` desactiva ese módulo y pinta el fondo con swww.
+  horizontal — la barra del shell sobre todo — tiene ahí 1600 píxeles lógicos frente a los
+  1920 del MSI. El desbordamiento es invisible desde el MSI, y los widgets se salen sin
+  decir nada.
+- **Noctalia v5.0.0 (el shell anterior) dimensionaba mal su superficie de fondo con escalas
+  fraccionales**; DMS no tiene ese bug, así que pinta el fondo él mismo y awww desapareció.
 
 ---
 
@@ -200,44 +202,16 @@ y `card2-eDP-2` es el de la iGPU, sin usar, no el panel.
 
 ---
 
-## Noctalia es declarativo — con un asterisco
+## Ajustes del shell: en la GUI, a propósito
 
-`~/.config/noctalia/config.toml` es un symlink de solo lectura al store de Nix, generado
-desde `programs.noctalia.settings` en `noctalia.nix` y validado en cada rebuild con
-`noctalia config validate`, así que una clave mala rompe la compilación en vez del escritorio.
+DMS guarda sus ajustes en `~/.config/DankMaterialShell/settings.json`. Mientras
+`settings = { }` en `dms.nix` siga vacío, ese fichero es mutable y lo posee la GUI de
+ajustes — un rebuild nunca lo toca.
 
-**Pero ese fichero no es toda la historia.** Noctalia lo fusiona con un segundo fichero
-mutable en `~/.local/state/noctalia/settings.toml` — el que escribe la GUI de ajustes — y la
-precedencia es *por ajuste*, no global. Se ha visto un tema elegido en la GUI sobrevivir a
-un rebuild completo y ganarle a `noctalia.nix`. El fichero de estado también se escribe
-*desde* la config de Nix en algunos casos, así que no son simplemente rivales.
-
-**En la práctica:** usa la GUI para probar, y luego escribe en `noctalia.nix` lo que te
-quedes. Si un ajuste de ahí parece ignorado, búscalo en el fichero de estado antes de
-suponer que el lado Nix está mal, y prefiere `noctalia msg <verbo>` (por ejemplo
-`color-scheme-set`) a editar el estado a mano — las ediciones manuales no siempre surten
-efecto.
-
-```fish
-noctalia config export full      # cada clave con su valor por defecto — lo más rápido para explorar
-noctalia theme --list-templates  # los templates de tematizado de apps
-noctalia msg --help              # verbos IPC de v5 (sustituyeron a `noctalia-shell ipc call` de v4)
-```
-
-### Tematizado de aplicaciones
-
-`theme.templates.builtin_ids` y `community_ids` son **opt-in y están vacíos por defecto** —
-`enable_builtin_templates = true` por sí solo no tematiza nada.
-
-Varios templates añaden una línea de include a una config que home-manager posee como
-symlink de solo lectura, y o fallan o reemplazan el symlink cuando no pueden escribir.
-Donde eso aplica, el include se escribe en el fichero de home-manager **por adelantado**,
-para que el propio chequeo de idempotencia del template corte antes de tocar nada. Lee los
-comentarios de `terminal/kitty.nix` y `gtk.nix` antes de cambiar esas cadenas.
-
-Solo se activan los templates cuya aplicación está instalada de verdad. Los descartados
-están listados en `noctalia.nix` **con el motivo**, para que la decisión no se vuelva a
-discutir.
+**En la práctica:** usa la GUI para probar, y luego decide: o lo dejas así (GUI-owned), o
+pegas el JSON en `programs.dank-material-shell.settings` dentro de `dms.nix` para volverlo
+declarativo (el fichero pasa a ser un symlink de solo lectura al store y la GUI deja de
+poder guardar). Uno u otro: quien escribe el fichero, lo controla.
 
 ---
 
@@ -381,8 +355,8 @@ a partir de los sistemas de ficheros montados.
 sudo nixos-rebuild switch --flake ~/nixos-config
 ```
 
-La primera compilación descarga mucho. La caché binaria de Noctalia está declarada en
-`configuration.nix`, así que el shell baja precompilado en vez de compilarse.
+La primera compilación descarga mucho. El shell en sí es un binario Go pequeño más QML, así
+que incluso sin caché binaria compila rápido.
 
 ### 5. Cierra sesión — no es opcional
 
@@ -404,10 +378,9 @@ de gamemode.
 - **Fondos de pantalla.** No están en el repo, [a propósito](#lo-que-no-es-mío). Suelta
   imágenes en `~/Pictures/Wallpapers` — `wallpaper.nix` crea el directorio y
   `wallpaper-rotate` las recoge sin rebuild. Lo mismo para `~/Pictures/Fastfetch`.
-- **El tematizado de apps de Noctalia.** Ejecuta `noctalia msg templates-apply` una vez para
-  que los templates rendericen la paleta en kitty, GTK, Qt y niri. **Fallan en silencio**
-  cuando no pueden escribir: comprueba que cada fichero destino cambió de verdad en vez de
-  fiarte del código de salida.
+- **El tematizado de las apps que matugen no cubre.** GTK, Qt, kitty, vesktop y niri siguen
+  el fondo automáticamente vía matugen de DMS. bat, zellij, btop, lazygit, zathura y yazi
+  mantienen paletas congeladas desde `config/themes/` — ya no cambian con el fondo.
 - **Secretos.** Aquí no hay nada cifrado porque aquí no hay nada secreto. Las claves SSH, el
   túnel WireGuard y el llavero de GNOME están todos fuera de este repo y se restauran a mano.
 
