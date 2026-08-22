@@ -108,7 +108,13 @@ caché con ese `tmTheme`, `bat --list-themes` lista `noctalia`.
 
 ## Pendiente
 
-1. `sudo nixos-rebuild switch` (o `nh os switch`) — solo daf3r.
+1. `sudo nixos-rebuild switch` (o `nh os switch`) — solo daf3r. **La tipografía
+   depende de esto**: hoy IBM Plex está activa por un symlink de prueba en
+   `~/.local/share/fonts/_prueba-ibm-plex`, que hay que borrar después:
+
+   ```
+   nh os switch && rm ~/.local/share/fonts/_prueba-ibm-plex && fc-cache -f
+   ```
 2. **Bloquear la pantalla de verdad** y confirmar que la música para. Es lo
    único del servicio que no se pudo probar sin bloquear la sesión:
 
@@ -135,6 +141,88 @@ caché con ese `tmTheme`, `bat --list-themes` lista `noctalia`.
    `settings.json` de la GUI ahí lo hace declarativo y le quita la propiedad a
    la GUI; dejarlo vacío mantiene el ajuste en vivo y fuera del repo. Es una
    decisión de contenido, no de limpieza, y sigue sin tomarse.
+
+
+## Segunda parte: la estética
+
+Tras el switch, la queja fue que el escritorio había perdido lo que tenía. Se
+midió antes de tocar, y la mayor parte no era cierto: los `transparency_mode`,
+`shadow`, `capsule_opacity` y `blur_intensity` que se borraron con
+`noctalia.nix` **no pintaban nada** — Noctalia solo arrancaba con
+`spawn-at-startup "noctalia"`, ese spawn ya no estaba en `main` y su
+`systemd.enable` era `false`. Llevaba desde el 2026-08-10 instalada sin
+ejecutarse. kitty conservaba `background_blur 1` y `background_opacity 0.96`, y
+el fade del fondo tampoco se perdió: DMS lo hace con `wallpaperTransition`.
+
+Pero faltaban cosas de verdad, y el criterio para recuperarlas fue **traducir la
+configuración de Noctalia**, no inventar una estética nueva:
+
+| Lo que había en `noctalia.nix` | Estaba en DMS | Se puso en |
+|---|---|---|
+| `shadow = true` (barra) | `shadowIntensity = 0` | 14 px |
+| `screen_corners size 16` | `frameEnabled = false` | true |
+| `capsule_padding = 4` | `widgetPadding = 8` | 3 |
+| `radius = 12` | `cornerRadius = 12` | ya coincidía |
+
+`wpblur.kdl` estaba huérfano: DMS lo genera y `config.kdl` no lo incluía, con
+una razón escrita que esta misma rama había invalidado (*"awww draws the
+wallpaper on this machine"*). Es la `layer-rule` sin la cual el fondo
+desenfocado no tiene dónde ponerse, así que el interruptor de Ajustes existía y
+no hacía nada.
+
+### El desbordamiento de la barra
+
+Se veían widgets pintados unos encima de otros. La causa, aislada ampliando la
+captura: el grupo central está anclado al centro geométrico y se dibuja
+**encima** cuando el de la izquierda invade su sitio — el visualizador del media
+aparecía dentro de la píldora de `nixosUpd`.
+
+La aritmética, en píxeles lógicos del eDP: los doce widgets pedían **1801 px** y
+la pantalla tiene **1600**. Por eso ningún reordenamiento servía —mover widgets
+de grupo solo desplaza el choque— y había que encoger 200 px repartidos, sin
+quitar ninguno:
+
+| Ajuste | De → a | Gana |
+|---|---|---|
+| `widgetPadding` | 8 → 3 | ~60 px |
+| `spacing` | 4 → 2 | ~24 px |
+| `fontScale` | 1 → 0.85 | ~110 px |
+| `clockCompactMode` | false → true | ~50 px del centro |
+| `mediaSize` | 2 → 1 | ~60 px del centro |
+
+La palanca no obvia: **encoger el grupo central empuja su borde izquierdo hacia
+la derecha**, porque está centrado. Resultado medido: 173 px de hueco, y el
+título de ventana puede crecer hasta su tope de 288 con 11 px de margen. Coste:
+el reloj perdió la fecha al pasar a compacto.
+
+### Tipografía y movimiento
+
+Las dos palancas que seguían en su valor por defecto:
+
+- `fontFamily` era **Noto Sans**, la que sale cuando nadie elige. Ahora **IBM
+  Plex Sans**, declarada en `fontsAndNeeds.nix`, `gtk.nix` y `qt.nix`.
+- niri corría con `animations { slowdown 1.0 }` y nada más: todas sus
+  animaciones con el mismo muelle críticamente amortiguado. Ahora cada una con
+  el suyo. Verificado que niri **lee** esas claves y no solo las tolera: con
+  `damping-ratio=0` y con una animación inventada, `niri validate` falla.
+
+### Lo que NO se tocó, a propósito
+
+`widgetOutlineEnabled` (bordes de 1 px en cada widget) y subir
+`m3ElevationIntensity`. Son las señales de AI slop de `CLAUDE.md`: ya hay
+separación por transparencia y blur, y un borde encima es el relleno
+estadísticamente probable.
+
+### Trampa encontrada por el camino
+
+**Editar `settings.json` a mano compite con DMS.** `shadowIntensity` y
+`gothCornersEnabled` se perdieron a mitad del trabajo porque el shell reescribió
+el fichero encima. DMS lo recarga en caliente (`watchChanges: true`), pero
+también lo reescribe desde su estado en memoria. La verificación válida es
+`dms ipc call settings dump`, no releer el fichero.
+
+Y el corolario para la decisión pendiente: **hay doce ajustes estéticos que
+viven fuera de git**. Una máquina nueva sale con el escritorio en defaults.
 
 ## Defecto conocido, no arreglado
 
