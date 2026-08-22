@@ -32,6 +32,14 @@
   boot.loader.efi.canTouchEfiVariables = true;
   boot.kernelPackages = pkgs.linuxPackages_xanmod_latest;
 
+  # Claude Desktop's "cowork" agent runs in a local qemu VM that wires its
+  # host<->guest channel over vhost-vsock. Without this module loaded, qemu is
+  # started with `-device vhost-vsock-pci`, fails to open /dev/vhost-vsock with
+  # "No such device", and the whole workspace dies with "qemu exited at startup:
+  # exit status 1". The module isn't autoloaded on this xanmod kernel, so it is
+  # declared here to persist across reboots.
+  boot.kernelModules = [ "vhost_vsock" ];
+
   nix.settings = {
     experimental-features = [ "nix-command" "flakes" ];
   };
