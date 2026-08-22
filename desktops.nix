@@ -199,6 +199,11 @@ in
     # ./pkgs/vm-mode.nix for the measurement this is built on.
     (callPackage ./pkgs/vm-mode.nix { })
 
+    # Grows ~/Pictures/Wallpapers from wallhaven, filtered to colours that sit
+    # with the Ayu palette so what bleeds through kitty's blur stays cold. Run
+    # by hand; see ./pkgs/wallget.nix for why it is not on a timer.
+    (callPackage ./pkgs/wallget.nix { })
+
     # X11 support for the niri session. niri has no built-in XWayland — there is
     # no enable switch on the module to flip — and instead integrates
     # xwayland-satellite, spawning it on demand when the first X11 client
