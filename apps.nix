@@ -1,59 +1,46 @@
-{ config, pkgs, inputs, ... }:
+{ config, pkgs, ... }:
 
 let
-  noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
   screenshots = "${config.home.homeDirectory}/Pictures/Screenshots";
 
   # Capture a region, annotate it, and put the result back on the clipboard.
   #
-  # Noctalia's capture and satty each do half of this and neither can do the
-  # other's half: Noctalia has the region selector and the clipboard handling,
-  # satty has the arrows, boxes and blur. Noctalia's own pipe_to_command would
-  # route *every* screenshot through satty, which is the wrong default when most
-  # captures need no annotation — so this is a separate command on its own key.
+  # DMS's screenshot and satty each do half of this and neither can do the
+  # other's half: DMS has the region selector and the clipboard handling, satty
+  # has the arrows, boxes and blur. `--stdout --no-file` pipes the raw PNG so
+  # nothing lands on disk or clipboard until satty finishes.
   screenshot-annotate = pkgs.writeShellApplication {
     name = "screenshot-annotate";
     runtimeInputs = [
       pkgs.satty
       pkgs.wl-clipboard
       pkgs.coreutils
-      pkgs.findutils
-      noctaliaPkg
+      pkgs.dms-shell # provides the `dms` binary (IPC + screenshot CLI)
     ];
     text = ''
       dir="${screenshots}"
       mkdir -p "$dir"
 
-      # find rather than `ls -t`: writeShellApplication runs shellcheck, and
-      # SC2012 fails the build over parsing ls output.
-      newest() {
-        find "$dir" -maxdepth 1 -type f -name '*.png' -printf '%T@ %p\n' 2>/dev/null \
-          | sort -rn | head -1 | cut -d' ' -f2-
-      }
+      # Capture to a temp file rather than piping straight into satty. The
+      # script runs under errexit+pipefail: if the user presses Esc in the
+      # region selector, dms exits non-zero and a bare pipe would kill the
+      # whole wrapper; and if it exits 0 with no image, satty would open on an
+      # empty stdin. A temp file turns both into a clean, silent bail-out.
+      tmp="$(mktemp --suffix=.png)"
+      trap 'rm -f "$tmp"' EXIT
 
-      # Watch for a *new* file rather than for the clipboard to hold an image:
-      # the clipboard usually already holds the previous screenshot, so waiting
-      # on its type would return instantly with the wrong picture.
-      before="$(newest)"
-
-      noctalia msg screenshot-region >/dev/null 2>&1 || true
-
-      # 30s of headroom — the region selector is interactive, so this is however
-      # long it takes to drag a box. Gives up quietly if the capture is aborted.
-      shot=""
-      for _ in $(seq 1 300); do
-        latest="$(newest)"
-        if [ -n "$latest" ] && [ "$latest" != "$before" ]; then
-          shot="$latest"
-          break
-        fi
-        sleep 0.1
-      done
-      [ -n "$shot" ] || exit 0
+      # --no-clipboard matters as much as --no-file: without it the RAW capture
+      # lands on the clipboard the moment the region is released, so an aborted
+      # annotation leaves the unannotated shot there — the exact thing this
+      # wrapper exists to avoid pasting.
+      dms screenshot region --no-confirm --stdout --no-file --no-clipboard \
+        > "$tmp" || exit 0
+      [ -s "$tmp" ] || exit 0
 
       # Enter copies the annotated image and quits, which is the whole point —
-      # the next thing that happens is a paste into Discord or Brave.
-      satty --filename "$shot" \
+      # the next thing that happens is a paste into Discord or Brave. The raw
+      # capture itself is deliberately not kept: only annotated output is.
+      satty --filename "$tmp" \
         --output-filename "$dir/annotated-%Y%m%d_%H%M%S.png" \
         --copy-command wl-copy \
         --actions-on-enter save-to-clipboard,exit \
@@ -120,11 +107,10 @@ in
   # PDF reader. Keyboard-driven, which suits a tiling session, and it starts
   # instantly where a browser tab does not.
   #
-  # Declared here rather than as a bare package for the same reason as btop in
-  # ./terminal/tools.nix: Noctalia's zathura template writes the palette to
-  # zathura/noctaliarc, but its apply.sh only reloads running instances over
-  # D-Bus — it never adds the include. Without the line below the colours are
-  # generated and never read.
+  # The palette is the frozen Noctalia-era file deployed via xdg.configFile in
+  # ./terminal/tools.nix (matugen has no zathura template). Without the include
+  # below the colours are present and never read — the same trap as every other
+  # theme file that is generated but not selected.
   programs.zathura = {
     enable = true;
     extraConfig = ''
@@ -226,11 +212,12 @@ in
 
     # Two Discord clients on purpose, because they are not interchangeable here.
     #
-    # vesktop is the one Noctalia can theme: its `discord` community template
-    # writes CSS into ~/.config/vesktop/themes/ (and webcord/legcord), and the
-    # official client has no equivalent — it would need BetterDiscord or Vencord
-    # injected before it could load a stylesheet at all. vesktop also tends to
-    # behave better under Wayland, screenshare included, since Vencord is built in.
+    # vesktop is the one that can be themed: matugen's vesktop template
+    # (matugenTemplateVesktop = true) writes CSS into ~/.config/vesktop/themes/
+    # on every wallpaper change, and the official client has no equivalent — it
+    # would need BetterDiscord or Vencord injected before it could load a
+    # stylesheet at all. vesktop also tends to behave better under Wayland,
+    # screenshare included, since Vencord is built in.
     #
     # discord is the official build, added on request. It works, it just stays
     # the one window on the desktop that ignores the palette.
@@ -258,9 +245,8 @@ in
       commandLineArgs = "--use-gl=angle --use-angle=gl --password-store=gnome-libsecret";
     })
 
-    # Telegram. Has a Noctalia community template, so it picks up the palette
-    # like vesktop does — pick "noctalia" under Settings > Chat Settings >
-    # Theme once it is installed.
+    # Telegram. No automatic theming (matugen has no template for it); it stays
+    # on its own dark theme.
     telegram-desktop
 
     # Office suite. Chosen over LibreOffice because OOXML is what it edits
@@ -313,13 +299,13 @@ in
 
     # --- Wayland desktop utilities ---
 
-    # wl-copy / wl-paste. Noctalia has its own clipboard for the GUI, but
-    # nothing could reach the clipboard from a script or a pipe without this.
+    # wl-copy / wl-paste. DMS has a clipboard GUI, but nothing could reach the
+    # clipboard from a script or a pipe without this.
     wl-clipboard
 
     # Annotate a screenshot before sending it — arrows, boxes, blur over
-    # anything private. Noctalia's capture already lands on the clipboard, and
-    # this is the step between that and pasting it into Discord.
+    # anything private. DMS's capture lands on the clipboard, and this is the
+    # step between that and pasting it into Discord.
     satty
     screenshot-annotate # the two wired together; bound to SUPER+Print
 
@@ -536,8 +522,8 @@ in
   # measurement looks like a dead end.)
   #
   # <All/> is deliberate — the menu exists only to hand kbuildsycoca6 the full
-  # set of applications, not to build a categorised launcher (Noctalia's
-  # launcher reads the .desktop files itself and never needed this). The name
+  # set of applications, not to build a categorised launcher (DMS's launcher
+  # reads the .desktop files itself and never needed this). The name
   # must match $XDG_MENU_PREFIX + "applications.menu"; the prefix is unset
   # under niri, so plain `applications.menu` is what gets looked up.
   #

@@ -120,7 +120,7 @@ layout {
 
     focus-ring {
         width 2
-        // Colours are overridden by noctalia.kdl at the bottom of this file.
+        // Colours are overridden by dms/colors.kdl at the bottom of this file.
         active-color "#39bae6"
         inactive-color "#1e222a"
     }
@@ -151,11 +151,11 @@ layout {
 // to graphical-session.target, which restarts it if it dies. Adding a
 // spawn-at-startup line as well would launch two shells.
 
-// awww (called swww until nixpkgs 26.11 renamed it) draws the wallpaper because
-// Noctalia v5.0.0 mis-sizes its own wallpaper
-// surface at fractional scales, and eDP-1 runs at 1.6. See ../../wallpaper.nix
-// for the full write-up.
-spawn-at-startup "awww-daemon"
+// awww (called swww until nixpkgs 26.11 renamed it) used to draw the wallpaper
+// because Noctalia v5.0.0 mis-sized its own wallpaper surface at fractional
+// scales. DMS paints its own correctly at 1.6, so the daemon is gone; only the
+// rotator stays, handing random images to `dms ipc call wallpaper set` — which
+// repaints AND regenerates every matugen palette. See ../../wallpaper.nix.
 spawn-at-startup "wallpaper-rotate" "--watch"
 
 // XWayland is NOT spawned here on purpose. niri 25.11 integrates
@@ -187,8 +187,8 @@ environment {
 
 prefer-no-csd
 
-// Matches shell.screenshot.directory in ../../noctalia.nix. niri has its own
-// screenshot UI bound below; Noctalia's IPC verbs also still work.
+// Matches DMS's screenshot --dir default below. niri has its own
+// screenshot action; the binds use `dms screenshot` instead.
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
 hotkey-overlay {
@@ -378,8 +378,8 @@ binds {
     Mod+B      { spawn "brave-origin" "--new-window"; }
 
     // The official client, not vesktop — it is the one in daily use. Note that
-    // only vesktop takes Noctalia's palette (see the discord template note in
-    // ../../noctalia.nix), so this is the window that stays its own colour.
+    // only vesktop takes the matugen palette (see the discord template note in
+    // ../../apps.nix), so this is the window that stays its own colour.
     //
     // Two separate things are going on here, and both are why this is not a
     // plain `spawn "discord"`.
@@ -480,11 +480,11 @@ binds {
     XF86KbdBrightnessUp   allow-when-locked=true { spawn "dms" "ipc" "brightness" "increment" "5" "leds:asus::kbd_backlight"; }
     XF86KbdBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "brightness" "decrement" "5" "leds:asus::kbd_backlight"; }
 
-    // Noctalia has no media-control IPC verb, so these use playerctl.
-    XF86AudioPlay  allow-when-locked=true { spawn "playerctl" "play-pause"; }
-    XF86AudioPause allow-when-locked=true { spawn "playerctl" "play-pause"; }
-    XF86AudioNext  allow-when-locked=true { spawn "playerctl" "next"; }
-    XF86AudioPrev  allow-when-locked=true { spawn "playerctl" "previous"; }
+    // Media keys go through DMS's MPRIS widget.
+    XF86AudioPlay  allow-when-locked=true { spawn "dms" "ipc" "mpris" "playPause"; }
+    XF86AudioPause allow-when-locked=true { spawn "dms" "ipc" "mpris" "playPause"; }
+    XF86AudioNext  allow-when-locked=true { spawn "dms" "ipc" "mpris" "next"; }
+    XF86AudioPrev  allow-when-locked=true { spawn "dms" "ipc" "mpris" "previous"; }
 
     // --- Screenshots ---
     //
@@ -578,7 +578,7 @@ binds {
 
 // DMS regenerates dms/colors.kdl from the active palette and it overrides the
 // focus-ring colours set above — which is why these includes have to be last.
-// This replaces Noctalia's noctalia.kdl, which worked the same way.
+// This replaces the old noctalia.kdl, which worked the same way.
 //
 // The whole dms/ directory is written by the shell itself, is gitignored, and
 // every file in it carries a DO-NOT-EDIT banner. DMS creates it on first run,
@@ -587,7 +587,7 @@ binds {
 //
 // Only two of the eight files it generates are included on purpose:
 //
-//   colors.kdl   the palette — the direct replacement for noctalia.kdl
+//   colors.kdl   the palette — the direct replacement for the old shell's
 //   alttab.kdl   styling for niri's recent-windows switcher
 //
 // layout.kdl is deliberately left out: it sets gaps, border widths and corner

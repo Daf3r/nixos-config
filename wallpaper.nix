@@ -1,75 +1,33 @@
-{ config, pkgs, inputs, ... }:
+{ config, pkgs, ... }:
 
-# Wallpaper rendering, deliberately taken away from Noctalia.
+# Wallpaper rotation, now driven by DMS.
 #
-# Noctalia v5.0.0 sizes its wallpaper surface as `physical_resolution /
-# ceil(scale)` — it divides by the integer Wayland buffer scale instead of the
-# real fractional scale. On eDP-1 (2560x1440 @ scale 1.6) that draws the image
-# at 1280x720 logical px inside a 1600x900 logical surface, anchored to the
-# bottom-left: the image covers 80% of the panel and the rest stays black.
-# The maths only works out at integer scales:
+# History: this module exists because Noctalia v5.0.0 drew its wallpaper
+# surface at the wrong size on fractionally-scaled outputs (2560x1440 @ 1.6 got
+# an 80%-covered panel), so drawing was moved out to awww and Noctalia was only
+# told about the change so it could re-derive the palette. Under DMS that
+# bridge is gone in both directions:
 #
-#   scale 1.0  -> 2560x1440 logical, draws 2560x1440  (correct)
-#   scale 1.25 -> 2048x1152 logical, draws 1280x720   (62%)
-#   scale 1.6  -> 1600x900  logical, draws 1280x720   (80%)
-#   scale 2.0  -> 1280x720  logical, draws 1280x720   (correct)
+#   - DMS paints its own wallpaper surface (correct at scale 1.6), so awww is
+#     no longer involved at all.
+#   - DMS's IPC owns the wallpaper state: `dms ipc call wallpaper set <path>`
+#     records it, repaints it AND regenerates every matugen palette (GTK, Qt,
+#     kitty, niri colours...), which under Noctalia needed the separate
+#     wallpaper_changed hook.
 #
-# Ruled out: restarting the shell, QT_SCALE_FACTOR_ROUNDING_POLICY=PassThrough,
-# accessibility.ui_scale, and patching the QML (v5 ships a compiled binary).
-# Scale 1 makes everything too small on a 17" 1440p panel and scale 2 makes it
-# too large, so the fractional 1.6 stays and only the wallpaper module goes.
-#
-# Everything else Noctalia draws (bar, panels, lockscreen) is correct at 1.6 —
-# this is specific to the wallpaper surface.
+# So all that remains of the old machinery is the rotator: pick a random image
+# from ~/Pictures/Wallpapers and hand it to DMS. The same 900s interval, same
+# random order, same single source of truth for what is on screen.
 let
   wallpapers = "${config.home.homeDirectory}/Pictures/Wallpapers";
-  noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
-  # The other half of the bridge: what actually paints the image.
-  #
-  # Bound to Noctalia's `wallpaper_changed` hook in ./noctalia.nix, so it runs
-  # whenever the recorded wallpaper changes — from the Settings picker, from
-  # `noctalia msg wallpaper-set`, from anywhere. Noctalia hands it two
-  # variables:
-  #
-  #   NOCTALIA_WALLPAPER_PATH       the image
-  #   NOCTALIA_WALLPAPER_CONNECTOR  the output, empty when not output-specific;
-  #                                 the hook fires once per changed connector
-  #
-  # This is what was missing. Picking a wallpaper in Noctalia updated its record
-  # and re-derived the palette — so the colours changed — while the image on
-  # screen stayed put, because Noctalia's own drawing module is disabled and
-  # nothing told awww.
-  wallpaper-apply = pkgs.writeShellApplication {
-    name = "wallpaper-apply";
-    runtimeInputs = [ pkgs.awww pkgs.coreutils ];
-    text = ''
-      img="''${NOCTALIA_WALLPAPER_PATH:-''${1:-}}"
-      [ -n "$img" ] || exit 0
-      [ -e "$img" ] || exit 0
-
-      # awww img fails until the daemon is accepting connections. Matters at
-      # login, where the hook can fire before awww-daemon is up.
-      for _ in $(seq 1 50); do
-        awww query >/dev/null 2>&1 && break
-        sleep 0.2
-      done
-
-      connector="''${NOCTALIA_WALLPAPER_CONNECTOR:-}"
-      if [ -n "$connector" ]; then
-        awww img --outputs "$connector" "$img" \
-          --transition-type fade --transition-duration 1.5
-      else
-        awww img "$img" --transition-type fade --transition-duration 1.5
-      fi
-    '';
-  };
-
-  # Replaces Noctalia's [wallpaper.automation]: same 900s interval, same random
-  # order, same 1.5s fade.
   wallpaper-rotate = pkgs.writeShellApplication {
     name = "wallpaper-rotate";
-    runtimeInputs = [ pkgs.coreutils pkgs.findutils noctaliaPkg ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.dms-shell # provides the `dms` binary (IPC + screenshot CLI)
+    ];
     text = ''
       dir="${wallpapers}"
       interval=900
@@ -85,11 +43,11 @@ let
         img="$(pick)"
         [ -n "$img" ] || return 0
 
-        # Deliberately does NOT call awww here. Telling Noctalia is enough: it
-        # records the path, re-derives the palette, and fires wallpaper_changed,
-        # which runs wallpaper-apply above. Calling awww directly as well would
-        # paint the same image twice and show two fades.
-        noctalia msg wallpaper-set "$img" >/dev/null 2>&1 || true
+        # Telling DMS is enough: it records the path, repaints and re-derives
+        # every palette via matugen. Fails silently when the shell is not up
+        # (e.g. running this from a bare TTY), which is fine — the next tick
+        # tries again.
+        dms ipc call wallpaper set "$img" >/dev/null 2>&1 || true
       }
 
       apply
@@ -103,7 +61,7 @@ let
   };
 in
 {
-  home.packages = [ pkgs.awww wallpaper-rotate wallpaper-apply ];
+  home.packages = [ wallpaper-rotate ];
 
   # Creates ~/Pictures/Wallpapers, which is NOT in this repo — the images there
   # are other people's work and this repo is public.
