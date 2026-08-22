@@ -25,7 +25,13 @@
     # DMS's own fontFamily is set separately in its GUI settings — see ./dms.nix
     # for why that file is not declared here. Keep the three in step:
     # DMS fontFamily, gtk.font in ./gtk.nix, and Fonts.general in ./qt.nix.
-    ibm-plex
+    #
+    # `.sans`, NOT the bare `ibm-plex`. That attribute is the meta-package for
+    # all seventeen families and costs 336 MiB — 297 of which are the CJK
+    # variants (chinese-sc alone is 118 MiB), and CJK already arrives through
+    # noto-fonts-cjk-sans below. The subattribute is 5 MiB and is the only one
+    # anything here selects.
+    ibm-plex.sans
 
     # Kept as the fallback and for the scripts Plex does not cover — CJK arrives
     # through noto-fonts-cjk-sans below, and emoji through the colour build.
