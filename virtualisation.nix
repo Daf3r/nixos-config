@@ -34,4 +34,34 @@
   # does not stop VMware from working — it makes the host freeze in bursts
   # while a guest is under memory pressure.
   boot.kernelParams = [ "transparent_hugepage=never" ];
+
+  # The FunSociety lab needs the host to sit at .2 on both host-only networks,
+  # not at .1. VMware always hands the first address of the subnet to its own
+  # host adapter, and .1 is already taken by the FortiGate: port2 is
+  # 192.168.2.1 on the LAN and port3 is 172.16.1.1 on the DMZ. That duplicate
+  # address has broken this lab once before — the domain controller and the
+  # Wazuh agent both lost connectivity until the host was moved off .1 — and
+  # the network editor gives no way to choose the host address, so it has to be
+  # reassigned after the fact. vmware-networks reapplies .1 every time it
+  # starts, hence PartOf: this unit is torn down and re-run with it rather than
+  # being a one-shot that silently goes stale on the next restart.
+  systemd.services.vmware-funsociety-net = {
+    description = "Move the VMware host adapters off the FortiGate gateway addresses";
+    after = [ "vmware-networks.service" ];
+    requires = [ "vmware-networks.service" ];
+    partOf = [ "vmware-networks.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    # Written to be idempotent: the delete is allowed to fail so a re-run on an
+    # already-corrected interface is a no-op rather than an error.
+    script = ''
+      ${pkgs.iproute2}/bin/ip addr del 192.168.2.1/24 dev vmnet1 || true
+      ${pkgs.iproute2}/bin/ip addr replace 192.168.2.2/24 dev vmnet1
+      ${pkgs.iproute2}/bin/ip addr del 172.16.1.1/24 dev vmnet2 || true
+      ${pkgs.iproute2}/bin/ip addr replace 172.16.1.2/24 dev vmnet2
+    '';
+  };
 }
