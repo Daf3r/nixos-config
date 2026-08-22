@@ -138,8 +138,8 @@ layout {
     }
 
     struts {
-        // Noctalia's bar is a layer-surface with reserve_space, so niri already
-        // accounts for it. Left at zero deliberately.
+        // DMS's bar is a layer-surface that reserves its own space, so niri
+        // already accounts for it. Left at zero deliberately.
     }
 }
 
@@ -585,16 +585,25 @@ binds {
 // so nothing has to be deployed by hand; `dms setup colors` recreates a missing
 // one.
 //
-// Only two of the eight files it generates are included on purpose:
+// Only three of the eight files it generates are included on purpose:
 //
 //   colors.kdl   the palette — the direct replacement for the old shell's
 //   alttab.kdl   styling for niri's recent-windows switcher
+//   wpblur.kdl   puts DMS's blurred-wallpaper layer *behind* the windows
 //
-// layout.kdl is deliberately left out: it sets gaps, border widths and corner
-// radii that this file already defines, and DMS's defaults are not the ones
-// tuned here. wpblur.kdl is left out too — it only matters for DMS's own
-// wallpaper surface, and awww draws the wallpaper on this machine (see
-// ../../wallpaper.nix). binds.kdl, cursor.kdl, outputs.kdl and windowrules.kdl
+// wpblur.kdl was excluded until 2026-08-21, and the reason it gave had expired:
+// "awww draws the wallpaper on this machine". It does not any more — DMS paints
+// its own since Noctalia was removed, so the file matters now. It is one
+// layer-rule, `place-within-backdrop true` on `dms:blurwallpaper`: without it
+// the blurred layer has nowhere to sit and turning the effect on in Settings
+// does nothing. Pair it with `blurredWallpaperLayer` (and
+// `blurWallpaperOnOverview` for Mod+O) in DMS's own settings.
+//
+// layout.kdl stays out, and that reason has NOT expired: it sets gaps, border
+// widths and corner radii that this file already defines — geometry-corner-
+// radius 12, the shadow block and clip-to-geometry are all above — and DMS's
+// defaults are not the ones tuned here.
+// binds.kdl, cursor.kdl, outputs.kdl and windowrules.kdl
 // are generated empty unless configured in the GUI; outputs.kdl staying empty
 // is what keeps DMS away from the monitor setup above.
 // !! DMS EDITS THIS FILE BY ITSELF. CHECK `git status` AFTER TOUCHING ITS GUI. !!
@@ -620,3 +629,4 @@ binds {
 // reboot made it real.
 include "dms/colors.kdl"
 include "dms/alttab.kdl"
+include "dms/wpblur.kdl"
