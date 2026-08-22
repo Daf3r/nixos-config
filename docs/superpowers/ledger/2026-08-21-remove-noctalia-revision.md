@@ -1,6 +1,8 @@
 # Extirpar Noctalia — revisión y arreglos
 
-Rama: `dms-only-remove-noctalia`, desde `95bb6f9` en `main`. **Sin integrar.**
+Rama: `dms-only-remove-noctalia`, desde `95bb6f9` en `main`.
+**Integrada en `main` el 2026-08-21** (fast-forward hasta `456404b`, publicada).
+A partir de aquí los cambios van poco a poco, directamente sobre `main`.
 
 La extirpación de Noctalia la escribió otra IA (Codex) en el árbol de trabajo,
 sin commitear. Esta sesión la revisó contra el sistema, arregló tres defectos
@@ -108,13 +110,9 @@ caché con ese `tmTheme`, `bat --list-themes` lista `noctalia`.
 
 ## Pendiente
 
-1. `sudo nixos-rebuild switch` (o `nh os switch`) — solo daf3r. **La tipografía
-   depende de esto**: hoy IBM Plex está activa por un symlink de prueba en
-   `~/.local/share/fonts/_prueba-ibm-plex`, que hay que borrar después:
-
-   ```
-   nh os switch && rm ~/.local/share/fonts/_prueba-ibm-plex && fc-cache -f
-   ```
+1. ~~Switch~~ **hecho el 2026-08-21**, y el symlink de prueba de la fuente ya
+   está borrado. Queda un `nh os switch` pendiente para lo posterior al
+   switch: `ibm-plex.sans` (-330 MiB) y el blur de kitty (0.85 / radio 24).
 2. **Bloquear la pantalla de verdad** y confirmar que la música para. Es lo
    único del servicio que no se pudo probar sin bloquear la sesión:
 
