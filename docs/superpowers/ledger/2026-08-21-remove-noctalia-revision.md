@@ -224,6 +224,31 @@ también lo reescribe desde su estado en memoria. La verificación válida es
 Y el corolario para la decisión pendiente: **hay doce ajustes estéticos que
 viven fuera de git**. Una máquina nueva sale con el escritorio en defaults.
 
+### Transparencia: qué se puede y qué no, verificado
+
+niri **26.04 no tiene blur**. Comprobado, no supuesto: `window-rule { blur }` y
+`layer-rule { blur }` son `unexpected node`; lo que sí acepta es `opacity` (en
+window-rule y en layer-rule) y `shadow`. El recuerdo de "menús transparentes
+que se veían mejor" es de Hyprland, que tenía `decoration:blur` y se eliminó el
+2026-08-07.
+
+La consecuencia práctica: **transparencia sin blur se ve peor, no mejor**. Un
+menú de Dolphin o de Brave al 90 % deja ver el escritorio crudo detrás, texto
+incluido, en vez de cristal esmerilado. Lo único que se ve bien translúcido es
+lo que DMS dibuja, porque aplica su propio blur (`blurEnabled`,
+`blurForegroundLayers`). Por eso `popupTransparency` bajó de 0.82 a **0.70** y
+ahí se quedó: bajarlo más es defendible, pero el launcher no entra en
+`dms screenshot` —es una capa overlay— así que nadie pudo mirarlo, y elegir un
+valor de transparencia sin verlo es justo lo que no se hace aquí.
+
+### Trampa: `settings set` no aplica los coerce del spec
+
+`SettingsSpec.js` declara `popupTransparency: { def: 1.0, coerce: percentToUnit }`,
+y la GUI manda porcentajes. El IPC **no** pasa por ese coerce: su handler hace
+`value = Number(value)` y asigna directo. Pasar `70` guarda literalmente 70 —
+fuera del rango 0-1 — sin error y sin aviso. Para cualquier clave con
+`percentToUnit` hay que dar unidades: `0.7`, no `70`.
+
 ## Defecto conocido, no arreglado
 
 `wallpaper-rotate` llama a `apply` al arrancar y, si DMS todavía no responde,
