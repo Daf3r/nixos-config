@@ -10,22 +10,15 @@
 # ../config/fastfetch/config.jsonc, adapted from
 # github.com/israrkhan-cys/Arch-_hyprland_rice. Changes from the original:
 #
-#   * The original is JSONC — `//` comments and trailing commas — which parses
-#     fine for fastfetch but NOT for Noctalia's template, whose apply.sh merges
-#     colours with jq and rejects anything that is not strict JSON. Rewritten
-#     without either.
 #   * The decorative dot rows were raw ANSI escapes in a custom module. They are
 #     fastfetch's own `colors` module with symbol "circle" here, which produces
 #     the same row from the terminal palette without embedding control
 #     characters in a JSON file.
-#   * Per-module `keyColor` is dropped so Noctalia's fastfetch template drives
-#     the colours from the active palette instead of a hardcoded ANSI number.
 #   * `packages` loses the "(pacman)" suffix, for obvious reasons.
 #
-# config.jsonc is left MUTABLE rather than managed as a store symlink, because
-# Noctalia's apply.sh rewrites it in place on every palette change. It is seeded
+# config.jsonc is MUTABLE rather than managed as a store symlink: it is seeded
 # from the repo copy only when absent, so a fresh machine gets the layout and an
-# existing one keeps its merged colours. To pick up an edit to the repo copy,
+# existing one keeps any live edits. To pick up an edit to the repo copy,
 # delete ~/.config/fastfetch/config.jsonc and rebuild.
 #
 # --- The image ---
@@ -39,14 +32,6 @@
 # work and this repo is public. Nothing creates it — fastfetch-random already
 # falls through to the config's own logo when the folder is missing, which is
 # the whole reason for the `2>/dev/null ... || true` below.
-#
-# --- Why jq is a dependency ---
-#
-# Noctalia's fastfetch template needs it and never declares it. Its first call
-# is `if ! jq empty "$config_file"` with stderr discarded, so a missing jq
-# surfaces as "could not be parsed as strict JSON" about a file that parses
-# fine. It also refuses to create config.jsonc itself, which is the other half
-# of why the seeding below exists.
 let
   fastfetchImages = "${config.home.homeDirectory}/Pictures/Fastfetch";
 
@@ -79,7 +64,6 @@ let
 in
 {
   home.packages = [
-    pkgs.jq
     fastfetch-random
   ];
 

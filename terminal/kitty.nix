@@ -5,19 +5,19 @@
 # styling. `programs.kitty` installs the same binary *and* manages kitty.conf,
 # so the package entry moved here.
 #
-# Division of labour with Noctalia: its `kitty` template writes *colours only*
-# (the 16 ANSI slots, cursor, background/foreground, selection, tab and border
-# colours) into ~/.config/kitty/themes/noctalia.conf. Everything else — font,
-# spacing, opacity, cursor shape, tab bar style — is set here. Noctalia cannot
-# do it, so a themed-but-otherwise-default kitty still looks like nothing.
+# Division of labour with DMS (see ../dms.nix): matugen's kitty template
+# (matugenTemplateKitty = true in its settings) writes *colours only* (the 16
+# ANSI slots, cursor, background/foreground, selection, border colours) to
+# ~/.config/kitty/dank-theme.conf on every wallpaper change. Tab-bar colours go
+# to dank-tabs.conf instead, which is deliberately NOT included: it also sets
+# tab_bar_edge/style/min_tabs, and kitty takes the last occurrence — the values
+# in `settings` below would be dead. Font, spacing, opacity, cursor shape and
+# the rest of the layout stay here; the palette include sits last so colours
+# win over anything set above.
 #
-# The `include themes/noctalia.conf` at the bottom is load-bearing. Noctalia's
-# templates/kitty/apply.sh wants to append that exact line to kitty.conf via
-# `cat tmp > kitty.conf`, which would fail here because home-manager makes
-# kitty.conf a read-only symlink into the store. Because the line is already
-# present its awk pass finds `include_seen`, produces identical output, and the
-# guarding `cmp -s` skips the write entirely. The two never collide as long as
-# this string stays byte-for-byte identical to apply.sh's `include_line`.
+# The `include dank-theme.conf` at the bottom is what connects the two: the
+# file lives next to kitty.conf in ~/.config/kitty/, regenerated in place by
+# DMS. It sits last so the palette wins over anything set in `settings`.
 {
   programs.kitty = {
     enable = true;
@@ -94,10 +94,10 @@
       # fish the integration twice.
     };
 
-    # Must stay exactly this string — see the apply.sh note in the header above.
-    # It sits last so Noctalia's palette wins over anything set in `settings`.
+    # Matugen's palette, regenerated on every wallpaper change. Sits last so
+    # it wins over anything set in `settings`.
     extraConfig = ''
-      include themes/noctalia.conf
+      include dank-theme.conf
     '';
   };
 }
