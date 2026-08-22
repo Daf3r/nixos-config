@@ -64,4 +64,38 @@
       ${pkgs.iproute2}/bin/ip addr replace 172.16.1.2/24 dev vmnet2
     '';
   };
+
+  # The lab guests have no working time source of their own. The FunSociety
+  # project measures MTTD as the distance between a Windows event and the Wazuh
+  # alert it produced, so a skewed guest clock does not degrade the metric, it
+  # inverts it: measured on 2026-08-22 the domain controller and the client were
+  # both an hour ahead in UTC and every MTTD came out at roughly minus one hour.
+  # They cannot reach an internet NTP server either — w32time times out with
+  # 0x800705B4 because UDP 123 does not make it out through the FortiGate — so
+  # the host serves the time itself, directly over the host-only networks and
+  # without the firewall in the path. timesyncd cannot do this: it is a client
+  # only, which is why chrony replaces it here.
+  services.chrony = {
+    enable = true;
+    extraConfig = ''
+      allow 192.168.2.0/24
+      allow 172.16.1.0/24
+
+      # Keep serving time when the laptop is offline. Without this chrony
+      # declares itself unsynchronised the moment it loses its upstream peers,
+      # the guests reject its answers, and the clocks drift apart again — which
+      # would happen precisely in a lecture hall with no usable wifi, in the
+      # middle of the demo. The high stratum keeps a real upstream winning
+      # whenever one is reachable.
+      local stratum 10
+    '';
+  };
+
+  # chrony only listens where it is allowed to. These are the two host-only
+  # networks the lab lives on: vmnet1 is the LAN with the domain controller and
+  # the Windows client, vmnet2 the DMZ with the Wazuh manager. Without these the
+  # daemon runs, answers nothing, and the guests fail to sync with no error on
+  # the host side to explain it.
+  networking.firewall.interfaces."vmnet1".allowedUDPPorts = [ 123 ];
+  networking.firewall.interfaces."vmnet2".allowedUDPPorts = [ 123 ];
 }
