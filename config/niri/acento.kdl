@@ -1,0 +1,25 @@
+// Acento del compositor.
+//
+// Este fichero existe para ganarle a dms/colors.kdl, y va DESPUÉS de él en
+// config.kdl por eso mismo: en niri la última ocurrencia de un nodo manda, y
+// los includes son la única forma de repetir `layout` — dos bloques `layout`
+// en el mismo fichero son un error de parseo.
+//
+// Qué arregla. El escritorio y el terminal hablaban idiomas distintos: todo lo
+// de config/themes/ (bat, btop, zellij, zathura, starship, yazi) va en la
+// paleta Ayu, con su cian, su ámbar y su verde, mientras niri pintaba el foco
+// en #ffffff y #919191. Eso no era un descuido de DMS: matugenScheme está en
+// scheme-monochrome a propósito — deriva la luminancia del fondo y suelta el
+// tono, que es lo que evita que el escritorio se tiña de rojo con un wallpaper
+// rojo y cambie otra vez a los quince minutos.
+//
+// Así que el acento se fija a mano, con el cian que este repo ya usaba antes
+// de DMS. No lo deriva nadie del wallpaper, luego no rota, y el escritorio
+// queda del mismo color que el prompt.
+layout {
+    focus-ring {
+        width 2
+        active-color "#39bae6"
+        inactive-color "#1f2430"
+    }
+}

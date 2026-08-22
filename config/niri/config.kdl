@@ -691,3 +691,6 @@ binds {
 include "dms/colors.kdl"
 include "dms/alttab.kdl"
 include "dms/wpblur.kdl"
+
+// El acento va el ÚLTIMO: le gana a colors.kdl. Ver ./acento.kdl.
+include "acento.kdl"
