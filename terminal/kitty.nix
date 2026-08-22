@@ -44,12 +44,23 @@
       # provides the compositor side, so this keeps the effect local to kitty
       # instead of making every translucent window blurry.
       #
-      # 0.96 rather than 0.92: enough transparency to keep the depth, little
-      # enough that a bright wallpaper cannot lift the background off #131313
-      # and wash out the text. The whole point of the monochrome palette is a
-      # terminal that stays dark whatever is behind it.
-      background_opacity = "0.96";
-      background_blur = 1;
+      # WATCH OUT: background_blur is a RADIUS IN PIXELS, not an on/off flag.
+      # It sat at 1 for months, written as if 1 meant "enabled", which produced
+      # a one-pixel blur — indistinguishable from none. Paired with an opacity
+      # of 0.96 it was invisible twice over: a 4% window onto the desktop is
+      # not enough to show anything, blurred or not.
+      #
+      # Both numbers had to move together, and 0.85 is the compromise with the
+      # original concern, which still stands: too much transparency and a bright
+      # wallpaper lifts the background off #131313 and washes out the text. At
+      # 0.85 with a 24px radius what shows through is a soft wash of colour
+      # rather than a readable picture, so the terminal stays dark and the text
+      # keeps its contrast.
+      #
+      # To retune without a rebuild, launch a throwaway window and look:
+      #   kitty -o background_opacity=0.75 -o background_blur=32
+      background_opacity = "0.85";
+      background_blur = 24;
       dynamic_background_opacity = true; # lets kitty adjust opacity at runtime
 
       # --- Cursor ---
