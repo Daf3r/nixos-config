@@ -193,6 +193,12 @@ in
     # the key looks dead. See ./pkgs/autoclick.nix.
     (callPackage ./pkgs/autoclick.nix { })
 
+    # Backs Mod+Shift+V: drops the laptop panel to scale 1 so VMware Workstation,
+    # which is X11 and therefore sees physical pixels through xwayland-satellite,
+    # stops resizing itself and the guest against a 1.6x-wrong target. See
+    # ./pkgs/vm-mode.nix for the measurement this is built on.
+    (callPackage ./pkgs/vm-mode.nix { })
+
     # X11 support for the niri session. niri has no built-in XWayland — there is
     # no enable switch on the module to flip — and instead integrates
     # xwayland-satellite, spawning it on demand when the first X11 client

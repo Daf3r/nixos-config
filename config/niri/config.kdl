@@ -422,6 +422,14 @@ binds {
     // without you knowing. See ../../pkgs/autoclick.nix.
     Mod+X      { spawn "autoclick"; }
 
+    // Modo VM: baja el panel del portátil a escala 1 mientras trabajas dentro
+    // de una máquina virtual, y lo devuelve a 1.6 al segundo toque. Existe
+    // porque VMware Workstation es X11 y xwayland-satellite le entrega píxeles
+    // físicos, así que con el panel a 1.6 la ventana y la resolución del
+    // invitado persiguen un tamaño 1,6 veces mayor que el hueco real de
+    // pantalla. Ambos toques notifican. Ver ../../pkgs/vm-mode.nix.
+    Mod+Shift+V { spawn "vm-mode"; }
+
     // Brave on both W and B. W is the one asked for; B predates it and costs
     // nothing to keep — and having the second key is what makes the split
     // below possible.
