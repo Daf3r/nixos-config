@@ -19,9 +19,10 @@
 #
 # The external monitor has to move as well. config/niri/config.kdl parks it at
 # x=1600 because that is where the panel's *logical* width ends — at scale 1 the
-# panel becomes 2560 wide and the two outputs would overlap by 960px. y=360
-# keeps them bottom-aligned the way y=180 does at scale 1.6, so the pointer
-# still crosses between the screens where their edges line up.
+# panel becomes 2560 wide and the two outputs would overlap by 960px. The new
+# position is derived from the panel's own mode and the external output's own
+# logical size, so it comes out right for a display this script has never seen:
+# see the comment on the move itself for why that stopped being a detail.
 #
 # Restoring reads back a state file written on the way in, rather than either
 # hardcoding 1.6 or asking niri to reload its config. The reload was the first
@@ -39,14 +40,22 @@ writeShellApplication {
   text = ''
     statefile="''${XDG_RUNTIME_DIR:-/tmp}/vm-mode.state"
 
-    # Outputs are looked up by model and not by connector name: this laptop has
+    # The panel is looked up by model and not by connector name: this laptop has
     # already renamed its internal panel between boots (eDP-1 became eDP-2), and
     # a script keyed on the connector would quietly do nothing after that.
+    #
+    # The external output, in contrast, is whatever is attached that is not the
+    # panel. It used to be matched on the MSI's model string, which meant that
+    # plugging anything else into the same HDMI port — a projector in a lecture
+    # room, a TV — left `external` empty: the panel still went to scale 1 and
+    # doubled its logical width to 2560, but the other screen was never moved
+    # out of the way and the two overlapped. Matching by "not the panel" is what
+    # makes this work with a display that was never seen before.
     outputs=$(niri msg --json outputs)
     panel=$(echo "$outputs" | jq -r '
       to_entries[] | select(.value.model == "MNH301CA3-1") | .key' | head -1)
-    external=$(echo "$outputs" | jq -r '
-      to_entries[] | select(.value.model == "MSI MP243X") | .key' | head -1)
+    external=$(echo "$outputs" | jq -r --arg p "$panel" '
+      to_entries[] | select(.key != $p) | .key' | head -1)
 
     if [ -z "$panel" ]; then
       notify-send -u critical -a vm-mode "vm-mode" \
@@ -108,8 +117,21 @@ writeShellApplication {
 
     # The external monitor is optional: undocked, there is nothing to move and
     # the panel alone is already consistent.
+    #
+    # Both coordinates are computed rather than written down. x is the panel's
+    # *physical* width, which is the logical width it takes once scale is 1, so
+    # the external output starts exactly where the panel stops and the two never
+    # overlap. y bottom-aligns them, the way config.kdl's y=180 does at scale
+    # 1.6. The old values were the literals 2560 and 360, which are the right
+    # answer only for this panel and a 1080-tall monitor — a projector running
+    # 1280x800 would have been left floating 280px above the panel's bottom
+    # edge, with the pointer jumping as it crossed between screens.
     if [ -n "$external" ]; then
-      niri msg output "$external" position set 2560 360
+      ext_x=$(echo "$outputs" | jq -r --arg p "$panel" '
+        .[$p] | .modes[.current_mode].width')
+      ext_y=$(echo "$outputs" | jq -r --arg p "$panel" --arg e "$external" '
+        (.[$p] | .modes[.current_mode].height) - .[$e].logical.height')
+      niri msg output "$external" position set "$ext_x" "$ext_y"
     fi
 
     notify-send -u low -a vm-mode "Modo VM encendido" \
