@@ -199,6 +199,13 @@ in
     # ./pkgs/vm-mode.nix for the measurement this is built on.
     (callPackage ./pkgs/vm-mode.nix { })
 
+    # Backs Mod+Shift+M: mirrors the laptop panel onto a projector or TV, which
+    # niri cannot do on its own — it has no clone action, so without this the
+    # only option when presenting is an extended desktop and turning around to
+    # read the wall. Pulls in wl-mirror, which does the actual capture. See
+    # ./pkgs/present-mode.nix.
+    (callPackage ./pkgs/present-mode.nix { })
+
     # Grows ~/Pictures/Wallpapers from wallhaven, filtered to colours that sit
     # with the Ayu palette so what bleeds through kitty's blur stays cold. Run
     # by hand; see ./pkgs/wallget.nix for why it is not on a timer.

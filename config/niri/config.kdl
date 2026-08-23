@@ -294,6 +294,31 @@ window-rule {
     variable-refresh-rate true
 }
 
+// El espejo de pantalla de Mod+Shift+M. wl-mirror pide pantalla completa por su
+// cuenta con --fullscreen-output, y niri no se lo concede: medido el 2026-08-22,
+// la ventana llegaba como una baldosa de 945x1018 en la tira de scroll del
+// monitor externo — el proceso corría, capturaba fotogramas de 2560x1440 y no
+// se veía nada, porque su columna quedaba fuera de la vista. Esta regla es lo
+// que la abre ya a pantalla completa. Ver ../../pkgs/present-mode.nix, que
+// además tiene que enfocarla: dos ventanas a pantalla completa en el mismo
+// workspace y la que se ve es la activa, no la última en abrirse.
+window-rule {
+    match app-id=r#"^at\.yrlf\.wl_mirror$"#
+    open-on-workspace "espejo"
+    open-fullscreen true
+}
+
+// El workspace donde vive ese espejo, anclado al conector HDMI porque es por
+// donde entra el proyector. Existe para que el espejo esté SOLO: cuando
+// compartía workspace con el terminal, las dos ventanas estaban a pantalla
+// completa y niri mostraba la activa, así que bastaba con que cualquier cosa
+// robara el foco —abrir el modo VM lo hacía— para que el proyector volviera a
+// enseñar el escritorio en mitad de una presentación. Con un workspace propio
+// no hay ninguna otra ventana que pueda ganarle.
+workspace "espejo" {
+    open-on-output "HDMI-A-1"
+}
+
 // Steam. Note the matching semantics: properties inside ONE `match` are ANDed,
 // separate `match` directives are ORed. An earlier version of this had two bare
 // `match` lines and therefore floated *every* Steam window, main client
@@ -429,6 +454,16 @@ binds {
     // invitado persiguen un tamaño 1,6 veces mayor que el hueco real de
     // pantalla. Ambos toques notifican. Ver ../../pkgs/vm-mode.nix.
     Mod+Shift+V { spawn "vm-mode"; }
+
+    // Modo presentación: duplica el panel del portátil en la pantalla externa
+    // —un proyector, una tele— y baja el panel a 60 Hz mientras dura. niri no
+    // sabe clonar salidas: no existe ninguna acción para ello, así que el
+    // espejo lo pinta wl-mirror capturando el panel. Los 240 Hz se bajan porque
+    // wl-mirror captura a la tasa de la salida de origen y ningún proyector
+    // muestra esos fotogramas. Ambos toques notifican. Segundo toque para
+    // salir: mata el espejo y devuelve el panel a su modo anterior.
+    // Ver ../../pkgs/present-mode.nix.
+    Mod+Shift+M { spawn "present-mode"; }
 
     // Brave on both W and B. W is the one asked for; B predates it and costs
     // nothing to keep — and having the second key is what makes the split
