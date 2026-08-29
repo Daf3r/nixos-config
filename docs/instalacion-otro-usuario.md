@@ -18,12 +18,15 @@ en `/home/mel/nixos-config`.
 Desde la instalación nueva:
 
 ```bash
-nix-shell -p git --run 'git clone https://github.com/Daf3r/nixos-config /home/mel/nixos-config'
+nix-shell -p git
+git clone https://github.com/Daf3r/nixos-config /home/mel/nixos-config
 cd /home/mel/nixos-config
 git switch -c local/mel
 ```
 
-La rama local evita que un ajuste específico de esta PC termine publicado en `main`.
+Mantén abierta esa shell de Nix mientras ejecutas los comandos que usen `git`; al escribir
+`exit`, Git deja de estar disponible hasta volver a ejecutar `nix-shell -p git`. La rama local
+evita que un ajuste específico de esta PC termine publicado en `main`.
 
 ## 3. Copia la configuración de hardware de esta PC
 
