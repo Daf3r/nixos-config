@@ -183,6 +183,32 @@ El atributo `daf3r-starter` puede conservarse aunque el usuario sea `mel`; es el
 host, no el nombre de la cuenta. Si también lo cambiaste, usa el nuevo atributo en el
 comando.
 
+## 6.5. Configura npm y las CLI de desarrollo
+
+Node y npm ya entran en el perfil de Home Manager porque Neovim los necesita para algunos
+language servers. Las instalaciones globales de npm se guardan en `~/.npm-global`; el
+`~/.npmrc` declarativo del repo evita que npm intente escribir en el `/nix/store`, que es
+inmutable, y el directorio `bin` ya queda en el `PATH`.
+
+Después del primer `switch`, instala Codex como `mel` (sin `sudo`):
+
+```bash
+npm config get prefix
+npm install --global @openai/codex
+command -v codex
+codex
+```
+
+La primera ejecución de `codex` solicita iniciar sesión. Si también utilizas Claude Code,
+puedes instalarlo en el mismo prefijo:
+
+```bash
+npm install --global @anthropic-ai/claude-code
+```
+
+Las dependencias de cada proyecto siguen viviendo en sus devshells: `remesafam` usa pnpm y
+`gymnova` usa npm. No ejecutes una instalación global para las dependencias de la aplicación.
+
 ## 7. Después del primer arranque
 
 Cierra sesión y vuelve a entrar para recibir los grupos declarados por la configuración.

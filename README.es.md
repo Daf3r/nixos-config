@@ -293,6 +293,24 @@ y solo uno necesita Rust. Instalar la unión globalmente pondría un toolchain d
 1,5 GB en el PATH mientras trabajas en una app Next.js, y facilitaría ejecutar el gestor de
 paquetes equivocado en el repo equivocado y reescribir un lockfile.
 
+### Herramientas CLI instaladas con npm
+
+Node y npm forman parte del perfil del usuario porque Neovim los necesita para algunos
+language servers. Las herramientas CLI que se instalan globalmente con npm van a
+`~/.npm-global`, no al `/nix/store`: `home.nix` declara ese `prefix` en `~/.npmrc` y añade su
+`bin` al `PATH`. Después del primer `nh os switch`, compruébalo con:
+
+```fish
+npm config get prefix       # debe mostrar ~/.npm-global expandido
+npm install --global @openai/codex
+codex                       # la primera vez ofrece iniciar sesión
+```
+
+La documentación oficial de Codex también ofrece un instalador independiente para Linux;
+el método npm anterior es el que usa esta configuración cuando se quiere gestionar las
+herramientas CLI desde npm. Claude Code, si se utiliza, se instala en el mismo prefijo con
+`npm install --global @anthropic-ai/claude-code`.
+
 ---
 
 ## Instalar esto desde cero

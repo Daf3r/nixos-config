@@ -288,6 +288,24 @@ one uses npm, and only one needs Rust. Installing the union globally would put a
 Rust toolchain on the PATH while working on a Next.js app, and make it easy to run the
 wrong package manager in the wrong repo and rewrite a lockfile.
 
+### CLI tools installed with npm
+
+Node and npm are in the user profile because Neovim needs them for some language servers.
+Global CLI tools go into `~/.npm-global`, not `/nix/store`: `home.nix` declares that prefix
+in `~/.npmrc` and adds its `bin` directory to `PATH`. After the first `nh os switch`, verify
+it with:
+
+```fish
+npm config get prefix       # should show the expanded ~/.npm-global
+npm install --global @openai/codex
+codex                       # the first run offers sign-in
+```
+
+The official Codex documentation also offers a standalone Linux installer; the npm method
+above is the one this configuration uses when CLI tools should be managed by npm. If you
+use Claude Code, install it in the same prefix with
+`npm install --global @anthropic-ai/claude-code`.
+
 ---
 
 ## Installing this from scratch

@@ -75,6 +75,14 @@ in
     "$HOME/.kimi-code/bin"
   ];
 
+  # Nix's nodejs package has an immutable prefix under /nix/store. Without a
+  # user npmrc, `npm install -g` tries to write there and fails with EACCES.
+  # Keep global CLI tools (Codex, and optionally Claude Code) in the user's
+  # writable profile instead; the bin directory is already on PATH above.
+  home.file.".npmrc".text = ''
+    prefix=${config.home.homeDirectory}/.npm-global
+  '';
+
   home.packages = with pkgs; [
     # nodejs is deliberately absent here: ./terminal/nvim.nix already installs
     # it — LazyVim needs it for the language servers that ship as npm packages —
