@@ -36,7 +36,7 @@ let
   # Matches StateDirectory=nixos-upd below, which is what actually creates it.
   stateDir = "/var/lib/nixos-upd";
 
-  # Everything the five entry points shell out to. This list is longer than it
+  # Everything the seven entry points shell out to. This list is longer than it
   # looks like it needs to be, and every addition is a failure that already
   # happened or was one run away:
   #
@@ -57,6 +57,10 @@ let
   #                anywhere in this config — unwrapped, apply would fast-forward
   #                the repository and then refuse to switch.
   #   nodejs       `npm view`, for the claude-code version report.
+  #   gnutar/xz/gzip/zstd
+  #                Debian control archives can use these compressors; keeping
+  #                all four here makes a future archive format a warning, not
+  #                an exit 127 from the update engine.
   #   nix          taken from config.nix.package so the engine talks to the same
   #                daemon and the same CLI the rest of the system does.
   #
@@ -74,6 +78,10 @@ let
     pkgs.gnugrep
     pkgs.findutils
     pkgs.binutils
+    pkgs.gnutar
+    pkgs.xz
+    pkgs.gzip
+    pkgs.zstd
     pkgs.util-linux
     config.nix.package
     pkgs.nixos-rebuild
@@ -88,10 +96,19 @@ let
   runtimeCommands = [
     "bash" "env" "mktemp" "readlink" "timeout" "date" "sort" "head" "tail"
     "curl" "jq" "git" "sed" "awk" "grep" "find" "strings" "flock"
+    "ar" "tar" "xz" "gzip" "zstd"
     "nix" "nixos-rebuild" "nh" "npm" "node"
   ];
 
-  entryPoints = [ "nixos-upd" "upd" "bump-brave-origin" "bump-t3code-app" "check-brave-vaapi" ];
+  entryPoints = [
+    "nixos-upd"
+    "upd"
+    "bump-brave-origin"
+    "bump-t3code-app"
+    "bump-chatgpt-desktop"
+    "bump-minecraft-launcher"
+    "check-brave-vaapi"
+  ];
 
   # A git configuration whose entire content is "${repo} may be opened by
   # whoever is reading this". It exists for the apply unit below and for nothing
@@ -493,6 +510,10 @@ RECORDER
       pkgs.git
       pkgs.jq
       pkgs.binutils
+      pkgs.gnutar
+      pkgs.xz
+      pkgs.gzip
+      pkgs.zstd
       pkgs.util-linux
     ];
 
@@ -547,11 +568,13 @@ RECORDER
 
       mkdir -p $out/libexec/nixos-upd $out/bin
       cp -r ./lib $out/libexec/nixos-upd/lib
-      cp ./*.sh $out/libexec/nixos-upd/
-      # The bats suites already ran, in checkPhase above; they are a build-time
-      # gate, not something the system needs at runtime. `cp ./*.sh` does not
-      # pick the directory up in the first place, so this is a guard against a
-      # future `cp -r .` rather than a removal of anything currently copied.
+      # Copy the entry points explicitly. A plain glob used to be enough while
+      # every script happened to be executable in Git; new detector files may
+      # arrive as mode 0644 and must still be installed before patchShebangs and
+      # the wrapper loop below inspect them.
+      for s in ${lib.concatStringsSep " " entryPoints}; do
+        install -Dm 0755 "''${s}.sh" "$out/libexec/nixos-upd/''${s}.sh"
+      done
       rm -rf $out/libexec/nixos-upd/tests
 
       # `#!/usr/bin/env bash` resolves through PATH at exec time. The wrapper

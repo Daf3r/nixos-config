@@ -27,6 +27,18 @@ setup() {
   CLOSURE="$WORK/closure"
   mkdir -p "$STATE" "$WORK/bin" "$CLOSURE"
 
+  # The Debian archive returned by the prefetch stub. The engine must exercise
+  # the real ChatGPT metadata parser here, not merely test its bump script in
+  # isolation.
+  mkdir -p "$WORK/chatgpt-control"
+  printf 'Package: chatgpt\nVersion: 1.0.1\nArchitecture: amd64\n' \
+    > "$WORK/chatgpt-control/control"
+  tar -cJf "$WORK/control.tar.xz" -C "$WORK/chatgpt-control" control
+  printf '2.0\n' > "$WORK/debian-binary"
+  tar -cJf "$WORK/data.tar.xz" --files-from /dev/null
+  ar r "$WORK/chatgpt.deb" "$WORK/debian-binary" \
+    "$WORK/control.tar.xz" "$WORK/data.tar.xz" >/dev/null
+
   # A $HOME holding a claude-code the npm stub agrees with, so the unmanaged
   # check runs and reports nothing. Left out, it warns that it could not run,
   # and every assertion about `warnings` below would be reading that instead.
@@ -54,7 +66,7 @@ teardown() {
   rm -rf "$WORK"
 }
 
-# $REPO as the engine expects to find it: a lock to move and the two
+# $REPO as the engine expects to find it: a lock to move and the three
 # hand-packaged derivations the bump scripts rewrite.
 make_repo() {
   mkdir -p "$REPO/pkgs"
@@ -62,6 +74,7 @@ make_repo() {
   cp "$FIX/lock-before.json" "$REPO/flake.lock"
   cp "$FIX/sample-pkg.nix" "$REPO/pkgs/brave-origin.nix"
   cp "$FIX/sample-pkg.nix" "$REPO/pkgs/t3code-app.nix"
+  cp "$FIX/sample-pkg.nix" "$REPO/pkgs/chatgpt-desktop.nix"
   printf 'result\n' > "$REPO/.gitignore"
   git -C "$REPO" add -A
   git -C "$REPO" -c user.name=t -c user.email=t@t commit -qm base
@@ -77,7 +90,7 @@ case "\$1 \$2" in
     [ -e "$WORK/diff-closures-fails" ] && exit 1
     cat "$WORK/diff.txt" ;;
   "store prefetch-file")
-    printf '{"hash":"sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="}\n' ;;
+    printf '{"hash":"sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=","storePath":"%s"}\n' "$WORK/chatgpt.deb" ;;
   "hash convert")
     printf 'sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=\n' ;;
   *)
@@ -192,13 +205,15 @@ engine_stubbed_lib() {
          == [{name: "nixpkgs", kind: "input", from: "f13ff45", to: "2222222"}]' \
     "$STATE/status.json"
 
-  # Both hand-packaged apps are there, as objects rather than as prose.
+  # All hand-packaged apps are there, as objects rather than as prose.
   jq -e '[.changes[] | select(.kind == "local_pkg") | .name] | sort
-         == ["brave-origin", "t3code-app"]' "$STATE/status.json"
+         == ["brave-origin", "chatgpt-desktop", "t3code-app"]' "$STATE/status.json"
   jq -e '.changes[] | select(.name == "t3code-app")
          | .from == "1.0.0" and .to == "0.0.34"' "$STATE/status.json"
   jq -e '.changes[] | select(.name == "brave-origin")
          | .from == "1.0.0" and .to == "1.93.134"' "$STATE/status.json"
+  jq -e '.changes[] | select(.name == "chatgpt-desktop")
+         | .from == "1.0.0" and .to == "1.0.1" and .hash_changed == true' "$STATE/status.json"
 
   # The exact set, not "no warnings" and not "at least these". Every step of
   # this run that can fail quietly ends in `|| warn`, so a future change that

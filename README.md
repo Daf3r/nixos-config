@@ -19,6 +19,10 @@ ASUS ROG Strix G17 (G713PV) with an RTX 4060 and a 240 Hz panel.
 
 ## Rebuild
 
+This repository is a complete host configuration, not a generic NixOS module. If you are
+installing it on a new machine, start with [Installing this from scratch](#installing-this-from-scratch)
+before running any rebuild command.
+
 ```fish
 nh os switch          # daily driver — shows a diff of exactly what changes
 nrs                   # sudo nixos-rebuild switch --flake ~/nixos-config
@@ -36,6 +40,13 @@ without spelling out the attribute.
 `upd apply --ff-only` fast-forwards the engine branch and `upd apply --boot` stages the
 generation for the next boot. The `nixos-upd` DankMaterialShell plugin shows that state
 in the bar and offers checking or applying it through polkit.
+
+The check covers Nix inputs plus the locally packaged apps: Brave Origin, T3 Code,
+the official ChatGPT Linux package and, when its declaration is present, Minecraft
+Launcher. For mutable upstream URLs it compares the source hash as well as the
+version, so a republished `latest` archive is detected instead of breaking the next
+build. Claude Code is reported as an npm-managed update; Hermes, Grok and Kimi keep
+their own self-update mechanisms and are not mutated by the Nix engine.
 
 ---
 
@@ -79,6 +90,9 @@ repo are long on purpose.
 | `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Packages |
 | `terminal/` | kitty, fish, fastfetch, nvim, CLI tools |
 | `pkgs/brave-origin.nix` | Brave Origin, packaged from Brave's own `.deb` |
+| `pkgs/chatgpt-desktop.nix` | Official ChatGPT Linux `.deb` |
+| `pkgs/t3code-app.nix` | T3 Code AppImage |
+| `pkgs/minecraft-launcher.nix` | Mojang launcher bootstrap, when enabled |
 | `devshells/` | Per-project toolchains — see [Dev shells](#dev-shells) |
 | `config/niri/config.kdl` | Live-editable niri config |
 | `config/nvim/` | LazyVim starter — third party, see below |
@@ -282,6 +296,11 @@ Two audiences here: someone rebuilding this exact laptop, and someone who wants 
 on different hardware. The steps are the same; the difference is how much of it applies,
 which is [spelled out below](#what-does-not-travel).
 
+The default values assume the login user is `daf3r`, the repository is
+`/home/daf3r/nixos-config`, and the host is named `daf3r-starter`. Keeping those three
+values during installation makes this a direct clone-and-build. A different username,
+hostname, GPU or display setup needs the adaptation step below before the first build.
+
 ### 0. Before reinstalling — try the boot menu first
 
 If this machine still boots at all, a broken rebuild is almost never worth reinstalling
@@ -343,16 +362,44 @@ If you are doing this from a live ISO before the first boot, it is at
 say — `sudo nixos-generate-config --show-hardware-config` prints a fresh one from the
 currently mounted filesystems.
 
-### 4. Build
+### 4. Adapt for another machine
+
+Skip this section only when installing the same ASUS ROG Strix G17. On another machine,
+this repository should be treated as a starting point: it contains this laptop's NVIDIA,
+ASUS, monitor and gaming assumptions, so a direct build can fail or enable the wrong
+drivers.
+
+- If the login user is not `daf3r`, either create the same username or update every active
+  `daf3r`/`/home/daf3r` reference before building. Find them with
+  `rg -n 'daf3r|/home/daf3r'`. The important files are `flake.nix`, `configuration.nix`,
+  `home.nix`, `updates.nix`, `updates/nixos-upd.sh`, `updates/upd.sh`,
+  `terminal/tools.nix` and `config/niri/config.kdl`.
+- If the hostname is different, change `networking.hostName` in `configuration.nix` and
+  the matching `nixosConfigurations.<name>` attribute in `flake.nix`; use that attribute
+  explicitly in the first rebuild command.
+- If the machine is not ASUS ROG or does not use an NVIDIA GPU, remove or rewrite the
+  corresponding `./asus.nix` and `./gpu.nix` imports in `configuration.nix`. Review
+  `./gaming.nix` too if this is not a gaming machine.
+- Replace the EDID-based monitor rules in `config/niri/config.kdl` and the panel rule in
+  `gamemode.nix` with the values from `niri msg outputs` after the first graphical boot.
+
+Keep `hardware-configuration.nix` from step 3 even after these edits: it describes the
+new machine's filesystems and is intentionally ignored by Git.
+
+### 5. Build
 
 ```fish
-sudo nixos-rebuild switch --flake ~/nixos-config
+sudo nixos-rebuild switch --flake ~/nixos-config#daf3r-starter
 ```
 
 First build pulls a lot. The shell itself is a small Go binary plus QML, so even without a
 binary cache it builds quickly.
 
-### 5. Log out — not optional
+If flakes are not enabled in the installer environment yet, add
+`--extra-experimental-features 'nix-command flakes'` to that command. The configuration
+enables both features for subsequent commands.
+
+### 6. Log out — not optional
 
 `daf3r` belongs to `networkmanager`, `wheel`, `video`, `i2c`, `docker` and `gamemode`, and
 **group membership is inherited when a session starts**. Until a fresh login, three things
@@ -366,7 +413,7 @@ are quietly broken:
 
 Check with `groups` after logging back in, then `gamemoded -t` for the honest gamemode test.
 
-### 6. What the repo cannot give you
+### 7. What the repo cannot give you
 
 - **Wallpapers.** Not in the repo, [on purpose](#what-is-not-mine). Drop images into
   `~/Pictures/Wallpapers` — `wallpaper.nix` creates the directory, and `wallpaper-rotate`
@@ -406,6 +453,11 @@ then update `version` and `hash`:
 ```fish
 nix hash convert --hash-algo sha256 --to sri <sha256 from the index>
 ```
+
+The update engine checks the mutable ChatGPT `.deb` and Minecraft bootstrap automatically:
+`bump-chatgpt-desktop` reads the Debian version and hash, while
+`bump-minecraft-launcher` tracks the bootstrap hash. Both run inside `upd check`, so a
+fresh install does not need to update those pins by hand.
 
 **Validating before switching.**
 

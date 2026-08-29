@@ -175,6 +175,10 @@
   };
 
   environment.systemPackages = with pkgs; [
+    # Mojang's official "Other distributions" launcher, wrapped so the
+    # binaries and Java runtimes it downloads can execute on NixOS.
+    (callPackage ./pkgs/minecraft-launcher.nix { })
+
     heroic
     protonup-qt
     lutris

@@ -34,8 +34,8 @@ deliberate command.
 
 ## Goals
 
-- Every update path automated up to the point of applying: the five flake inputs
-  and the two locally-packaged applications.
+- Every update path automated up to the point of applying: the flake inputs and
+  every locally-packaged application declared in `pkgs/` that has a detector.
 - Verify a prepared update actually builds before it is offered.
 - Detect the Brave VA-API regression automatically instead of thermally.
 - Never modify `~/nixos-config` on its own.
@@ -68,13 +68,15 @@ nixos-upd.timer  (daily, Persistent, RandomizedDelaySec=1h)
         └─ nixos-upd  (writeShellApplication)
              1. flock /var/lib/nixos-upd/lock
              2. sync worktree      /var/lib/nixos-upd/wt  ←  ~/nixos-config @ main
-             3. bump-brave-origin  →  version + hash
-             4. bump-t3code-app    →  version + hash
-             5. nix flake update
-             6. nixos-rebuild build --flake .#daf3r-starter
-             7. check-brave-vaapi  →  strings | grep -x
-             8. nix store diff-closures /run/current-system ./result
-             9. write status.json; commit worktree to branch auto/update
+   3. bump-brave-origin       →  version + hash
+   4. bump-t3code-app         →  version + hash
+   5. bump-chatgpt-desktop    →  Debian version + hash
+   6. bump-minecraft-launcher →  bootstrap hash
+   7. nix flake update
+   8. nixos-rebuild build --flake .#daf3r-starter
+   9. check-brave-vaapi  →  strings | grep -x
+  10. nix store diff-closures /run/current-system ./result
+  11. write status.json; commit worktree to branch auto/update
 ```
 
 ### The worktree is the safety boundary
@@ -119,6 +121,20 @@ the index cannot be parsed or the `.deb` does not exist — a half-written pair
 
 Same contract, against `pingdotgg/t3code` GitHub releases, prefetching
 `T3-Code-<version>-x86_64.AppImage`.
+
+### `bump-chatgpt-desktop`
+
+Reads the Debian control metadata from OpenAI's official `latest` archive and
+updates both `version` and `hash` in `pkgs/chatgpt-desktop.nix`. It prefetches on
+every check because the URL is mutable; a hash-only change is recorded with
+`hash_changed: true` and remains visible in `upd show` and the DMS panel.
+
+### `bump-minecraft-launcher`
+
+Tracks the hash of Mojang's mutable `Minecraft.tar.gz` bootstrap. Mojang's
+launcher core updates itself after installation and has no stable release API,
+so this detector intentionally reports source-hash drift rather than inventing
+a version.
 
 ### `check-brave-vaapi`
 

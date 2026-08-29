@@ -19,6 +19,10 @@ como shell, sobre un ASUS ROG Strix G17 (G713PV) con una RTX 4060 y un panel de 
 
 ## Reconstruir
 
+Este repositorio es una configuración completa del host, no un módulo genérico de NixOS.
+Si lo vas a instalar en otra máquina, empieza por [Instalar esto desde cero](#instalar-esto-desde-cero)
+antes de ejecutar cualquier rebuild.
+
 ```fish
 nh os switch          # el del día a día — muestra un diff de qué cambia exactamente
 nrs                   # sudo nixos-rebuild switch --flake ~/nixos-config
@@ -36,6 +40,13 @@ flake se llama como `networking.hostName`, y por eso `--flake ~/nixos-config` re
 `upd apply --ff-only` adelanta la rama del motor y `upd apply --boot` deja la generación
 preparada para el próximo arranque. El plugin `nixos-upd` de DankMaterialShell muestra
 ese estado en la barra y ofrece comprobarlo o aplicarlo mediante polkit.
+
+El chequeo cubre los inputs de Nix y las aplicaciones empaquetadas localmente: Brave
+Origin, T3 Code, el paquete oficial de ChatGPT para Linux y, cuando existe su declaración,
+Minecraft Launcher. Para las URLs mutables compara también el hash de la fuente además de
+la versión, así detecta un `latest` republicado antes de que rompa la siguiente compilación.
+Claude Code se reporta como actualización gestionada por npm; Hermes, Grok y Kimi conservan
+sus propios mecanismos de autoactualización y el motor de Nix no los modifica.
 
 ---
 
@@ -79,6 +90,9 @@ los comentarios de este repo son largos a propósito.
 | `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Paquetes |
 | `terminal/` | kitty, fish, fastfetch, nvim, herramientas de CLI |
 | `pkgs/brave-origin.nix` | Brave Origin, empaquetado desde el `.deb` de Brave |
+| `pkgs/chatgpt-desktop.nix` | `.deb` oficial de ChatGPT para Linux |
+| `pkgs/t3code-app.nix` | AppImage de T3 Code |
+| `pkgs/minecraft-launcher.nix` | Bootstrap del launcher de Mojang, cuando está activado |
 | `devshells/` | Toolchains por proyecto — ver [Entornos de desarrollo](#entornos-de-desarrollo) |
 | `config/niri/config.kdl` | Config de niri, editable en vivo |
 | `config/nvim/` | Starter de LazyVim — de terceros, ver abajo |
@@ -287,6 +301,12 @@ Dos públicos: quien reconstruya este portátil exacto, y quien quiera la config
 hardware. Los pasos son los mismos; lo que cambia es cuánto aplica, y eso está
 [detallado abajo](#lo-que-no-viaja).
 
+Los valores por defecto suponen que el usuario de inicio de sesión es `daf3r`, que el repo
+está en `/home/daf3r/nixos-config` y que el host se llama `daf3r-starter`. Mantener esos
+tres valores durante la instalación permite clonar y compilar directamente. Si cambia el
+usuario, el hostname, la GPU o las pantallas, hay que adaptar la configuración en el paso
+de abajo antes de la primera compilación.
+
 ### 0. Antes de reinstalar, prueba el menú de arranque
 
 Si esta máquina todavía arranca, casi nunca merece la pena reinstalar por un rebuild roto.
@@ -349,16 +369,45 @@ Si lo haces desde una ISO en vivo antes del primer arranque, está en
 disco, por ejemplo — `sudo nixos-generate-config --show-hardware-config` imprime uno nuevo
 a partir de los sistemas de ficheros montados.
 
-### 4. Compila
+### 4. Adapta la configuración para otra máquina
+
+Omite esta sección solo si estás instalando el ASUS ROG Strix G17 original. En otra
+máquina, este repositorio debe tratarse como punto de partida: contiene los supuestos de
+este portátil sobre NVIDIA, ASUS, monitores y gaming, así que un clon directo puede fallar
+o activar drivers equivocados.
+
+- Si el usuario no es `daf3r`, crea ese mismo usuario o cambia todas las referencias activas
+  a `daf3r`/`/home/daf3r` antes de compilar. Encuéntralas con
+  `rg -n 'daf3r|/home/daf3r'`. Los ficheros importantes son `flake.nix`,
+  `configuration.nix`, `home.nix`, `updates.nix`, `updates/nixos-upd.sh`, `updates/upd.sh`,
+  `terminal/tools.nix` y `config/niri/config.kdl`.
+- Si el hostname es distinto, cambia `networking.hostName` en `configuration.nix` y el
+  atributo `nixosConfigurations.<nombre>` correspondiente en `flake.nix`; usa ese
+  atributo explícitamente en el primer rebuild.
+- Si la máquina no es ASUS ROG o no usa GPU NVIDIA, elimina o adapta las importaciones
+  `./asus.nix` y `./gpu.nix` en `configuration.nix`. Revisa también `./gaming.nix` si no
+  es una máquina para jugar.
+- Sustituye las reglas de monitores por EDID de `config/niri/config.kdl` y la regla del
+  panel en `gamemode.nix` con los valores que dé `niri msg outputs` tras el primer arranque
+  gráfico.
+
+Conserva `hardware-configuration.nix` del paso 3 incluso después de editar lo demás:
+describe los sistemas de ficheros de la máquina nueva y está ignorado por Git a propósito.
+
+### 5. Compila
 
 ```fish
-sudo nixos-rebuild switch --flake ~/nixos-config
+sudo nixos-rebuild switch --flake ~/nixos-config#daf3r-starter
 ```
 
 La primera compilación descarga mucho. El shell en sí es un binario Go pequeño más QML, así
 que incluso sin caché binaria compila rápido.
 
-### 5. Cierra sesión — no es opcional
+Si el entorno del instalador todavía no tiene flakes activado, añade
+`--extra-experimental-features 'nix-command flakes'` a ese comando. La configuración activa
+ambas funciones para los comandos siguientes.
+
+### 6. Cierra sesión — no es opcional
 
 `daf3r` pertenece a `networkmanager`, `wheel`, `video`, `i2c`, `docker` y `gamemode`, y **la
 pertenencia a grupos se hereda al iniciar sesión**. Hasta un login nuevo, tres cosas están
@@ -373,7 +422,7 @@ rotas en silencio:
 Compruébalo con `groups` tras volver a entrar, y luego `gamemoded -t` para la prueba honesta
 de gamemode.
 
-### 6. Lo que el repo no te puede dar
+### 7. Lo que el repo no te puede dar
 
 - **Fondos de pantalla.** No están en el repo, [a propósito](#lo-que-no-es-mío). Suelta
   imágenes en `~/Pictures/Wallpapers` — `wallpaper.nix` crea el directorio y
@@ -414,6 +463,11 @@ y actualiza `version` y `hash`:
 ```fish
 nix hash convert --hash-algo sha256 --to sri <sha256 del índice>
 ```
+
+El motor de actualizaciones comprueba automáticamente el `.deb` mutable de ChatGPT y el
+bootstrap de Minecraft: `bump-chatgpt-desktop` lee la versión y el hash Debian, mientras
+`bump-minecraft-launcher` sigue el hash del bootstrap. Ambos se ejecutan dentro de `upd
+check`, así que una instalación nueva no necesita actualizar esos pins a mano.
 
 **Validar antes de aplicar.**
 

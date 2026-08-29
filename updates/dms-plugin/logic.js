@@ -168,10 +168,12 @@ function buttonFor(status) {
 function changeLines(status) {
   if (!status || !Array.isArray(status.changes)) return []
   return status.changes
-    .filter(c => c.from !== c.to)
+    .filter(c => c.from !== c.to || c.hash_changed === true)
     .map(c => ({
       name: c.name,
-      text: `${c.from || '(nuevo)'} → ${c.to || '(fuera)'}`,
+      text: c.hash_changed === true && c.from === c.to
+        ? `${c.from || '(sin version)'} (hash actualizado)`
+        : `${c.from || '(nuevo)'} → ${c.to || '(fuera)'}`,
     }))
 }
 

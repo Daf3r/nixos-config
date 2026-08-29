@@ -348,7 +348,7 @@ git -C "$WT" reset --hard --quiet FETCH_HEAD >>"$LOG" 2>&1 \
 git -C "$WT" checkout -q -B auto/update FETCH_HEAD >>"$LOG" 2>&1 \
   || fail check_failed "could not put the worktree on auto/update"
 
-# --- bump the two locally-packaged apps ------------------------------------
+# --- bump the locally-packaged apps ----------------------------------------
 # A failing bump leaves that package where it is and does not stop the run --
 # but it must not be silent either. Both signals are needed and they are not
 # the same one: the `warnings` entry is what a reader gates on (a clean `ready`
@@ -363,14 +363,33 @@ git -C "$WT" checkout -q -B auto/update FETCH_HEAD >>"$LOG" 2>&1 \
 # covers it. That is the other half of why both signals exist rather than one.
 # Same class as the VA-API check above: the check not running has to look
 # different from the check passing.
-if ! brave_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-brave-origin.sh" --repo "$WT" 2>>"$LOG")"; then
-  brave_json='{"name":"brave-origin","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
-  warn local_bump_failed "brave-origin could not be bumped; it stays at the version pinned in pkgs/brave-origin.nix (see $LOG)"
-fi
-if ! t3code_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/bump-t3code-app.sh" --repo "$WT" 2>>"$LOG")"; then
-  t3code_json='{"name":"t3code-app","kind":"local_pkg","from":"","to":"","error":"bump failed"}'
-  warn local_bump_failed "t3code-app could not be bumped; it stays at the version pinned in pkgs/t3code-app.nix (see $LOG)"
-fi
+local_changes='[]'
+run_local_bump() { # $1 script, $2 report name, $3 target file
+  local script=$1 name=$2 target=$3 bump_json next
+
+  # Optional package declarations are allowed: this keeps the engine useful
+  # while a new package is being introduced on a branch, without turning its
+  # absence into a false warning. Once the file is committed, it is checked on
+  # every run and a failed check becomes visible in both channels below.
+  [ -f "$WT/pkgs/$target" ] || return 0
+
+  if ! bump_json="$(LIB_DIR="$LIB_DIR" bash "$SELF_DIR/$script" --repo "$WT" 2>>"$LOG")"; then
+    bump_json="$(jq -nc --arg n "$name" \
+      '{name: $n, kind: "local_pkg", from: "", to: "", error: "bump failed"}')"
+    warn local_bump_failed \
+      "$name could not be checked or bumped; it stays at the pin in pkgs/$target (see $LOG)"
+  fi
+
+  if ! next="$(jq -c --argjson item "$bump_json" '. + [$item]' <<<"$local_changes")"; then
+    fail check_failed "the local package result for $name was not valid JSON"
+  fi
+  local_changes="$next"
+}
+
+run_local_bump bump-brave-origin.sh brave-origin brave-origin.nix
+run_local_bump bump-t3code-app.sh t3code-app t3code-app.nix
+run_local_bump bump-chatgpt-desktop.sh chatgpt-desktop chatgpt-desktop.nix
+run_local_bump bump-minecraft-launcher.sh minecraft-launcher minecraft-launcher.nix
 
 # --- flake inputs -----------------------------------------------------------
 # Snapshot the lock the update is measured *from*, and take it from FETCH_HEAD
@@ -629,8 +648,7 @@ fi
 # two keys are whatever closure_reboot decided they are and there is no second
 # place that can disagree with it about their names.
 ready_body="$(jq -n \
-  --argjson brave "$brave_json" \
-  --argjson t3 "$t3code_json" \
+  --argjson local "$local_changes" \
   --argjson inputs "$inputs_json" \
   --argjson closure "$closure_json" \
   --argjson reboot "$reboot_json" \
@@ -639,7 +657,7 @@ ready_body="$(jq -n \
   --argjson unmanaged "$unmanaged" \
   '{build: {ok: true, log: $log},
     branch: "auto/update",
-    changes: ($inputs + [$brave, $t3]),
+    changes: ($inputs + $local),
     closure_diff: $closure,
     warnings: $warnings,
     unmanaged: $unmanaged} + $reboot')" \

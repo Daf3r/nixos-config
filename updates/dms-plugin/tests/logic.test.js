@@ -59,6 +59,14 @@ test('changeLines skips entries whose version did not move', () => {
   assert.equal(lines[0].name, 'nixpkgs')
 })
 
+test('changeLines keeps a same-version hash refresh visible', () => {
+  const [line] = changeLines({ ...ready, changes: [
+    { name: 'chatgpt-desktop', kind: 'local_pkg', from: '26.825.31414', to: '26.825.31414', hash_changed: true },
+  ]})
+  assert.equal(line.name, 'chatgpt-desktop')
+  assert.match(line.text, /hash actualizado/)
+})
+
 test('changeLines renders an added and a removed package readably', () => {
   // Rewritten from the plan's version, which built only the added package and
   // then asserted `/abc1234/` on it -- so the name promised two cases and the

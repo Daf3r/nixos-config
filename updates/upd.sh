@@ -275,10 +275,16 @@ case "$cmd" in
         # "brave-origin 1.93.134 -> 1.93.134" is noise. An entry with an empty
         # side is a package that appeared or went away, and saying so beats a
         # row with a blank in it.
-        jq -r '.changes[]? | select(type == "object") | select(.from != .to)
-               | "  " + (.name // "sin nombre")
-                 + " " + (if (.from // "") == "" then "(nuevo)" else .from end)
-                 + " -> " + (if (.to // "") == "" then "(fuera)" else .to end)' "$STATUS"
+        jq -r '.changes[]? | select(type == "object")
+               | select(.from != .to or .hash_changed == true)
+               | if (.hash_changed == true and .from == .to)
+                 then "  " + (.name // "sin nombre") + " "
+                      + (if (.from // "") == "" then "(sin version)" else .from end)
+                      + " (hash actualizado)"
+                 else "  " + (.name // "sin nombre")
+                      + " " + (if (.from // "") == "" then "(nuevo)" else .from end)
+                      + " -> " + (if (.to // "") == "" then "(fuera)" else .to end)
+                 end' "$STATUS"
         # One line for the closure, because the per-package detail is what
         # `upd diff` is for. The `// []` fallbacks are not producer paths --
         # the engine always writes all four keys -- but a truncated or
