@@ -391,6 +391,11 @@ o activar drivers equivocados.
   panel en `gamemode.nix` con los valores que dé `niri msg outputs` tras el primer arranque
   gráfico.
 
+Para una secuencia completa de comandos usando, por ejemplo, el usuario `mel`, consulta la
+[guía para instalar con otro usuario](docs/instalacion-otro-usuario.md). Incluye la rama
+local, la copia de `hardware-configuration.nix`, las sustituciones necesarias y la
+validación antes del primer build.
+
 Conserva `hardware-configuration.nix` del paso 3 incluso después de editar lo demás:
 describe los sistemas de ficheros de la máquina nueva y está ignorado por Git a propósito.
 

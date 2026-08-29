@@ -383,6 +383,10 @@ drivers.
 - Replace the EDID-based monitor rules in `config/niri/config.kdl` and the panel rule in
   `gamemode.nix` with the values from `niri msg outputs` after the first graphical boot.
 
+For a complete command-by-command example using a different account such as `mel`, see the
+[guide for installing with another user](docs/instalacion-otro-usuario.md). It covers the
+local branch, hardware file, required substitutions and validation before the first build.
+
 Keep `hardware-configuration.nix` from step 3 even after these edits: it describes the
 new machine's filesystems and is intentionally ignored by Git.
 
