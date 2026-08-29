@@ -731,9 +731,9 @@ binds {
 // config/niri is a git-tracked directory, so the edit shows up as a diff
 // instead of happening invisibly. That is how this one was caught, before a
 // reboot made it real.
-include "dms/colors.kdl"
-include "dms/alttab.kdl"
-include "dms/wpblur.kdl"
+include optional=true "dms/colors.kdl"
+include optional=true "dms/alttab.kdl"
+include optional=true "dms/wpblur.kdl"
 
 // El acento va el ÚLTIMO: le gana a colors.kdl. Ver ./acento.kdl.
 include "acento.kdl"

@@ -13,6 +13,41 @@ NixOS con otro nombre, sustituye `mel` por ese nombre en todos los comandos sigu
 Esta configuración está escrita para `x86_64-linux`. También da por hecho que el repo estará
 en `/home/mel/nixos-config`.
 
+## 1.5. Activa SSH para configurar la máquina remotamente
+
+Este paso es opcional, pero permite continuar desde otra PC con copiar y pegar. En la PC
+nueva, abre una terminal local o una TTY (`Ctrl`+`Alt`+`F2`) y edita la configuración inicial:
+
+```bash
+sudo nano /etc/nixos/configuration.nix
+```
+
+Añade dentro del bloque principal `{ ... }`:
+
+```nix
+services.openssh = {
+  enable = true;
+  openFirewall = true;
+  settings = {
+    PermitRootLogin = "no";
+    PasswordAuthentication = true; # temporal: se desactiva después de copiar la llave
+  };
+};
+```
+
+Aplica la configuración y muestra la IP de la máquina nueva:
+
+```bash
+sudo nixos-rebuild switch
+hostname -I
+```
+
+Desde la PC de administración, con ambas máquinas en la misma red:
+
+```bash
+ssh mel@IP_DE_LA_PC_NUEVA
+```
+
 ## 2. Clona el repositorio en la ruta esperada
 
 Desde la instalación nueva:
@@ -101,15 +136,48 @@ nano terminal/tools.nix
 
 Busca `programs.git.settings.user` y coloca el nombre y correo de GitHub de `mel`.
 
+## 5.5. Cambia SSH a una llave y déjalo persistente
+
+En la PC de administración, crea una llave si aún no tienes una y cópiala a `mel` mientras
+la contraseña temporal todavía está activa:
+
+```bash
+ssh-keygen -t ed25519
+ssh-copy-id -i ~/.ssh/id_ed25519.pub mel@IP_DE_LA_PC_NUEVA
+```
+
+En la configuración local adaptada, añade a `configuration.nix`:
+
+```nix
+services.openssh = {
+  enable = true;
+  openFirewall = true;
+  settings = {
+    PermitRootLogin = "no";
+    PasswordAuthentication = false;
+  };
+};
+
+users.users.mel.openssh.authorizedKeys.keys = [
+  "ssh-ed25519 AAAA... comentario-de-la-llave"
+];
+```
+
+Sustituye la línea `ssh-ed25519 AAAA...` por el contenido real de
+`~/.ssh/id_ed25519.pub` en la PC de administración. Así SSH seguirá funcionando después de
+que el primer build reemplace la configuración temporal de `/etc/nixos`.
+
 ## 6. Valida y haz el primer build
 
 ```bash
 git diff --check
-nix flake check
-sudo nixos-rebuild switch \
-  --extra-experimental-features 'nix-command flakes' \
-  --flake /home/mel/nixos-config#daf3r-starter
+nix --extra-experimental-features 'nix-command flakes' flake check --no-build
+sudo env NIX_CONFIG='experimental-features = nix-command flakes' \
+  nixos-rebuild switch --flake /home/mel/nixos-config#daf3r-starter
 ```
+
+La configuración de NixOS ya activa esas funciones experimentales después del primer
+switch, pero la instalación base puede necesitarlas explícitas en este primer comando.
 
 El atributo `daf3r-starter` puede conservarse aunque el usuario sea `mel`; es el nombre del
 host, no el nombre de la cuenta. Si también lo cambiaste, usa el nuevo atributo en el
