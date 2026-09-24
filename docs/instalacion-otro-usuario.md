@@ -235,3 +235,17 @@ git rebase origin/main
 
 Resuelve cualquier conflicto conservando las adaptaciones de `mel` y vuelve a ejecutar
 `nix flake check` antes de activar otra generación.
+
+## Reglas para un agente en la PC de `mel`
+
+Vienen del `AGENTS.md` anterior, que describía esta adaptación:
+
+- El host sigue siendo `daf3r-starter` salvo que se renombre de forma consistente en
+  `flake.nix`, `configuration.nix` y `updates/nixos-upd.sh`; la ruta del flake es
+  `/home/mel/nixos-config#daf3r-starter`.
+- `home.username` y `home.homeDirectory` apuntan a `mel` y `/home/mel`.
+- No reintroducir `./wireguard.nix` ni `./virtualisation.nix` en `configuration.nix`:
+  ese equipo no usa el túnel WireGuard de netcup ni VMware.
+- La GPU es una NVIDIA GTX 1660 SUPER: no reutilizar la configuración ASUS/PRIME del
+  portátil ni los bloques de monitores del panel del ASUS.
+- Al rebasar `local/mel` sobre `origin/main`, conservar las adaptaciones de hardware.

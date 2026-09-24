@@ -1,12 +1,12 @@
-# Instrucciones para Codex
+# nixos-config — instrucciones del proyecto
 
-Este repositorio es una configuración completa de NixOS con Home Manager para un
-host principal (`daf3r-starter`) y adaptaciones locales para otros equipos. Estas
-reglas aplican a todo el repositorio.
+Configuración de NixOS con Home Manager del ASUS ROG de daf3r (host y atributo
+del flake `daf3r-starter`). Las reglas generales están en `~/AGENTS.md`; aquí
+sólo lo propio de este repo.
 
-## Regla crítica: siempre usar el flake
+## Regla crítica: siempre el flake
 
-No ejecutes nunca un rebuild ambiguo:
+Nunca un rebuild ambiguo:
 
 ```bash
 sudo nixos-rebuild switch
@@ -14,41 +14,29 @@ sudo nixos-rebuild switch --file /etc/nixos/configuration.nix
 sudo nixos-rebuild switch -I nixos-config=/etc/nixos/configuration.nix
 ```
 
-Esos comandos aplican la configuración mínima generada por el instalador y pueden
-reemplazar el escritorio completo de este repositorio. El comando correcto incluye
-siempre el flake y el atributo del host:
+Aplican la configuración mínima del instalador y pueden sustituir el escritorio
+entero. El comando correcto lleva siempre el flake y el host:
 
 ```bash
 sudo env NIX_CONFIG='experimental-features = nix-command flakes' \
-  nixos-rebuild switch \
-  --flake /home/<usuario>/nixos-config#daf3r-starter
+  nixos-rebuild switch --flake /home/daf3r/nixos-config#daf3r-starter
 ```
 
-Sustituye `<usuario>` por el usuario real. En la adaptación actual es `mel`, por lo
-que la ruta es `/home/mel/nixos-config`. `daf3r-starter` es el nombre del host y del
-atributo del flake; no lo cambies solo porque la cuenta se llame `mel`.
+`hardware-configuration.nix` sí puede venir de `/etc/nixos` (describe discos y
+hardware); `/etc/nixos/configuration.nix` nunca se copia encima del repo.
 
-`hardware-configuration.nix` sí puede copiarse desde `/etc/nixos`, porque es el
-archivo generado por el instalador que describe discos y hardware. No copies
-`/etc/nixos/configuration.nix` encima de la configuración del repositorio.
+## Flujo de un cambio
 
-## Flujo obligatorio antes de aplicar cambios
-
-1. Inspecciona el estado y no sobrescribas cambios del usuario:
-
-   ```bash
-   git status --short --branch
-   git diff --check
-   ```
-
-2. Valida el flake:
+1. `git status --short --branch` y `git diff --check`: hay trabajo sin commitear
+   a menudo; no se pisa.
+2. Validar el flake:
 
    ```bash
    nix --extra-experimental-features 'nix-command flakes' \
      flake check --no-build --all-systems
    ```
 
-3. Construye la generación sin activarla:
+3. Construir la generación sin activarla:
 
    ```bash
    nix --extra-experimental-features 'nix-command flakes' \
@@ -56,69 +44,49 @@ archivo generado por el instalador que describe discos y hardware. No copies
      '.#nixosConfigurations.daf3r-starter.config.system.build.toplevel'
    ```
 
-4. Solo después aplica el cambio con `nixos-rebuild switch --flake ...`. Si el
-   comando necesita contraseña, deja que `sudo` la solicite en la terminal; nunca
-   pidas, guardes ni escribas contraseñas en archivos, comandos o commits.
+4. **El `switch` lo corre daf3r**, que necesita root. El agente le da el comando
+   exacto de arriba y, para comprobar que surtió efecto:
 
-Después de un switch comprueba:
+   ```bash
+   systemctl --failed
+   systemctl is-system-running
+   ```
 
-```bash
-systemctl --failed
-systemctl is-system-running
-```
+   más la comprobación concreta de lo que cambió (el servicio, el binario, el
+   fichero en `/run/current-system`).
+5. Con check y build en verde y el cambio haciendo lo que debe, commit y push.
 
-Si se rompe una generación, no borres generaciones ni repares el store a ciegas.
-Primero conserva el diagnóstico y usa el menú de systemd-boot o `nixos-rebuild
-switch --rollback` desde una generación que funcione.
+Ficheros nuevos: `git add` antes del check, o el flake no los ve.
 
-## Ramas y máquinas
+Si una generación se rompe, no se borran generaciones ni se repara el store a
+ciegas: se conserva el diagnóstico y se vuelve por el menú de systemd-boot o
+`nixos-rebuild switch --rollback` desde una generación que funcione.
 
-- `main` es la configuración canónica del ASUS ROG de `daf3r`.
-- Las adaptaciones de otra máquina deben vivir en una rama local como
-  `local/mel`; no subas UUID, hardware, monitores o decisiones específicas de esa
-  máquina a `main`.
-- En el equipo de `mel`, conserva `local/mel` y adapta el hardware allí. El host
-  sigue siendo `daf3r-starter` salvo que se renombre de forma consistente en
-  `flake.nix`, `configuration.nix` y `updates/nixos-upd.sh`.
-- Antes de rebasar una rama local sobre `origin/main`, revisa los conflictos y
-  conserva las adaptaciones de hardware del equipo destino.
-- No hagas commits como `root`; el repositorio debe pertenecer a su usuario normal.
+## Ramas y otras máquinas
 
-## Reglas específicas de la adaptación de `mel`
+- `main` es la configuración del ROG de daf3r.
+- Otra máquina vive en su rama local (`local/<usuario>`), con su hardware, UUID
+  y monitores; nada de eso sube a `main`. Guía y reglas de esa adaptación:
+  `docs/instalacion-otro-usuario.md`.
+- No se hacen commits como `root`: el repo pertenece al usuario normal.
 
-- `home.username` y `home.homeDirectory` deben apuntar a `mel` y `/home/mel`.
-- No reintroduzcas `./wireguard.nix` ni `./virtualisation.nix` en `configuration.nix`:
-  ese equipo no usa el túnel WireGuard netcup ni VMware.
-- La GPU del escritorio es una NVIDIA GTX 1660 SUPER. No reutilices la configuración
-  ASUS/PRIME del portátil ni bloques de monitores del panel del ASUS.
-- Las instalaciones globales de npm van a `~/.npm-global`. Usa `npm` como el usuario
-  normal, nunca `sudo npm`; el prefijo está declarado en `home.nix` y su `bin` está
-  en `PATH`.
-- Las dependencias de proyectos no van globales: `remesafam` usa su devshell con
-  pnpm y `gymnova` su devshell con npm/Rust.
+## Zonas sensibles
 
-## Edición, secretos y comandos peligrosos
+- `updates.nix` y `updates/` (el widget y el motor de `upd`): si se tocan,
+  además de check y build, correr sus pruebas (`updates/tests/*.bats` y
+  `updates/dms-plugin/tests/`).
+- Nunca en git: contraseñas, claves SSH privadas, tokens, `/etc/wireguard/*.conf`,
+  `.env` ni credenciales.
+- `git reset --hard`, `git checkout --`, `rm -rf`, `nix-store --repair` y
+  limpiezas del store se confirman con el objetivo exacto antes.
+- No se edita `/run/current-system`, `/nix/store` ni ficheros generados del
+  sistema.
+- Una petición de diagnóstico no autoriza activar una generación ni editar.
 
-- Edita archivos del repositorio con cambios revisables y valida el diff. No edites
-  `/run/current-system`, `/nix/store` ni archivos generados del sistema.
-- No pongas contraseñas, claves SSH privadas, tokens, `/etc/wireguard/*.conf`,
-  archivos `.env` ni credenciales en Git.
-- No uses `git reset --hard`, `git checkout --`, `rm -rf`, `nix-store --repair` ni
-  limpiezas destructivas sin confirmar el objetivo exacto con el usuario.
-- Los módulos `updates.nix` y `updates/` son sensibles: si se modifican, ejecuta
-  las pruebas existentes además de `flake check` y el build.
-- Si una solicitud es solo de diagnóstico, no actives una nueva generación ni
-  modifiques archivos sin autorización explícita.
+## Herramientas
 
-## Herramientas CLI
-
-Codex se instala como usuario mediante npm:
-
-```bash
-npm config get prefix
-npm install --global @openai/codex
-codex
-```
-
-Claude Code, si se necesita, usa el mismo prefijo. La autenticación de Codex y de
-otras herramientas siempre se realiza de forma interactiva y nunca se versiona.
+- Globales de npm (Codex, Claude Code) en `~/.npm-global`, como usuario, nunca
+  `sudo npm`; el prefijo está en `home.nix` y su `bin` en `PATH`.
+- Las dependencias de proyecto no van globales: cada proyecto tiene su devShell
+  (`remesafam` con pnpm, `gymnova` con npm y Rust).
+- La autenticación de Codex y demás CLIs es interactiva y nunca se versiona.
