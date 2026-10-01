@@ -53,8 +53,31 @@ seguía terminando cada noche, así que el fallo no era que no arrancara.
 - Que el hardware decode funcione de verdad con Brave 1.96.x: sólo se ha mirado el
   binario, no se ha reproducido vídeo ni medido CPU.
 
-## Fuera de alcance de este registro
+## Cuarto fallo, descubierto después: el commit automático arrastraba basura
 
-Sin commitear a la espera de decisión de daf3r: `storage.nix` (quita el montaje
-de `/mnt/datos`), `apps.nix` + `pkgs/curseforge.nix` (CurseForge, Burp Suite,
-Thunderbird), el parche de `claude-usage` y la documentación asociada.
+Tras el primer `upd apply --boot` real, `main` hizo fast-forward a un commit
+`auto: actualizacion preparada` que traía `noctalia.nix` (637 líneas) y su paleta,
+muertos desde que se retiró el shell. Causa: el worktree privado del motor
+conserva ese fichero sin trackear desde el 2026-08-21, `reset --hard` no borra
+ficheros sin trackear y `git add -A` los metía en cada commit automático. Hasta
+ahora no había llegado a `main` porque ningún `apply` había hecho el
+fast-forward sobre uno de esos commits.
+
+- El motor hace `git clean -fd` (sin `-x`, para no tocar el GC root `result`)
+  tras el `reset --hard`. Prueba nueva en `nixos-upd.bats`; falla si se quita la
+  línea. Suite completa: 175 pruebas.
+- Los dos ficheros se quitan de `main` en un commit aparte.
+
+## Decisiones sobre el trabajo pendiente del 29/09
+
+- Se commitean `apps.nix` + `pkgs/curseforge.nix` (CurseForge, Burp Suite,
+  Thunderbird) con su runbook, plan y diseño, y `storage.nix` (el segundo NVMe
+  es hoy Windows con BitLocker y la partición btrfs `datos` quedó en 16 MB).
+- **No** se commitea el parche de `claude-usage` (`usage-provider.patch`): sólo
+  servía para ocultar Claude y se quiere ver Claude y Codex a la vez. Era además
+  un parche sobre un plugin de terceros, que se rompe con cualquier cambio
+  upstream de su `Daemon.qml`. Copia fuera del repo; quien lo quiera recuperar
+  lo tiene en el commit de la sesión, no en `main`.
+- `apply` reconstruye desde el working tree del repo, no desde la preparación:
+  la generación dejada para el arranque ya llevaba Burp, CurseForge y Thunderbird
+  aunque `main` aún no los declarase.
