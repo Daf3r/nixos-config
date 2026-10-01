@@ -398,6 +398,7 @@ run_local_bump bump-brave-origin.sh brave-origin brave-origin.nix
 run_local_bump bump-t3code-app.sh t3code-app t3code-app.nix
 run_local_bump bump-chatgpt-desktop.sh chatgpt-desktop chatgpt-desktop.nix
 run_local_bump bump-minecraft-launcher.sh minecraft-launcher minecraft-launcher.nix
+run_local_bump bump-discord.sh discord discord-sources.json
 
 # --- flake inputs -----------------------------------------------------------
 # Snapshot the lock the update is measured *from*, and take it from FETCH_HEAD
@@ -631,9 +632,9 @@ fi
 # that half-written derivation onto auto/update, where it looks exactly like a
 # reviewed change. Delete them, and exclude the pattern from staging as well so
 # one that reappears between the two steps still cannot be committed.
-find "$WT/pkgs" -maxdepth 1 -type f -name '*.nix.??????' -print -delete >>"$LOG" 2>&1 || true
+find "$WT/pkgs" -maxdepth 1 -type f \( -name '*.nix.??????' -o -name '*.json.??????' \) -print -delete >>"$LOG" 2>&1 || true
 
-git -C "$WT" add -A -- . ':(exclude,glob)pkgs/*.nix.??????' >>"$LOG" 2>&1 \
+git -C "$WT" add -A -- . ':(exclude,glob)pkgs/*.nix.??????' ':(exclude,glob)pkgs/*.json.??????' >>"$LOG" 2>&1 \
   || fail check_failed "could not stage the prepared update"
 
 if git -C "$WT" diff --cached --quiet; then

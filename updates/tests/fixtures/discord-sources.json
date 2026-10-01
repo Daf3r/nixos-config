@@ -1,0 +1,17 @@
+{
+  "linux-stable": {
+    "distro": {
+      "hash": "sha256-SS+fRoAZv/8V3YIPX4Ng/xukej6I1j2Jt1mru/TOGKk=",
+      "url": "https://stable.dl2.discordapp.net/distro/app/stable/linux/x64/1.0.159/full.distro"
+    },
+    "kind": "distro",
+    "modules": {
+      "discord_utils": {
+        "hash": "sha256-Flg1s5h1b4wO2Fa1jyxntXZAKsQjfGrwAp3f9qqv568=",
+        "url": "https://stable.dl2.discordapp.net/distro/app/stable/linux/x64/1.0.159/discord_utils/1/full.distro",
+        "version": 1
+      }
+    },
+    "version": "1.0.159"
+  }
+}

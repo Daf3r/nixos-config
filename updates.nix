@@ -107,6 +107,7 @@ let
     "bump-t3code-app"
     "bump-chatgpt-desktop"
     "bump-minecraft-launcher"
+    "bump-discord"
     "check-brave-vaapi"
   ];
 

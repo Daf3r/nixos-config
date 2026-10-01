@@ -44,8 +44,8 @@ Los cambios locales del repositorio se conservan si no chocan con la actualizaci
 si Git detecta que una ruta sería sobrescrita, `upd` se detiene antes de activar nada.
 
 El chequeo cubre los inputs de Nix y las aplicaciones empaquetadas localmente: Brave
-Origin, T3 Code, el paquete oficial de ChatGPT para Linux y, cuando existe su declaración,
-Minecraft Launcher. Para las URLs mutables compara también el hash de la fuente además de
+Origin, T3 Code, el paquete oficial de ChatGPT para Linux, Discord y, cuando existe su
+declaración, Minecraft Launcher. Para las URLs mutables compara también el hash de la fuente además de
 la versión, así detecta un `latest` republicado antes de que rompa la siguiente compilación.
 Claude Code se reporta como actualización gestionada por npm; Hermes, Grok y Kimi conservan
 sus propios mecanismos de autoactualización y el motor de Nix no los modifica.
@@ -96,6 +96,7 @@ los comentarios de este repo son largos a propósito.
 | `pkgs/chatgpt-desktop.nix` | `.deb` oficial de ChatGPT para Linux |
 | `pkgs/t3code-app.nix` | AppImage de T3 Code |
 | `pkgs/minecraft-launcher.nix` | Bootstrap del launcher de Mojang, cuando está activado |
+| `pkgs/discord.nix` + `pkgs/discord-sources.json` | Discord de nixpkgs fijado a la versión del manifiesto oficial de Discord |
 | `devshells/` | Toolchains por proyecto — ver [Entornos de desarrollo](#entornos-de-desarrollo) |
 | `config/niri/config.kdl` | Config de niri, editable en vivo |
 | `config/nvim/` | Starter de LazyVim — de terceros, ver abajo |

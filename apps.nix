@@ -256,7 +256,11 @@ in
     # the same root cause as the Clerk login problem that went unexplained for
     # months. Naming gnome-libsecret points it at the keyring that is already
     # running.
-    (discord.override {
+    #
+    # Built from ./pkgs/discord.nix rather than pkgs.discord: same package, but
+    # pinned to the release `upd` finds in Discord's manifest, because nixpkgs
+    # trails upstream and Discord refuses to run once it is one release behind.
+    (pkgs.callPackage ./pkgs/discord.nix {
       commandLineArgs = "--use-gl=angle --use-angle=gl --password-store=gnome-libsecret";
     })
 
