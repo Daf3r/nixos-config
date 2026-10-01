@@ -79,8 +79,17 @@ in
   # user npmrc, `npm install -g` tries to write there and fails with EACCES.
   # Keep global CLI tools (Codex, and optionally Claude Code) in the user's
   # writable profile instead; the bin directory is already on PATH above.
+  #
+  # allow-scripts exists because npm 12 blocks install-time lifecycle scripts by
+  # default. Claude Code's npm package ships `bin/claude.exe` as a 500-byte stub
+  # and relies on its postinstall (install.cjs) to overwrite it with the native
+  # binary. With the script blocked, `npm install -g @anthropic-ai/claude-code`
+  # (or any update) finishes "successfully" and `claude` then dies with
+  # "claude native binary not installed". Whitelisting just this package keeps
+  # the block on for everything else.
   home.file.".npmrc".text = ''
     prefix=${config.home.homeDirectory}/.npm-global
+    allow-scripts=@anthropic-ai/claude-code
   '';
 
   home.packages = with pkgs; [
