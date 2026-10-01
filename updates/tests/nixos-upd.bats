@@ -364,3 +364,29 @@ engine_stubbed_lib() {
   jq -e 'has("reboot_reason") | not' "$STATE/status.json"
   [ "$(cat "$REBOOT_STUB_COUNT")" = "2" ]
 }
+
+# The prepared commit is `git add -A` over a clone that `reset --hard` only
+# resets, and reset leaves untracked files where they are. A noctalia.nix left
+# over in the clone from before Noctalia was removed from the repo was therefore
+# staged into every auto/update commit, and the first `upd apply` that
+# fast-forwarded the user's main carried the dead module (and its palette) into
+# it. The clone is disposable by its own comment, so it is swept clean too.
+@test "a stray untracked file in the clone never reaches the prepared commit" {
+  run engine
+  [ "$status" -eq 0 ]
+
+  printf '{ ... }: { }\n' > "$STATE/wt/leftover.nix"
+  mkdir -p "$STATE/wt/config/old"
+  printf '{}\n' > "$STATE/wt/config/old/palette.json"
+
+  run engine
+  [ "$status" -eq 0 ]
+
+  [ ! -e "$STATE/wt/leftover.nix" ]
+  run git -C "$STATE/wt" ls-tree -r --name-only auto/update
+  [[ "$output" != *leftover.nix* ]]
+  [[ "$output" != *palette.json* ]]
+  # What the sweep must not take with it: the `result` symlink is the GC root
+  # pinning the built closure, and it is ignored precisely so it survives.
+  [ -L "$STATE/wt/result" ]
+}

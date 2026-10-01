@@ -342,6 +342,14 @@ git -C "$WT" fetch --quiet "$REPO" "$BRANCH" >>"$LOG" 2>&1 \
 # whatever is in this clone's working tree is by definition disposable.
 git -C "$WT" reset --hard --quiet FETCH_HEAD >>"$LOG" 2>&1 \
   || fail check_failed "could not reset the worktree to FETCH_HEAD"
+# `reset --hard` leaves untracked files alone, and `git add -A` further down
+# stages whatever is there. A module the repo dropped long ago but that stayed
+# on disk in this clone (noctalia.nix, left since 2026-08-21) was committed into
+# every prepared update and, once `upd apply` fast-forwarded the user's branch,
+# into the user's branch. No -x: ignored paths survive, which keeps $WT/result,
+# the GC root pinning the closure `upd apply` is about to switch to.
+git -C "$WT" clean -fdq >>"$LOG" 2>&1 \
+  || fail check_failed "could not remove untracked files from the worktree"
 # Sit on auto/update from the start, so the commit at the end lands on the
 # branch the reader is told to look at rather than on a copy of main that a
 # side pointer is then dragged to.
