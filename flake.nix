@@ -30,9 +30,9 @@
     # build is cheap; this is not the Electron situation the old ChatGPT
     # repackager described.
     # Pinned to a release tag, NOT to a branch, and that is the point. The
-    # default branch builds `1.6-beta`, so tracking it would buy exactly the
+    # default branch may contain unreleased changes, so tracking it would buy
     # pre-release churn this migration was supposed to escape — the old shell,
-    # Noctalia v5, was beta too. v1.5.3 is the newest tagged release (2026-07-27).
+    # Noctalia v5, was beta too. v1.6.2 is the reviewed stable release (2026-09-17).
     #
     # A tag never moves, so `nix flake update` cannot bump this: upgrading means
     # editing the version below by hand, on purpose, after reading the release
@@ -40,10 +40,10 @@
     #   gh release list -R AvengeMedia/DankMaterialShell -L 5
     #
     # Do not assume a steady release cadence when deciding how often to look:
-    # v1.5.0 through v1.5.3 landed within three weeks, but v1.4.6 to v1.5.0 was
+    # v1.6.0 through v1.6.2 landed within two weeks, but v1.4.6 to v1.5.0 was
     # a two-month gap.
     dms = {
-      url = "github:AvengeMedia/DankMaterialShell/v1.5.3";
+      url = "github:AvengeMedia/DankMaterialShell/v1.6.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
