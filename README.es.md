@@ -43,6 +43,12 @@ ese estado en la barra y ofrece comprobarlo o aplicarlo mediante polkit.
 Los cambios locales del repositorio se conservan si no chocan con la actualización;
 si Git detecta que una ruta sería sobrescrita, `upd` se detiene antes de activar nada.
 
+`upd apps` es la misma ejecución sin `nix flake update`: solo se actualizan las apps
+empaquetadas a mano, nixpkgs, el kernel y los drivers no se mueven, y el informe lo dice.
+`upd apps --apply` las aplica en caliente si la ejecución no pide reinicio. Existe para
+apps como Discord, que se niega a abrir una versión vieja mientras nixpkgs va días por
+detrás de upstream.
+
 El chequeo cubre los inputs de Nix y las aplicaciones empaquetadas localmente: Brave
 Origin, T3 Code, el paquete oficial de ChatGPT para Linux, Discord y, cuando existe su
 declaración, Minecraft Launcher. Para las URLs mutables compara también el hash de la fuente además de

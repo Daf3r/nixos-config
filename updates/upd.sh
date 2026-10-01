@@ -249,6 +249,16 @@ case "$cmd" in
       echo "estado: $state   comprobado: $when"
     fi
 
+    # A run made by `upd apps` is not the whole-system report, and "todo al dia"
+    # or a short change list under it would be read as if it were. Said before
+    # anything else is printed, and only when it is true: a full report carries
+    # no scope line at all.
+    scope="$(jq -r '.scope // "full"' "$STATUS")" \
+      || die "no pude leer el alcance de esta comprobacion; no imprimo un informe a medias"
+    if [ "$scope" = apps ]; then
+      echo "alcance: solo apps; no se mueve nixpkgs, ni el kernel, ni los drivers"
+    fi
+
     rc=0
     case "$state" in
       current)
@@ -785,6 +795,58 @@ case "$cmd" in
     esac
     ;;
 
+  apps)
+    # Prepare only the hand-packaged apps -- Discord among them, which refuses to
+    # run a release behind while nixpkgs trails it by days -- and, with --apply,
+    # switch to the result in place. The engine does the same run as `check`
+    # minus `nix flake update`, so nixpkgs, the kernel and the drivers do not
+    # move and the closure diff is the apps and nothing else.
+    #
+    # --apply is conditional on what the engine says, not on what this command
+    # hopes: it goes ahead only for a `ready` that does not ask for a reboot.
+    # Anything else stops here and names the command that does fit, because
+    # switching in place under a kernel or driver change is exactly the mismatch
+    # `upd apply --boot` exists to avoid.
+    apply_after=0
+    case "${2:-}" in
+      "") ;;
+      --apply) apply_after=1 ;;
+      *) die "uso: upd apps [--apply]; no entiendo: '$2'" ;;
+    esac
+
+    # The same lookup `check` does, but not an `exec`: the report has to be shown
+    # after the engine finishes, and the apply decision made on what it wrote.
+    if [ -n "${NIXOS_UPD:-}" ]; then
+      engine=("$NIXOS_UPD")
+    elif command -v nixos-upd >/dev/null 2>&1; then
+      engine=(nixos-upd)
+    elif [ -f "$SELF_DIR/nixos-upd.sh" ]; then
+      engine=(bash "$SELF_DIR/nixos-upd.sh")
+    else
+      die "no encuentro el motor (ni nixos-upd en el PATH ni $SELF_DIR/nixos-upd.sh)"
+    fi
+
+    engine_rc=0
+    "${engine[@]}" --apps || engine_rc=$?
+    bash "${BASH_SOURCE[0]}" show || true
+    if [ "$engine_rc" -ne 0 ]; then
+      die "el motor termino con codigo $engine_rc; no sigo" "$engine_rc"
+    fi
+    [ "$apply_after" -eq 1 ] || exit 0
+
+    require_readable_status
+    state="$(jq -r '.state' "$STATUS")"
+    if [ "$state" != ready ]; then
+      die "no aplico: la comprobacion termino en '$state', no hay nada preparado"
+    fi
+    reboot_rec="$(jq -r '.reboot_recommended // false' "$STATUS")" \
+      || die "no pude leer si esta preparacion pide reinicio; no aplico a ciegas"
+    if [ "$reboot_rec" != false ]; then
+      die "no aplico en caliente: lo preparado pide reinicio; usa \`upd apply --boot\`"
+    fi
+    exec bash "${BASH_SOURCE[0]}" apply
+    ;;
+
   check)
     # Run the engine directly rather than through `systemctl start --wait
     # nixos-upd.service`: the unit runs as daf3r and StateDirectory leaves
@@ -808,7 +870,7 @@ case "$cmd" in
 
   *)
     cat >&2 <<'EOF'
-uso: upd [show|status|diff|apply|check]
+uso: upd [show|status|diff|apply|check|apps]
 
   show    (por defecto) que dejo preparado la ultima comprobacion
   status  `upd status --json`: lo mismo en JSON y con los bloqueos de ahora
@@ -824,6 +886,9 @@ uso: upd [show|status|diff|apply|check]
           limpia el estado despues de una activacion exitosa; `boot` conserva
           lo preparado hasta que se reinicie
   check   lanza una comprobacion ahora, en primer plano
+  apps    como `check`, pero solo las apps empaquetadas (Discord, Brave, T3
+          Code, ChatGPT...): no mueve nixpkgs, el kernel ni los drivers
+          --apply    ademas las aplica en caliente si no piden reinicio
 EOF
     exit 1
     ;;

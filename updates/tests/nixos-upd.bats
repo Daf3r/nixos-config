@@ -390,3 +390,60 @@ engine_stubbed_lib() {
   # pinning the built closure, and it is ignored precisely so it survives.
   [ -L "$STATE/wt/result" ]
 }
+
+# --- `--apps`: the packaged apps without moving the system ------------------
+#
+# Discord will not run a release behind, nixpkgs trails it by days, and a full
+# update drags a kernel/NVIDIA/mesa bump (hence a reboot) along with whatever
+# it moves. `--apps` is the same run minus `nix flake update`: the hand-packaged
+# apps are bumped, the result built and prepared, and flake.lock stays exactly
+# as committed, so the diff against the running system is the apps and nothing
+# else and `upd apply` can switch in place.
+
+engine_apps() {
+  REPO="$REPO" BRANCH=main STATE_DIR="$STATE" FLAKE_ATTR=prueba bash "$ENGINE" --apps
+}
+
+@test "an apps run bumps the packaged apps and leaves flake.lock as committed" {
+  run engine_apps
+  [ "$status" -eq 0 ]
+  jq -e '.state == "ready" and .scope == "apps"' "$STATE/status.json"
+
+  # The whole point: no input moves, so nixpkgs, the kernel and the drivers stay.
+  cmp "$REPO/flake.lock" "$STATE/wt/flake.lock"
+  jq -e '[.changes[] | select(.kind == "input")] == []' "$STATE/status.json"
+
+  # And the apps are still bumped, exactly as in a full run.
+  jq -e '[.changes[] | select(.kind == "local_pkg") | .name] | sort
+         == ["brave-origin", "chatgpt-desktop", "t3code-app"]' "$STATE/status.json"
+  jq -e '.changes[] | select(.name == "t3code-app") | .to == "0.0.34"' "$STATE/status.json"
+}
+
+@test "an apps run never reports inputs from a lock snapshot left by an earlier full run" {
+  run engine
+  [ "$status" -eq 0 ]
+  [ -f "$STATE/lock.before" ]
+  # The full run's snapshot is still on disk, and diffing it against today's
+  # untouched lock would invent an input move that never happened.
+  cp "$WORK/lock-after.json" "$STATE/lock.before"
+
+  run engine_apps
+  [ "$status" -eq 0 ]
+  jq -e '[.changes[] | select(.kind == "input")] == []' "$STATE/status.json"
+  [ ! -e "$STATE/lock.before" ]
+}
+
+@test "a full run says its scope is full" {
+  run engine
+  [ "$status" -eq 0 ]
+  jq -e '.scope == "full"' "$STATE/status.json"
+  jq -e '[.changes[] | select(.kind == "input")] | length == 1' "$STATE/status.json"
+}
+
+@test "an unknown argument is refused without touching the status on disk" {
+  printf '{"schema":2,"state":"ready"}\n' > "$STATE/status.json"
+  run bash -c "REPO='$REPO' BRANCH=main STATE_DIR='$STATE' bash '$ENGINE' --nope"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown argument"* ]]
+  jq -e '.state == "ready"' "$STATE/status.json"
+}

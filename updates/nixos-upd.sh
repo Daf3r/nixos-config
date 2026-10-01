@@ -40,6 +40,22 @@ WT="$STATE_DIR/wt"
 LOG="$STATE_DIR/last.log"
 STATUS="$STATE_DIR/status.json"
 
+# `--apps` prepares only the hand-packaged apps: the same run without
+# `nix flake update`, so flake.lock stays as committed and nixpkgs, the kernel
+# and the drivers do not move. That is what lets `upd apply` switch in place, no
+# reboot, for something like Discord, which refuses to run a release behind while
+# nixpkgs trails it by days. Parsed before anything touches $STATUS: a typo in an
+# argument must not cost the user the report already on disk.
+APPS_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --apps) APPS_ONLY=1 ;;
+    *) echo "nixos-upd: unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
+SCOPE=full
+[ "$APPS_ONLY" -eq 1 ] && SCOPE=apps
+
 # Every path that gives up without writing a fresh status must first remove the
 # old one. Leaving yesterday's file behind is worse than leaving none: a reader
 # has no way to tell a current `ready` from one describing a build that no
@@ -416,12 +432,21 @@ run_local_bump bump-discord.sh discord discord-sources.json
 # On failure the half-written file is removed rather than left: an empty
 # lock.before is unparseable, and a stale one from an earlier run would be
 # silently diffed against as if it were today's baseline.
-if ! git -C "$WT" show FETCH_HEAD:flake.lock > "$STATE_DIR/lock.before" 2>>"$LOG"; then
+if [ "$APPS_ONLY" -eq 1 ]; then
+  # Nothing moves in the lock, so there is nothing to diff -- and a lock.before
+  # left by an earlier full run must go, or inputs_diff below would compare that
+  # old baseline with today's untouched lock and report an input move that never
+  # happened.
   rm -f "$STATE_DIR/lock.before" || true
-  warn lock_snapshot_failed "could not snapshot the previous flake.lock, so status.json will not name which inputs moved (see $LOG)"
-fi
+  log "apps run: flake.lock stays as committed, so nixpkgs and the kernel do not move"
+else
+  if ! git -C "$WT" show FETCH_HEAD:flake.lock > "$STATE_DIR/lock.before" 2>>"$LOG"; then
+    rm -f "$STATE_DIR/lock.before" || true
+    warn lock_snapshot_failed "could not snapshot the previous flake.lock, so status.json will not name which inputs moved (see $LOG)"
+  fi
 
-nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake update failed"
+  nix flake update --flake "$WT" >>"$LOG" 2>&1 || fail check_failed "nix flake update failed"
+fi
 
 # --- build ------------------------------------------------------------------
 # From inside $WT, because `nixos-rebuild build` drops its `result` symlink in
@@ -662,9 +687,11 @@ ready_body="$(jq -n \
   --argjson closure "$closure_json" \
   --argjson reboot "$reboot_json" \
   --arg log "$LOG" \
+  --arg scope "$SCOPE" \
   --argjson warnings "$warnings" \
   --argjson unmanaged "$unmanaged" \
   '{build: {ok: true, log: $log},
+    scope: $scope,
     branch: "auto/update",
     changes: ($inputs + $local),
     closure_diff: $closure,

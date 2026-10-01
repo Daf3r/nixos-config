@@ -1378,3 +1378,108 @@ EOF
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.activation.pendingBoot == false'
 }
+
+# --- `upd apps`: packaged apps only, applied in place -----------------------
+#
+# The same engine run without `nix flake update`, so what it prepares is the
+# hand-packaged apps and `upd apply` can switch without a reboot. The stub engine
+# does not write a report; the test lays down the one the real engine would have
+# written and checks the reader's side: which arguments reached the engine, what
+# was shown, and when applying is allowed.
+
+apps_motor() { # records its arguments; the status was written by the test
+  { printf '#!%s\n' "$BASH"
+    printf 'printf "%%s\\n" "$*" > "%s/motor-args"\n' "$WORK"
+  } > "$WORK/bin/motor"
+  chmod +x "$WORK/bin/motor"
+}
+
+apps_ready_status() { # $1 reboot_recommended (true|false)
+  ready_status
+  jq --argjson r "$1" '. + {scope: "apps", reboot_recommended: $r}' "$STATE/status.json" \
+    > "$STATE/status.new" && mv "$STATE/status.new" "$STATE/status.json"
+}
+
+@test "apps runs the engine in apps-only mode and then shows what it prepared" {
+  apps_motor
+  apps_ready_status false
+  run env NIXOS_UPD="$WORK/bin/motor" REPO="$WORK/repo" STATE_DIR="$STATE" \
+      GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" apps
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/motor-args")" = "--apps" ]
+  [[ "$output" == *"estado: ready"* ]]
+  [[ "$output" == *"alcance: solo apps"* ]]
+  # Nothing is applied by merely preparing.
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "a full report says nothing about its scope" {
+  ready_status
+  run upd show
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"alcance"* ]]
+}
+
+@test "apps --apply switches in place when no reboot is needed" {
+  make_rig
+  apps_motor
+  apps_ready_status false
+  prepared="$(git -C "$STATE/wt" rev-parse auto/update)"
+  run env NIXOS_UPD="$WORK/bin/motor" REPO="$REPO" STATE_DIR="$STATE" \
+      GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" apps --apply
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/motor-args")" = "--apps" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$prepared" ]
+  [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
+}
+
+@test "apps --apply refuses to switch in place when the run asks for a reboot" {
+  make_rig
+  apps_motor
+  apps_ready_status true
+  before="$(git -C "$REPO" rev-parse HEAD)"
+  run env NIXOS_UPD="$WORK/bin/motor" REPO="$REPO" STATE_DIR="$STATE" \
+      GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" apps --apply
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"reinicio"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$before" ]
+}
+
+@test "apps --apply does not apply a run that did not end ready" {
+  make_rig
+  apps_motor
+  status_json '{"schema":2,"state":"build_failed","checked_at":"2026-10-01T00:00:00-06:00","build":{"ok":false,"log":"/l"},"warnings":[]}'
+  run env NIXOS_UPD="$WORK/bin/motor" REPO="$REPO" STATE_DIR="$STATE" \
+      GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" apps --apply
+  [ "$status" -eq 1 ]
+  # `apply` would also refuse on its own; what is held down here is that this
+  # command says why before it ever gets that far.
+  [[ "$output" == *"no aplico: la comprobacion termino en 'build_failed'"* ]]
+  [ ! -s "$NH_MARKER" ]
+}
+
+@test "apps refuses an argument it does not know" {
+  apps_motor
+  run env NIXOS_UPD="$WORK/bin/motor" STATE_DIR="$STATE" bash "$UPD" apps --nope
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"--nope"* ]]
+  [ ! -e "$WORK/motor-args" ]
+}
+
+@test "apps stops when the engine itself fails, even with a ready report on disk" {
+  # A full rig and a ready, no-reboot report: a yesterday's report like this one
+  # is exactly what would let `apply` succeed if the engine's failure were
+  # ignored, so the switch not happening is down to the engine's exit code alone.
+  make_rig
+  { printf '#!%s\n' "$BASH"; printf 'exit 7\n'; } > "$WORK/bin/motor"
+  chmod +x "$WORK/bin/motor"
+  apps_ready_status false
+  before="$(git -C "$REPO" rev-parse HEAD)"
+  run env NIXOS_UPD="$WORK/bin/motor" REPO="$REPO" STATE_DIR="$STATE" \
+      GIT_CEILING_DIRECTORIES="$WORK" bash "$UPD" apps --apply
+  [ "$status" -eq 7 ]
+  [[ "$output" == *"el motor termino con codigo 7"* ]]
+  [ ! -s "$NH_MARKER" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$before" ]
+}

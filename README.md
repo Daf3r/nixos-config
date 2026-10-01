@@ -43,6 +43,12 @@ in the bar and offers checking or applying it through polkit.
 Local repository changes are preserved when they do not overlap the update; if Git
 detects that a path would be overwritten, `upd` stops before activating anything.
 
+`upd apps` is the same run without `nix flake update`: only the locally packaged apps are
+bumped, nixpkgs, the kernel and the drivers stay where they are, and the report says so.
+`upd apps --apply` then switches in place when the run does not ask for a reboot. It exists
+for apps such as Discord, which refuses to run a release behind while nixpkgs trails
+upstream by days.
+
 The check covers Nix inputs plus the locally packaged apps: Brave Origin, T3 Code,
 the official ChatGPT Linux package, Discord and, when its declaration is present,
 Minecraft Launcher. For mutable upstream URLs it compares the source hash as well as the
