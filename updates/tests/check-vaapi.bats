@@ -25,6 +25,28 @@ teardown() {
   [[ "$output" == *"missing: VaapiOnNvidiaGPUs"* ]]
 }
 
+# Chromium stopped embedding the plain feature name around Brave 1.94 and keeps
+# only the C++ identifier, `k<Name>`; the runtime name is that string minus the
+# leading `k`. Measured on 1.93.136 vs 1.96.59: SkiaGraphite, OverlayScrollbar,
+# ParallelDownloading and the three VA-API names all went from `Name` to
+# `kName`. Reading only the plain form made every check since then warn that
+# all three features were missing while they were there.
+@test "accepts the k-prefixed identifier Chromium embeds in newer builds" {
+  printf 'kAcceleratedVideoDecodeLinuxGL\nkVaapiOnNvidiaGPUs\nkVaapiIgnoreDriverChecks\n' \
+    > "$WORK/k-form"
+  run bash "$SCRIPT" "$WORK/k-form"
+  [ "$status" -eq 0 ]
+  [ "$output" = "" ]
+}
+
+@test "still reports a name when neither the plain nor the k form is present" {
+  printf 'kAcceleratedVideoDecodeLinuxGL\nkVaapiIgnoreDriverChecks\nVaapiOnNvidiaGPUsRenamed\n' \
+    > "$WORK/k-missing-one"
+  run bash "$SCRIPT" "$WORK/k-missing-one"
+  [ "$status" -eq 0 ]
+  [ "$output" = "missing: VaapiOnNvidiaGPUs" ]
+}
+
 @test "exits 0 even when names are missing, so it never blocks an update" {
   run bash "$SCRIPT" "$WORK/missing-one"
   [ "$status" -eq 0 ]

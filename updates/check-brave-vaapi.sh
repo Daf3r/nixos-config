@@ -49,8 +49,14 @@ trap 'rm -f "$extracted"' EXIT
 # than as passed. A caller that genuinely must not abort should do the same.
 strings "$binary" > "$extracted"
 
+# A feature counts as present as `Name` or as `kName`. Builds up to Brave 1.93
+# embed the plain name; from 1.94 on Chromium keeps only the C++ identifier and
+# derives the runtime name from it, so the plain line is gone even though the
+# feature is there. Checking only the plain form reported all three names as
+# missing on every run since then. A name that is in neither form is still
+# reported, which is the rename this script exists to catch.
 for name in "${names[@]}"; do
-  if ! grep -qx "$name" "$extracted"; then
+  if ! grep -qxE "k?$name" "$extracted"; then
     echo "missing: $name"
   fi
 done
