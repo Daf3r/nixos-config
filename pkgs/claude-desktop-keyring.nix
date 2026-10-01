@@ -35,19 +35,20 @@ runCommand "claude-desktop-keyring-${claude-desktop.version}"
     makeWrapper ${claude-desktop}/bin/claude-desktop $out/bin/claude-desktop \
       --add-flags "--password-store=gnome-libsecret"
 
-    # Everything except the desktop entries is fine as-is; only they hardcode the
-    # unwrapped binary, and they do it three times — the main Exec plus the "New
-    # chat" and "New code" actions, which would otherwise slip past the wrapper.
+    # Keep the upstream desktop-entry name: Anthropic can change it between
+    # releases. Its Exec fields point directly at the unwrapped binary, including
+    # the "New chat" and "New code" actions, so rewrite every desktop entry.
     for entry in ${claude-desktop}/share/*; do
       name="$(basename "$entry")"
       [ "$name" = applications ] && continue
       ln -s "$entry" "$out/share/$name"
     done
 
-    substitute \
-      ${claude-desktop}/share/applications/claude-desktop.desktop \
-      $out/share/applications/claude-desktop.desktop \
-      --replace-fail \
-        "${claude-desktop}/bin/claude-desktop" \
-        "$out/bin/claude-desktop"
+    for entry in ${claude-desktop}/share/applications/*.desktop; do
+      name="$(basename "$entry")"
+      substitute "$entry" "$out/share/applications/$name" \
+        --replace-fail \
+          "${claude-desktop}/bin/claude-desktop" \
+          "$out/bin/claude-desktop"
+    done
   ''
