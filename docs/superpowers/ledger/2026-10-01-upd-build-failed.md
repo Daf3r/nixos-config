@@ -76,8 +76,9 @@ fast-forward sobre uno de esos commits.
 - **No** se commitea el parche de `claude-usage` (`usage-provider.patch`): sólo
   servía para ocultar Claude y se quiere ver Claude y Codex a la vez. Era además
   un parche sobre un plugin de terceros, que se rompe con cualquier cambio
-  upstream de su `Daemon.qml`. Copia fuera del repo; quien lo quiera recuperar
-  lo tiene en el commit de la sesión, no en `main`.
+  upstream de su `Daemon.qml`. No está en ningún commit: se descartó sin
+  guardarlo en el repo. Si hiciera falta de nuevo, se reescribe (son tres
+  hunks pequeños en `Daemon.qml` y `Settings.qml`, más un test).
 - `apply` reconstruye desde el working tree del repo, no desde la preparación:
   la generación dejada para el arranque ya llevaba Burp, CurseForge y Thunderbird
   aunque `main` aún no los declarase.
