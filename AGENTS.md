@@ -88,5 +88,5 @@ ciegas: se conserva el diagnóstico y se vuelve por el menú de systemd-boot o
 - Globales de npm (Codex, Claude Code) en `~/.npm-global`, como usuario, nunca
   `sudo npm`; el prefijo está en `home.nix` y su `bin` en `PATH`.
 - Las dependencias de proyecto no van globales: cada proyecto tiene su devShell
-  (`remesafam` con pnpm, `gymnova` con npm y Rust).
+  (`remesafam` con pnpm, `flowfit` con npm y Rust).
 - La autenticación de Codex y demás CLIs es interactiva y nunca se versiona.

@@ -207,7 +207,7 @@ npm install --global @anthropic-ai/claude-code
 ```
 
 Las dependencias de cada proyecto siguen viviendo en sus devshells: `remesafam` usa pnpm y
-`gymnova` usa npm. No ejecutes una instalación global para las dependencias de la aplicación.
+`flowfit` usa npm. No ejecutes una instalación global para las dependencias de la aplicación.
 
 ## 7. Después del primer arranque
 
