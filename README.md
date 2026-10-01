@@ -89,7 +89,8 @@ repo are long on purpose.
 | `wallpaper.nix` | `wallpaper-rotate`, driving DMS's wallpaper IPC |
 | `gtk.nix` / `qt.nix` | Cursor, themes, icons, fonts — kept in step with each other |
 | `home.nix` | home-manager entrypoint, out-of-store symlinks |
-| `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Packages |
+| `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Packages, including Burp Suite Community |
+| `docs/runbooks/2026-08-30-burpsuite.md` | Burp Suite setup, isolated browser proxy and local Docker lab |
 | `terminal/` | kitty, fish, fastfetch, nvim, CLI tools |
 | `pkgs/brave-origin.nix` | Brave Origin, packaged from Brave's own `.deb` |
 | `pkgs/chatgpt-desktop.nix` | Official ChatGPT Linux `.deb` |
@@ -109,6 +110,10 @@ effect immediately — `~/.config/niri/config.kdl` resolves back to this repo.
 Everything else needs `nh os switch`. `starship.toml` is read through `$STARSHIP_CONFIG`
 and the palettes in `config/themes/` are copied into the store, so none of it is live
 despite living under `config/`.
+
+Burp Suite is installed by `apps.nix` and therefore also needs a rebuild. Its local proxy
+settings belong to an isolated browser profile, not to the system-wide configuration; see
+the [Burp Suite runbook](docs/runbooks/2026-08-30-burpsuite.md).
 
 One directory here is written *by* the shell rather than by hand: `config/niri/dms/`,
 generated wholesale by DMS on every run and gitignored. The palette block in

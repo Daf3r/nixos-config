@@ -176,8 +176,18 @@ in
     # --password-store flag it has to be launched with.
     (pkgs.callPackage ./pkgs/t3code-app.nix { })
 
+    # CurseForge publishes an official Linux AppImage, not a Nix package. It
+    # is wrapped declaratively here so NixOS does not need Debian's dpkg state.
+    (pkgs.callPackage ./pkgs/curseforge.nix { })
+
     kdePackages.dolphin # SUPER+E in config/niri/config.kdl
     kdePackages.kate # SUPER+K
+
+    # Burp Suite Community from nixpkgs. The package wraps PortSwigger's
+    # official JAR in an FHS environment, supplies its JDK and installs a
+    # desktop entry. Nix remains the update source; keep license acceptance
+    # interactive instead of setting burpsuite.accept_license here.
+    burpsuite
 
     # Cursor, the AI editor. A VSCode fork, so Electron, so it picks its
     # credential backend by sniffing XDG_CURRENT_DESKTOP — which says "niri"
@@ -209,6 +219,11 @@ in
     # Nextcloud desktop sync client. Qt, so it picks up the platform theme and
     # palette wired in ../qt.nix rather than falling back to Breeze.
     nextcloud-client
+
+    # Desktop email client. Mailcow recommends Thunderbird, and it supports
+    # IMAP/SMTP plus calendars and contacts without putting mailbox credentials
+    # in this repository. Add the account interactively on first launch.
+    thunderbird
 
     # Two Discord clients on purpose, because they are not interchangeable here.
     #

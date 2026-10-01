@@ -89,7 +89,8 @@ los comentarios de este repo son largos a propósito.
 | `wallpaper.nix` | `wallpaper-rotate`, que rota el fondo por el IPC de DMS |
 | `gtk.nix` / `qt.nix` | Cursor, temas, iconos, fuentes — mantenidos en sintonía entre sí |
 | `home.nix` | Punto de entrada de home-manager, symlinks fuera del store |
-| `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Paquetes |
+| `apps.nix`, `terminal.nix`, `fontsAndNeeds.nix` | Paquetes, incluido Burp Suite Community |
+| `docs/runbooks/2026-08-30-burpsuite.md` | Configuración de Burp Suite, proxy aislado y laboratorio Docker local |
 | `terminal/` | kitty, fish, fastfetch, nvim, herramientas de CLI |
 | `pkgs/brave-origin.nix` | Brave Origin, empaquetado desde el `.deb` de Brave |
 | `pkgs/chatgpt-desktop.nix` | `.deb` oficial de ChatGPT para Linux |
@@ -109,6 +110,10 @@ surte efecto al momento — `~/.config/niri/config.kdl` resuelve de vuelta a est
 Todo lo demás necesita `nh os switch`. `starship.toml` se lee vía `$STARSHIP_CONFIG` y las
 paletas de `config/themes/` se copian al store, así que nada de eso es en vivo pese a estar
 bajo `config/`.
+
+Burp Suite se instala desde `apps.nix` y por ello también necesita un rebuild. Su proxy local
+debe vivir en un perfil de navegador aislado, no en la configuración global del sistema; ver
+la [guía de Burp Suite](docs/runbooks/2026-08-30-burpsuite.md).
 
 Un solo directorio de aquí lo escribe el shell y no una mano: `config/niri/dms/`, que DMS
 genera entero en cada ejecución y está gitignorado. El bloque de paleta de
