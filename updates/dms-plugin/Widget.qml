@@ -115,7 +115,7 @@ PluginComponent {
     // a permanent "todo al dia" would be a sentence nobody reads after the
     // first week, while the two failures have a message that belongs in the
     // panel, where there is room for it and something to do about it.
-    readonly property string pillText: root.view.state === "ready" ? root.view.summary : ""
+    readonly property string pillText: (root.view.state === "ready" || root.view.state === "pending_boot") ? root.view.summary : ""
 
     horizontalBarPill: Component {
         Item {

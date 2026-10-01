@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, osConfig, ... }:
 
 # DankMaterialShell, the session shell since 2026-08-10 (replacing Noctalia
 # v5, fully removed on 2026-08-21).
@@ -103,7 +103,16 @@
     # derivation — it is the loop a human runs while editing logic.js.
     plugins.nixos-upd = {
       enable = true;
-      src = ./updates/dms-plugin;
+      # Keep the status reader and the QML contract on the same version,
+      # including while a boot generation is staged but not running yet.
+      src = let
+        updater = lib.findFirst (p: lib.getName p == "nixos-upd") null osConfig.environment.systemPackages;
+      in pkgs.runCommand "nixos-upd-plugin" { } ''
+        cp -r ${./updates/dms-plugin} "$out"
+        chmod -R u+w "$out"
+        substituteInPlace "$out/Daemon.qml" \
+          --replace-fail '["upd",' '["${updater}/bin/upd",'
+      '';
     };
   };
 }

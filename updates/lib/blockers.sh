@@ -64,7 +64,6 @@
 #
 # The blocker vocabulary, and the contract for whoever renders it:
 #
-#   dirty_tree        $REPO has uncommitted or untracked changes
 #   wrong_branch      $REPO is on another branch, or on a detached HEAD
 #   engine_running    the engine holds the lock right now
 #   pending_reboot    the system profile and the running system are different
@@ -78,8 +77,8 @@
 #                     do is guess
 #
 # A consumer must treat an unknown `code` as a blocker and show its `detail`
-# rather than skipping it: this list grew from four to six while the subcommand
-# was being written, and it can grow again. The `detail` is the whole message
+# rather than skipping it: this list has grown while the subcommand was being
+# written, and it can grow again. The `detail` is the whole message
 # for a human -- it is what the panel puts next to the disabled button -- so
 # every one of them says what is wrong *and* what would resolve it.
 
@@ -89,6 +88,39 @@
 # can foresee, and nothing but a broken `jq` reaches the caller. (This line said
 # "Always returns 0" for two rounds, three lines under a paragraph explaining
 # why that is not true. The summary next to a signature is what gets read.)
+prepared_blockers() {
+  local repo=$1 wt=$2 prepared scratch index detail
+  # Ask Git's two-tree fast-forward check using a disposable index. Objects
+  # are read from the private clone without fetching or moving local refs.
+  # -n prevents worktree writes; a separate index also isolates lock files.
+  [ -d "$wt/.git" ] || { printf '[]\n'; return; }
+  if ! prepared="$(git -C "$wt" rev-parse --verify 'auto/update^{commit}' 2>/dev/null)"; then
+    printf '[{"code":"prepared_uncheckable","detail":"No se puede leer la preparación; ejecuta upd check."}]\n'
+    return
+  fi
+  scratch="$(mktemp -d)" || return 1
+  index="$(git -C "$repo" rev-parse --path-format=absolute --git-path index 2>/dev/null)" || {
+    rmdir "$scratch"
+    return 1
+  }
+  if ! cp "$index" "$scratch/index"; then
+    rmdir "$scratch"
+    return 1
+  fi
+  if GIT_INDEX_FILE="$scratch/index" \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES="$wt/.git/objects${GIT_ALTERNATE_OBJECT_DIRECTORIES:+:$GIT_ALTERNATE_OBJECT_DIRECTORIES}" \
+    git -C "$repo" read-tree --dry-run -m -u HEAD "$prepared" 2>"$scratch/error"; then
+    printf '[]\n'
+  else
+    detail="$(< "$scratch/error")"
+    detail="${detail//$'\n'/ }"
+    jq -cn --arg detail "La preparación parte de la versión guardada en Git y no encaja con tu configuración local: ${detail:0:400}. Revisa y guarda los cambios de la configuración antes de volver a preparar; repetir la comprobación no resuelve este conflicto." \
+      '[{code: "prepared_conflict", detail: $detail}]'
+  fi
+  rm -f "$scratch/index" "$scratch/index.lock" "$scratch/error"
+  rmdir "$scratch"
+}
+
 blockers_live() {
   local repo=$1 branch=$2 lock=$3 profile_path=$4 current_path=$5
   local cur_branch profile current
@@ -139,7 +171,7 @@ blockers_live() {
     # The two flags are the ones `apply` spells out, for the same reason:
     # status.showUntrackedFiles=no and submodule.<name>.ignore=all each silence
     # half of this check from a config file this engine does not own.
-    local tree_out tree_err tree_rc=0 err_file
+    local tree_err tree_rc=0 err_file
     # `2>/dev/null` on mktemp and a branch for its failure, because without them
     # an unwritable $TMPDIR broke all three promises at the top of this file at
     # once. Measured, exercising this function with $TMPDIR at mode 500:
@@ -152,7 +184,7 @@ blockers_live() {
     if [ -z "$err_file" ]; then
       found+=(repo_uncheckable "no pude crear un fichero temporal para recoger los avisos de git (\$TMPDIR no es escribible); sin eso no distingo un arbol limpio de uno que git no pudo leer, asi que no afirmo ninguna de las dos cosas")
     else
-      tree_out="$(git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none 2>"$err_file")" \
+      GIT_OPTIONAL_LOCKS=0 git -C "$repo" status --porcelain --untracked-files=normal --ignore-submodules=none > /dev/null 2>"$err_file" \
         || tree_rc=$?
       # Read, flatten and cut with expansions only: no `tr | head`, which under
       # `pipefail` is a race rather than a pipeline -- `head` exits at its 200th
@@ -174,8 +206,6 @@ blockers_live() {
 
       if [ "$tree_rc" -ne 0 ] || [ -n "$tree_err" ]; then
         found+=(repo_uncheckable "git no pudo leer entero el arbol de $repo (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no digo que este limpio")
-      elif [ -n "$tree_out" ]; then
-        found+=(dirty_tree "el arbol de trabajo en $repo tiene cambios sin commitear; no se aplica encima de ellos")
       fi
     fi
 

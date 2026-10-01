@@ -30,8 +30,9 @@ set -euo pipefail
 #      `status --json` produced its object -- blockers and all
 #   1  this reader has no answer to give: a status file that is missing,
 #      unparseable or of an unknown schema. And, for `apply` alone, the
-#      refusals to act: a dirty target tree, a clone it cannot vouch for, a
-#      missing tool. Those last three are exit 1 when they stop an apply and
+#      refusals to act: a clone it cannot vouch for, a missing tool, or a
+#      local change that Git cannot preserve while fast-forwarding. Those are
+#      exit 1 when they stop an apply and
 #      exit 0 with a `blockers[]` entry when `status --json` reports them --
 #      refusing to act and reporting that acting would be refused are different
 #      answers, and the panel needs the second one to be an answer at all.
@@ -420,12 +421,25 @@ case "$cmd" in
       "${_UPD_CURRENT_SYSTEM:-/run/current-system}")" \
       || die "no pude calcular los bloqueos en vivo; no emito un objeto sin ellos"
 
+    if [ "$(jq -r '.state' "$STATUS")" = ready ] && [ "$blockers" = '[]' ]; then
+      blockers="$(prepared_blockers "$REPO" "$WT")" \
+        || die "no pude comprobar si la preparación encaja con los cambios locales"
+    fi
+
     # The file exactly as the engine wrote it, with `blockers` beside it, and
     # deliberately not the filtered view `show` builds: there the `from == to`
     # rows are dropped because a human does not need them, here the consumer
     # counts and groups on its own. Two differently-filtered readings of one
     # file is how the two come to disagree about what the engine found.
-    jq --argjson b "$blockers" '. + {blockers: $b}' "$STATUS"
+    profile="$(readlink -f "${_UPD_SYSTEM_PROFILE:-/nix/var/nix/profiles/system}" 2>/dev/null || true)"
+    current="$(readlink -f "${_UPD_CURRENT_SYSTEM:-/run/current-system}" 2>/dev/null || true)"
+    booted="$(readlink -f "${_UPD_BOOTED_SYSTEM:-/run/booted-system}" 2>/dev/null || true)"
+    pending_boot=false
+    if [ -n "$profile" ] && [ -n "$current" ] && [ "$profile" != "$current" ] && [ "$current" = "$booted" ]; then
+      pending_boot=true
+    fi
+    jq --argjson b "$blockers" --argjson pending "$pending_boot" \
+      '. + {blockers: $b, activation: {pendingBoot: $pending}}' "$STATUS"
     ;;
 
   diff)
@@ -638,20 +652,16 @@ case "$cmd" in
       die "no puedo leer $REPO como repositorio git con arbol de trabajo; sin eso no se si el arbol esta limpio ni en que rama esta, y no aplico a ciegas"
     fi
 
-    # --- never discard uncommitted work -------------------------------------
-    # Before any fetch, and before anything at all is written into $REPO.
-    # --porcelain covers untracked files too, which is the common case: a
-    # scratch file the user has not decided about yet is still their work.
+    # --- inspect the target tree before fetching -----------------------------
+    # A dirty tree is not automatically unsafe. Git's fast-forward operation
+    # preserves local changes that do not overlap the prepared commit and
+    # refuses when it would overwrite one. The old blanket refusal made the
+    # update button useless during ordinary work on this configuration repo;
+    # the merge itself is the stronger, path-aware safety gate.
     #
-    # The two flags are not decoration. `status.showUntrackedFiles=no` in the
-    # repository's own config silences the untracked half of this check
-    # completely, and `submodule.<name>.ignore=all` silences the submodule half
-    # -- both reproduced, with apply proceeding past a stray NOTAS.txt. Nothing
-    # was lost in that reproduction (git refuses to clobber untracked files on
-    # merge, and a fast-forward does not touch submodule worktrees), but the one
-    # safety rule this subcommand exists to enforce must not be switchable from
-    # a config file this engine does not control. Asking explicitly for what the
-    # rule means takes the config out of the loop.
+    # Keep the explicit status read because Git can return success with empty
+    # stdout after warning that it could not inspect a directory. That is an
+    # unreadable repository, not a clean one, and apply must still refuse it.
     dirty_flags=(--porcelain --untracked-files=normal --ignore-submodules=none)
     # `git status` can exit 0 with empty stdout after failing to read a
     # subdirectory, while printing the warning on stderr. Treat that as an
@@ -672,9 +682,7 @@ case "$cmd" in
       die "no puedo leer entero el arbol de $REPO (${tree_err:-fallo sin mensaje, codigo $tree_rc}); no se si hay cambios sin commitear, asi que no aplico a ciegas"
     fi
     if [ -n "$tree_out" ]; then
-      echo "el arbol de trabajo tiene cambios sin commitear; no aplico" >&2
-      git -C "$REPO" status --short --untracked-files=normal --ignore-submodules=none >&2
-      exit 1
+      echo "hay cambios locales; conservare los que no entren en conflicto con la actualizacion" >&2
     fi
 
     cur_branch="$(git -C "$REPO" symbolic-ref --quiet --short HEAD)" \
@@ -701,9 +709,10 @@ case "$cmd" in
     if [ "$target" != "$prepared" ]; then
       die "lo que traje ($target) no es el commit preparado ($prepared); algo cambio bajo los pies"
     fi
-    # `merge --ff-only` would refuse on its own, but with a message about merge
-    # strategies rather than about what actually happened: the branch moved on
-    # after the update was prepared.
+    # `merge --ff-only` is the path-aware dirty-tree gate. It preserves local
+    # work on untouched paths and refuses before changing HEAD when the target
+    # would overwrite it. Capture its stderr so the refusal explains the
+    # actual conflict rather than leaking Git's generic wording alone.
     if ! git -C "$REPO" merge-base --is-ancestor HEAD "$target"; then
       die "$cur_branch no es antecesor del commit preparado; $REPO avanzo despues de prepararlo, lanza \`upd check\` y vuelve a mirar"
     fi
@@ -713,7 +722,17 @@ case "$cmd" in
     git -C "$REPO" --no-pager log --oneline -1 "$target" | sed 's/^/  /'
     echo "  closure preparado: ${closure:-desconocido, se reconstruira}"
 
-    git -C "$REPO" merge --ff-only "$target"
+    merge_err_file="$(mktemp 2>/dev/null)" \
+      || die "no pude crear un fichero temporal para recoger el conflicto de Git; no aplico"
+    merge_rc=0
+    git -C "$REPO" merge --ff-only "$target" 2>"$merge_err_file" || merge_rc=$?
+    merge_err="$(< "$merge_err_file")"
+    rm -f "$merge_err_file"
+    merge_err="${merge_err//$'\n'/ }"
+    merge_err="${merge_err:0:400}"
+    if [ "$merge_rc" -ne 0 ]; then
+      die "no pude aplicar la actualizacion porque Git detecto cambios locales que chocan con ella: ${merge_err:-fallo sin mensaje}; no se activo nada"
+    fi
 
     # --ff-only stops here, and the split exists for the bar plugin: the
     # repository half has to run as daf3r, because a merge done as root leaves
@@ -793,7 +812,8 @@ uso: upd [show|status|diff|apply|check]
 
   show    (por defecto) que dejo preparado la ultima comprobacion
   status  `upd status --json`: lo mismo en JSON y con los bloqueos de ahora
-          mismo (arbol sucio, rama, motor en marcha, reinicio pendiente), que
+          mismo (rama, motor en marcha, reinicio pendiente o repositorio
+          ilegible), que
           es lo que lee el widget de la barra
   diff    el diff de closures guardado
   apply   aplica lo preparado: fast-forward y `nh os switch`

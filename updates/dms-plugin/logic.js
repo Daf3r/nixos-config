@@ -24,6 +24,10 @@ function classify(status) {
   // this does not get to be cleverer than the shell -- including on `false`,
   // which jq's `//` swallows along with null, and which this got wrong for one
   // round while claiming to copy the rule.
+  if (status.activation && status.activation.pendingBoot === true) {
+    return { state: 'pending_boot', icon: 'restart_alt', tone: 'ready',
+             summary: 'Actualización instalada · reinicia' }
+  }
   const w = status.warnings
   const absent = w === undefined || w === null || w === false
   const warned = Array.isArray(w) ? w.length > 0 : !absent
@@ -32,6 +36,9 @@ function classify(status) {
       return { state: 'current', icon: 'check_circle', tone: warned ? 'warn' : 'ok',
                summary: 'todo al dia' }
     case 'ready':
+      if (Array.isArray(status.blockers) && status.blockers.some(b => b.code === 'prepared_conflict'))
+        return { state: 'ready', icon: 'difference', tone: 'warn',
+                 summary: 'Preparación incompatible' }
       return { state: 'ready', icon: 'system_update_alt', tone: warned ? 'warn' : 'ready',
                summary: `${changeLines(status).length} cambios preparados` }
     case 'build_failed':
@@ -67,6 +74,8 @@ function blockerDetail(b) {
 // the place a user actually presses. Rules that live in the QML are rules no
 // test can reach; this one lives here.
 function checkFor(status) {
+  if (classify(status).state === 'pending_boot')
+    return { label: 'Pendiente de reinicio', enabled: false, reason: 'La nueva generación ya está instalada. Guarda tu trabajo y reinicia cuando te convenga.' }
   const c = classify(status)
   if (c.tone === 'unknown') {
     // Nothing readable to check against, and the same answer buttonFor gives:
@@ -81,10 +90,10 @@ function checkFor(status) {
   // on a lock it cannot see. A button that offers to fail is worse than one that
   // says why it cannot.
   //
-  // Only `engine_running` of the six. A dirty tree, a checked-out branch or a
-  // pending reboot stop an *apply* and have nothing to say about a check, and
-  // disabling on them would leave a dead button over a machine where checking
-  // works fine.
+  // Only `engine_running` of the apply safety gates. A dirty tree, a checked-
+  // out branch or a pending reboot stop an *apply* and have nothing to say
+  // about a check, and disabling on them would leave a dead button over a
+  // machine where checking works fine.
   //
   // Nor does an absent list disable it, and that is a deliberate difference from
   // buttonFor's `ready` branch rather than an oversight. There the cost of
@@ -116,6 +125,8 @@ function reattachDecision(active, result, watching) {
 }
 
 function buttonFor(status) {
+  if (classify(status).state === 'pending_boot')
+    return { label: 'Instalada', action: 'none', enabled: false, reason: 'La nueva generación ya está instalada. Guarda tu trabajo y reinicia cuando te convenga.' }
   const c = classify(status)
   if (c.tone === 'unknown') {
     return { label: 'Sin estado', action: 'none', enabled: false, reason: c.summary }
@@ -131,9 +142,9 @@ function buttonFor(status) {
   // Missing is not empty, and the difference decides whether a button is live.
   // `blockers` exists only in `upd status --json`, which computes it on the
   // spot; /var/lib/nixos-upd/status.json has never carried the key and never
-  // will, because two of the six conditions -- a dirty tree, a checked-out
-  // branch -- are facts about the moment somebody looks. Measured on this
-  // machine: the two documents are byte-identical apart from that one key.
+  // will, because the branch and repository-readability facts are about the
+  // moment somebody looks. Measured on this machine: the two documents are
+  // byte-identical apart from that one key.
   //
   // So an absent list means nobody asked, not that nothing is in the way, and
   // treating the two alike would put a live Aplicar button over a tree the
@@ -143,13 +154,17 @@ function buttonFor(status) {
     return { label: 'Aplicar', action: 'none', enabled: false,
              reason: 'este estado no trae la lista de bloqueos, asi que no se si algo impide aplicar; el panel tiene que sondear `upd status --json`, que la calcula en vivo, y no status.json, que nunca la lleva' }
   }
-  const blockers = status.blockers
+  // Older status producers included `dirty_tree` as a blanket apply blocker.
+  // Keep accepting that status shape, but do not disable the button for it:
+  // the current engine lets Git decide whether each local path conflicts with
+  // the prepared fast-forward. An unreadable repository remains a real
+  // blocker as `repo_uncheckable`, and every other blocker remains authoritative.
+  const blockers = status.blockers.filter(b => b?.code !== 'dirty_tree')
   if (blockers.length > 0) {
     // The engine's own wording, passed through untouched. Rewording it here
     // would mean maintaining two descriptions of the same refusal. Every one of
     // them, including codes this plugin has never heard of: blockers.sh states
-    // outright that the vocabulary grew from four to six while it was being
-    // written and can grow again.
+    // outright that the vocabulary can grow again.
     return { label: 'Aplicar', action: 'none', enabled: false,
              reason: blockers.map(blockerDetail).join('; ') }
   }
@@ -166,6 +181,7 @@ function buttonFor(status) {
 }
 
 function changeLines(status) {
+  if (status && status.activation && status.activation.pendingBoot === true) return []
   if (!status || !Array.isArray(status.changes)) return []
   return status.changes
     .filter(c => c.from !== c.to || c.hash_changed === true)

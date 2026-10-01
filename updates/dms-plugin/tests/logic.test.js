@@ -9,6 +9,13 @@ const ready = {
   closure_diff: { added: [], removed: [], changed: [], size_delta_mb: 1.5 },
 }
 
+test('a conflicting preparation says review rather than advertising updates', () => {
+  const status = { ...ready, blockers: [{code: 'prepared_conflict', detail: 'flake.lock tiene cambios locales'}] }
+  assert.equal(classify(status).summary, 'Preparación incompatible')
+  assert.equal(buttonFor(status).enabled, false)
+  assert.equal(checkFor(status).enabled, true)
+})
+
 test('a ready update offers to apply', () => {
   const b = buttonFor(ready)
   assert.equal(b.action, 'apply')
@@ -27,9 +34,15 @@ test('ready with warnings is visually distinct from ready without', () => {
 })
 
 test('a blocker disables the button and says why', () => {
-  const b = buttonFor({ ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' }] })
+  const b = buttonFor({ ...ready, blockers: [{ code: 'wrong_branch', detail: 'el repositorio esta en otra rama' }] })
   assert.equal(b.enabled, false)
-  assert.match(b.reason, /sin commitear/)
+  assert.match(b.reason, /otra rama/)
+})
+
+test('a dirty tree does not disable an otherwise applicable update', () => {
+  const b = buttonFor({ ...ready, blockers: [{ code: 'dirty_tree', detail: 'hay cambios locales' }] })
+  assert.equal(b.enabled, true)
+  assert.equal(b.action, 'apply')
 })
 
 test('an unknown schema is unknown, never healthy', () => {
@@ -125,12 +138,11 @@ test('the two real sources differ only in blockers, which is why the rest of thi
 })
 
 test('a live status with blockers disables the button and names every one of them', () => {
-  // Two real blockers, because this repo is on a feature branch with the work
-  // in progress uncommitted -- the ordinary state of a machine being worked on.
+  // The branch is a real apply blocker; local work is handled by Git when the
+  // prepared commit is fast-forwarded.
   const b = buttonFor(live)
   assert.equal(b.enabled, false)
   assert.equal(b.action, 'none')
-  assert.match(b.reason, /sin commitear/)
   assert.match(b.reason, /upd-barra/)
 })
 
@@ -144,9 +156,8 @@ test('a blocker detail is passed through verbatim, never reworded', () => {
 })
 
 test('an unknown blocker code still disables and still shows its detail', () => {
-  // blockers.sh states this outright: the vocabulary went from four codes to
-  // six while it was being written and can grow again, so a consumer must not
-  // skip a code it does not recognise.
+  // blockers.sh states this outright: the vocabulary can grow, so a consumer
+  // must not skip a code it does not recognise.
   const b = buttonFor({ ...ready, blockers: [{ code: 'inventado_manana', detail: 'algo nuevo lo impide' }] })
   assert.equal(b.enabled, false)
   assert.match(b.reason, /algo nuevo lo impide/)
@@ -248,8 +259,8 @@ test('the disabled check button says the engine is busy, in the engine words', (
 test('engine_running is found wherever it sits in the list, not only first', () => {
   // The ordering is not hypothetical and it is not favourable: blockers.sh
   // appends the two git facts before it ever looks at the lock, so on a machine
-  // somebody is working on -- dirty tree, feature branch -- `engine_running` is
-  // the third entry and never the first.
+  // somebody is working on a feature branch, `engine_running` is the second
+  // entry and never the first.
   //
   // Every other case in this section hands the function a one-element list, and
   // that is what made them all agree with a reader that only ever inspected
@@ -258,13 +269,12 @@ test('engine_running is found wherever it sits in the list, not only first', () 
   // defect it leaves is precisely the one this branch exists to prevent -- a
   // live "Comprobar ahora" over an engine that holds the lock.
   const b = buttonFor({ ...ready, state: 'current', blockers: [
-    { code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' },
     { code: 'wrong_branch', detail: "esta en la rama 'upd-barra' y el motor prepara desde 'main'" },
     enMarcha,
   ]})
   assert.equal(b.enabled, false, 'el motor esta corriendo aunque no encabece la lista')
   assert.equal(b.action, 'none')
-  // Solo el del lock: los otros dos paran un apply y no dicen nada de una
+  // Solo el del lock: la rama para un apply y no dice nada de una
   // comprobacion, asi que citarlos aqui seria darle al usuario dos motivos de
   // los cuales uno no lo es.
   assert.equal(b.reason, enMarcha.detail)
@@ -282,7 +292,7 @@ test('the blockers that only stop an apply do not stop a check', () => {
   // "any blocker kills every button". None of these three has anything to say
   // about running a check, and a dead "Comprobar ahora" over a machine that
   // would have checked fine is a worse answer than no rule at all.
-  for (const code of ['dirty_tree', 'wrong_branch', 'pending_reboot']) {
+  for (const code of ['wrong_branch', 'pending_reboot']) {
     const b = buttonFor({ ...ready, state: 'current', blockers: [{ code, detail: 'da igual lo que diga' }] })
     assert.equal(b.action, 'check', `${code} no impide comprobar`)
     assert.equal(b.enabled, true, `${code} no impide comprobar`)
@@ -305,14 +315,14 @@ test('a ready with the engine running still talks about applying, not checking',
   // state dispatch. It would answer "Comprobar ahora" for a ready update, and
   // it would drop the other blockers from the sentence -- a user told only
   // about the lock, who waits for it to clear and finds the button still dead
-  // for the dirty tree nobody mentioned.
+  // for the branch nobody mentioned.
   const b = buttonFor({ ...ready, blockers: [
-    { code: 'dirty_tree', detail: 'el arbol de trabajo tiene cambios sin commitear' },
+    { code: 'wrong_branch', detail: 'la rama no es main' },
     enMarcha,
   ]})
   assert.equal(b.label, 'Aplicar')
   assert.equal(b.enabled, false)
-  assert.match(b.reason, /sin commitear/)
+  assert.match(b.reason, /la rama no es main/)
   assert.match(b.reason, /en marcha/)
 })
 
@@ -370,10 +380,10 @@ test('a blocker with no detail still explains why the button is dead', () => {
   // the panel puts next to the disabled button. If it arrives empty the button
   // must not go quiet: a dead Aplicar with no reason is the one outcome a user
   // cannot act on, and cannot even report.
-  const b = buttonFor({ ...ready, blockers: [{ code: 'dirty_tree' }] })
+  const b = buttonFor({ ...ready, blockers: [{ code: 'wrong_branch' }] })
   assert.equal(b.enabled, false)
   assert.ok(b.reason.length > 0, 'un boton apagado sin motivo no se puede ni reportar')
-  assert.match(b.reason, /dirty_tree/)
+  assert.match(b.reason, /wrong_branch/)
 })
 
 test('a blocker with neither code nor detail still explains itself', () => {
@@ -482,8 +492,8 @@ test('none of these eight paths leaves the button dead and mute', () => {
     ['schema desconocido', { schema: 99, state: 'ready' }],
     ['estado desconocido', { ...ready, state: 'reticulando_splines' }],
     ['sin lista de bloqueos', onDisk],
-    ['bloqueo con detalle', { ...ready, blockers: [{ code: 'dirty_tree', detail: 'el arbol tiene cambios' }] }],
-    ['bloqueo sin detalle', { ...ready, blockers: [{ code: 'dirty_tree' }] }],
+    ['bloqueo con detalle', { ...ready, blockers: [{ code: 'wrong_branch', detail: 'el arbol esta en otra rama' }] }],
+    ['bloqueo sin detalle', { ...ready, blockers: [{ code: 'wrong_branch' }] }],
     ['motor corriendo, fuera de ready', { ...ready, state: 'current', blockers: [enMarcha] }],
     ['motor corriendo y sin detalle', { ...ready, state: 'current', blockers: [{ code: 'engine_running' }] }],
   ]
@@ -545,7 +555,7 @@ test('checkFor refuses only for engine_running, in the engine words', () => {
   assert.equal(busy.enabled, false)
   assert.equal(busy.reason, enMarcha.detail)
   assert.equal(busy.label, 'Comprobar ahora', 'lo apagado es el boton, no su nombre')
-  for (const code of ['dirty_tree', 'wrong_branch', 'pending_reboot']) {
+  for (const code of ['wrong_branch', 'pending_reboot']) {
     assert.equal(checkFor({ ...ready, blockers: [{ code, detail: 'da igual lo que diga' }] }).enabled, true,
       `${code} para un apply, no una comprobacion`)
   }
@@ -554,10 +564,9 @@ test('checkFor refuses only for engine_running, in the engine words', () => {
 test('checkFor finds engine_running wherever it sits, not only first', () => {
   // Same ordering fact as buttonFor's: blockers.sh appends the two git facts
   // before it looks at the lock, so on a machine being worked on the lock is
-  // the third entry. A reader that only inspects blockers[0] passes every
+  // the second entry. A reader that only inspects blockers[0] passes every
   // one-element case above and fails exactly here.
   const c = checkFor({ ...ready, blockers: [
-    { code: 'dirty_tree', detail: 'el arbol tiene cambios sin commitear' },
     { code: 'wrong_branch', detail: 'la rama no es main' },
     enMarcha,
   ]})
@@ -606,8 +615,8 @@ test('a dark check button never leaves the panel without its reason', () => {
     ['schema ajeno', { schema: 99, state: 'ready' }],
     ['estado desconocido', { ...ready, state: 'reticulando_splines' }],
     ['ready y ocupado', { ...ready, blockers: [enMarcha] }],
-    ['ready, sucio y ocupado', { ...ready, blockers: [
-      { code: 'dirty_tree', detail: 'el arbol tiene cambios sin commitear' }, enMarcha] }],
+    ['ready, rama equivocada y ocupado', { ...ready, blockers: [
+      { code: 'wrong_branch', detail: 'la rama no es main' }, enMarcha] }],
     ['current y ocupado', { ...ready, state: 'current', blockers: [enMarcha] }],
     ['build_failed y ocupado', { ...ready, state: 'build_failed', blockers: [enMarcha] }],
     ['ocupado y sin detalle', { ...ready, state: 'current', blockers: [{ code: 'engine_running' }] }],
@@ -624,4 +633,19 @@ test('a dark check button never leaves the panel without its reason', () => {
       `${nombre}: el motivo no aparece ni en la linea de explicacion ni en el titular`)
   }
   assert.equal(apagados, universo.length, 'un filtro que no encuentra nada no puede leerse como un aprobado')
+})
+
+test('a boot-installed generation supersedes the old prepared report', () => {
+  const st = { ...ready, activation: { pendingBoot: true }, blockers: [{code: 'pending_reboot'}] }
+  assert.equal(classify(st).state, 'pending_boot')
+  assert.match(classify(st).summary, /reinicia/i)
+  assert.equal(buttonFor(st).enabled, false)
+  assert.equal(checkFor(st).enabled, false)
+  assert.deepEqual(changeLines(st), [])
+})
+
+test('test activation is not mislabeled as an installed boot generation', () => {
+  const st = { ...ready, activation: { pendingBoot: false }, blockers: [{code: 'pending_reboot'}] }
+  assert.equal(classify(st).state, 'ready')
+  assert.equal(buttonFor(st).enabled, false)
 })

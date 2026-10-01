@@ -40,6 +40,8 @@ flake se llama como `networking.hostName`, y por eso `--flake ~/nixos-config` re
 `upd apply --ff-only` adelanta la rama del motor y `upd apply --boot` deja la generación
 preparada para el próximo arranque. El plugin `nixos-upd` de DankMaterialShell muestra
 ese estado en la barra y ofrece comprobarlo o aplicarlo mediante polkit.
+Los cambios locales del repositorio se conservan si no chocan con la actualización;
+si Git detecta que una ruta sería sobrescrita, `upd` se detiene antes de activar nada.
 
 El chequeo cubre los inputs de Nix y las aplicaciones empaquetadas localmente: Brave
 Origin, T3 Code, el paquete oficial de ChatGPT para Linux y, cuando existe su declaración,

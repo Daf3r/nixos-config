@@ -193,7 +193,7 @@ Item {
     Column {
         width: parent.width
         spacing: Theme.spacingXS
-        visible: warnings.count > 0
+        visible: warnings.count > 0 && root.view.state !== "pending_boot"
 
         Repeater {
             id: warnings
@@ -226,8 +226,8 @@ Item {
         id: blockerCard
         width: parent.width
         visible: root.button.reason !== "" && root.button.reason !== root.view.summary
-        color: Theme.withAlpha(Theme.error, 0.10)
-        border.color: Theme.withAlpha(Theme.error, 0.32)
+        color: Theme.withAlpha(root.view.state === "pending_boot" ? Theme.primary : Theme.error, 0.10)
+        border.color: Theme.withAlpha(root.view.state === "pending_boot" ? Theme.primary : Theme.error, 0.32)
         border.width: 1
         radius: Theme.cornerRadius
         implicitHeight: blockerContent.implicitHeight + Theme.spacingS * 2
@@ -253,7 +253,7 @@ Item {
 
                 StyledText {
                     width: parent.width - Theme.iconSizeSmall - Theme.spacingXS
-                    text: root.button.enabled ? "Requiere reinicio" : "No se puede aplicar todavía"
+                    text: root.view.state === "pending_boot" ? "Pendiente de reinicio" : (root.button.enabled ? "Requiere reinicio" : "No se puede aplicar todavía")
                     color: Theme.error
                     font.pixelSize: Theme.fontSizeSmall
                     font.weight: Font.Medium

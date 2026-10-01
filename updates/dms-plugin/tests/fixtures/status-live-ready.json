@@ -247,10 +247,6 @@
   "state": "ready",
   "blockers": [
     {
-      "code": "dirty_tree",
-      "detail": "el arbol de trabajo en /home/daf3r/nixos-config tiene cambios sin commitear; no se aplica encima de ellos"
-    },
-    {
       "code": "wrong_branch",
       "detail": "/home/daf3r/nixos-config esta en la rama 'upd-barra' y el motor prepara desde 'main'; haz `git -C /home/daf3r/nixos-config switch main`"
     }

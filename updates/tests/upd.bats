@@ -459,15 +459,47 @@ EOF
 # those live facts being reported *as data*, next to the file, with an exit code
 # that does not lie about whether there was an answer.
 
-@test "status --json reports a dirty tree as a blocker and still exits 0" {
-  # Exit 0 is load-bearing and is why it is asserted on nearly every case here:
-  # a panel that reads non-zero as "no data" would go blank precisely when it
-  # has the most to say. Non-zero is reserved for "there is no object at all".
+@test "status detects prepared conflicts without changing HEAD index or files" {
+  make_rig
+  printf 'local configuration\n' > "$REPO/flake.lock"
+  before_head="$(git -C "$REPO" rev-parse HEAD)"
+  before_index="$(sha256sum "$REPO/.git/index")"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | any(.code == "prepared_conflict")'
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$before_head" ]
+  [ "$(sha256sum "$REPO/.git/index")" = "$before_index" ]
+  [ "$(cat "$REPO/flake.lock")" = 'local configuration' ]
+}
+
+@test "status matches Git refusal of an unstaged edit even when contents match the preparation" {
+  make_rig
+  printf 'v2\n' > "$REPO/flake.lock"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers | any(.code == "prepared_conflict")'
+  git -C "$REPO" fetch -q "$STATE/wt" auto/update
+  run git -C "$REPO" merge --ff-only FETCH_HEAD
+  [ "$status" -ne 0 ]
+}
+
+@test "status permits unrelated staged local work" {
+  make_rig
+  printf 'keep me\n' > "$REPO/personal.nix"
+  git -C "$REPO" add personal.nix
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.blockers == []'
+}
+
+@test "status --json does not block a readable dirty tree" {
+  # A dirty tree is no longer a reason to disable Apply. Git itself performs
+  # the path-aware conflict check when the prepared commit is fast-forwarded.
   make_rig
   touch "$REPO/scratch.txt"
   run upd_status --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree") == null'
 }
 
 @test "status --json sees a modified tracked file, not only an untracked one" {
@@ -475,7 +507,7 @@ EOF
   printf 'editado a mano\n' >> "$REPO/flake.lock"
   run upd_status --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree") == null'
 }
 
 @test "status --json reports the wrong branch as a blocker, naming both" {
@@ -599,7 +631,7 @@ EOF
   git -C "$REPO" checkout -q -b experimento
   run upd_status --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | length >= 2'
+  echo "$output" | jq -e '.blockers | length >= 1'
   echo "$output" | jq -e '.blockers | all(.code | type == "string" and (length > 0))'
   echo "$output" | jq -e '.blockers | all(.detail | type == "string" and (length > 0))'
 }
@@ -795,6 +827,22 @@ EOF
   [[ "$output" == *"--ff-only"* ]]
 }
 
+@test "apply --ff-only preserves non-conflicting dirty work" {
+  # A dirty tree is not itself a conflict. Git can fast-forward files from the
+  # prepared commit while preserving a local file that the update does not
+  # touch; upd used to reject this safe case before Git could check it.
+  make_rig
+  printf 'trabajo local\n' > "$REPO/local.nix"
+  prepared="$(git -C "$STATE/wt" rev-parse auto/update)"
+
+  run upd apply --ff-only
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$prepared" ]
+  [ "$(cat "$REPO/local.nix")" = "trabajo local" ]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+  [ ! -s "$NH_MARKER" ]
+}
+
 @test "finalize switch clears the prepared state after the privileged half" {
   make_rig
   printf 'closure diff\n' > "$STATE/diff.txt"
@@ -820,23 +868,23 @@ EOF
 
 @test "apply --ff-only runs the same guards as a full apply" {
   # "Every guard the current apply runs" is the contract, and the risk of a
-  # mode flag is that it grows a shortcut past them. Two are checked, one from
-  # each end of the sequence: the dirty tree, which refuses before anything is
-  # written, and the `ready` gate, which refuses after the lock is taken.
+  # mode flag is that it grows a shortcut past them. The dirty tree is safe when
+  # its paths do not overlap the update, while the `ready` gate still refuses
+  # after the lock is taken.
   make_rig
   touch "$REPO/scratch.txt"
   run upd apply --ff-only
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cambios sin commitear"* ]]
-  [ ! -f "$REPO/.git/FETCH_HEAD" ]
-  [ "$(cat "$REPO/flake.lock")" = "v1" ]
-  rm "$REPO/scratch.txt"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"fast-forward hecho"* ]]
+  [ -f "$REPO/.git/FETCH_HEAD" ]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+  [ -f "$REPO/scratch.txt" ]
 
   status_json '{"schema":2,"checked_at":"x","state":"build_failed","warnings":[]}'
   run upd apply --ff-only
   [ "$status" -eq 1 ]
   [[ "$output" == *"no hay ninguna actualizacion lista"* ]]
-  [ "$(cat "$REPO/flake.lock")" = "v1" ]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
 }
 
 @test "apply --ff-only does not require nh, and the other modes still do" {
@@ -919,41 +967,39 @@ EOF
   [ "$(cat "$NH_MARKER")" = "os boot $REPO" ]
 }
 
-@test "apply refuses a dirty target tree, prints it, and fetches nothing" {
+@test "apply preserves non-conflicting dirty work before activating" {
   make_rig
   touch "$REPO/SCRATCH-TEST"
   run upd apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cambios sin commitear; no aplico"* ]]
-  [[ "$output" == *"?? SCRATCH-TEST"* ]]
-  # Nothing was activated, and nothing was even written into the repository:
-  # the refusal comes before the fetch.
-  [ ! -s "$NH_MARKER" ]
-  [ ! -f "$REPO/.git/FETCH_HEAD" ]
-  [ "$(git -C "$REPO" log --oneline | wc -l)" -eq 1 ]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hay cambios locales"* ]]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+  [ -f "$REPO/SCRATCH-TEST" ]
+  [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
 }
 
-@test "apply refuses a modified tracked file as well as an untracked one" {
+@test "apply refuses local changes that conflict with the update" {
   make_rig
   printf 'editado a mano\n' >> "$REPO/flake.lock"
   run upd apply
   [ "$status" -eq 1 ]
-  [[ "$output" == *"M flake.lock"* ]]
+  [[ "$output" == *"cambios locales que chocan"* ]]
+  [[ "$output" == *"no se activo nada"* ]]
   [ ! -s "$NH_MARKER" ]
+  [ "$(git -C "$REPO" rev-parse HEAD)" = "$(git -C "$REPO" rev-parse main)" ]
+  [[ "$(cat "$REPO/flake.lock")" == *"editado a mano"* ]]
 }
 
-@test "apply refuses a dirty tree even when the repo config hides it" {
-  # status.showUntrackedFiles=no silences the untracked half of the check
-  # entirely; the safety rule must not be switchable from a config file this
-  # engine does not control.
+@test "apply preserves untracked work even when the repo config hides it" {
+  # status.showUntrackedFiles=no may hide the advisory status output, but Git's
+  # own fast-forward still preserves an untracked path it does not overwrite.
   make_rig
   git -C "$REPO" config status.showUntrackedFiles no
   touch "$REPO/NOTAS.txt"
   run upd apply
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"cambios sin commitear; no aplico"* ]]
-  [[ "$output" == *"?? NOTAS.txt"* ]]
-  [ ! -s "$NH_MARKER" ]
+  [ "$status" -eq 0 ]
+  [ -f "$REPO/NOTAS.txt" ]
+  [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
 }
 
 @test "apply refuses a tree git cannot read instead of calling it clean" {
@@ -1171,30 +1217,30 @@ EOF
 
 # --- the contract the two surfaces share -------------------------------------
 #
-# Five of the six blockers are expressed twice: once in lib/blockers.sh, for the
-# panel, and once as a guard inside `apply`, for the terminal. That duplication
+# The apply safety gates are expressed twice: once in lib/blockers.sh, for the
+# panel, and once as guards inside `apply`, for the terminal. That duplication
 # is deliberate -- `apply` refusing on its own account is what makes it safe to
 # run without a panel, and wiring it through `blockers_live` would couple the
 # command to the panel's library -- but duplication is how two readings of one
 # rule drift apart. This repository has closed that shape twice already: the
 # filter in `show` versus `status --json`, and the reboot advisory versus the
-# footer under it.
+# footer under it. A readable dirty tree is intentionally not in this list:
+# Git performs the path-aware conflict check during the fast-forward.
 #
 # So the agreement is pinned here rather than left to good intentions. Each of
 # these builds one situation and asserts both halves of it: the panel reports
-# the blocker, **and** the terminal refuses. Deleting either half turns one of
-# these red, which is the whole point -- the tests above cover each surface
-# alone, and none of them would notice the two disagreeing.
+# the blocker, **and** the terminal refuses. The dirty-tree case below is the
+# deliberate exception: both surfaces must allow harmless local work, while
+# Git refuses a real overlap before activation.
 #
 # `pending_reboot` is deliberately absent: it is the one blocker `apply` does
 # not reproduce, and that asymmetry is a decision (a person may stack a
 # generation knowingly; the panel's drive-by user should not). It is written up
 # in the task report rather than encoded here.
 #
-# Each of these also pins *which* refusal `apply` gives, and not merely that it
-# gave one. Measured: without that, a guard can be deleted and the test stays
-# green because a later guard stops the run for an unrelated reason -- "it
-# refused" is satisfied by any of six exits.
+# Each refusal test also pins *which* refusal `apply` gives, and not merely that
+# it gave one. Without that, a guard can be deleted and the test stays green
+# because a later guard stops the run for an unrelated reason.
 #
 # All five are anchored now. The fifth, the unreadable repository, was left
 # unanchored through Task 6 on purpose and the rule it left behind was "anchor
@@ -1204,21 +1250,20 @@ EOF
 # repository check `blockers_live` already opened with, which is what made the
 # fifth anchorable.
 
-@test "contrato: un arbol sucio bloquea el panel y frena el terminal" {
+@test "contrato: un arbol sucio permite aplicar si no hay conflicto" {
   make_rig
   touch "$REPO/scratch.txt"
 
   run upd_status --json
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree")'
+  echo "$output" | jq -e '.blockers | map(.code) | index("dirty_tree") == null'
 
   run upd apply
-  [ "$status" -eq 1 ]
-  # The whole sentence, tail included: the clone guard further up says "el clon
-  # en ... tiene cambios sin commitear" about a different tree entirely, so
-  # matching only "cambios sin commitear" would accept the wrong refusal.
-  [[ "$output" == *"el arbol de trabajo tiene cambios sin commitear; no aplico"* ]]
-  [ ! -s "$NH_MARKER" ]
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"hay cambios locales"* ]]
+  [ "$(cat "$REPO/flake.lock")" = "v2" ]
+  [ -f "$REPO/scratch.txt" ]
+  [ "$(cat "$NH_MARKER")" = "os switch $REPO" ]
 }
 
 @test "contrato: la rama equivocada bloquea el panel y frena el terminal" {
@@ -1317,4 +1362,19 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"motor ejecutado"* ]]
   [[ "$output" != *"systemctl"* ]]
+}
+
+@test "status distinguishes a boot installation from test activation" {
+  ready_status
+  make_rig
+  SYS_CURRENT="$WORK/gen1"
+  ln -sfn "$WORK/gen2" "$SYS_PROFILE"
+  export _UPD_BOOTED_SYSTEM="$WORK/gen1"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.activation.pendingBoot == true'
+  export _UPD_BOOTED_SYSTEM="$WORK/gen2"
+  run upd_status --json
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.activation.pendingBoot == false'
 }

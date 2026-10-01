@@ -105,7 +105,7 @@ teardown() {
 
 @test "a tree git cannot read whole is never reported as clean" {
   # The finding this arm exists for, asserted as a negative: silence about
-  # dirty_tree is the failure mode, not the passing one.
+  # repo_uncheckable is the failure mode, not the passing one.
   mkdir "$REPO/secreto"
   printf 'x\n' > "$REPO/secreto/b.txt"
   chmod 000 "$REPO/secreto"
@@ -162,12 +162,12 @@ teardown() {
   echo "$output" | jq -e '.[] | select(.code == "repo_uncheckable") | .detail | test("temporal")'
 }
 
-@test "a readable dirty tree is still reported as dirty" {
-  # The other side of the same branch: the new guard must not have swallowed the
-  # ordinary case it sits in front of.
+@test "a readable dirty tree is not an apply blocker" {
+  # Local work is now handed to Git's path-aware fast-forward check. The live
+  # blocker list must not disable the panel before that check can distinguish a
+  # harmless local file from a file the update would overwrite.
   touch "$REPO/scratch.txt"
   run blockers_live "$REPO" main "$LOCK" "$GEN" "$GEN"
   [ "$status" -eq 0 ]
-  echo "$output" | jq -e 'map(.code) | index("dirty_tree")'
-  echo "$output" | jq -e 'map(.code) | index("repo_uncheckable") == null'
+  echo "$output" | jq -e '. == []'
 }

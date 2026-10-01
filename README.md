@@ -40,6 +40,8 @@ without spelling out the attribute.
 `upd apply --ff-only` fast-forwards the engine branch and `upd apply --boot` stages the
 generation for the next boot. The `nixos-upd` DankMaterialShell plugin shows that state
 in the bar and offers checking or applying it through polkit.
+Local repository changes are preserved when they do not overlap the update; if Git
+detects that a path would be overwritten, `upd` stops before activating anything.
 
 The check covers Nix inputs plus the locally packaged apps: Brave Origin, T3 Code,
 the official ChatGPT Linux package and, when its declaration is present, Minecraft
