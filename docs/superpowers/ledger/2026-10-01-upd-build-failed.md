@@ -82,3 +82,38 @@ fast-forward sobre uno de esos commits.
 - `apply` reconstruye desde el working tree del repo, no desde la preparación:
   la generación dejada para el arranque ya llevaba Burp, CurseForge y Thunderbird
   aunque `main` aún no los declarase.
+
+## Discord siempre una versión atrás — `upd apps`
+
+Síntoma: Discord pide actualizarse para poder usarse. Medido: 1.0.158 en marcha,
+1.0.159 en la generación preparada, 1.0.160 publicada. Discord rechaza un host más
+viejo que el que quiere su servidor y nixpkgs va días por detrás, así que ni
+reiniciar lo arreglaba; además una actualización completa arrastra kernel, NVIDIA y
+mesa, y con ellos el reinicio.
+
+- `pkgs/discord.nix` reutiliza el paquete de nixpkgs sin copiarlo y cambia sólo su
+  `sources.json` por `pkgs/discord-sources.json`. Es import-from-derivation a
+  propósito: `package.nix` lee `./sources.json` relativo a sí mismo y no ofrece un
+  argumento para apuntarlo a otro sitio; vendorizar tres ficheros congelaría código
+  ajeno. Si nixpkgs mueve el paquete, el `cp` falla y `upd` informa `build_failed`.
+- `bump-discord.sh` lee el manifiesto oficial (el mismo que usa `update.py` de
+  nixpkgs, que rechaza cualquier User-Agent que no sea de Discord). El manifiesto ya
+  trae el SHA-256 del host y de cada módulo, así que detectar una versión nueva no
+  descarga nada. Valida host, módulos y hashes (64 hex) y no escribe nada si algo no
+  cuadra: un host nuevo con módulos viejos arranca pero no entra a un canal de voz.
+- `nixos-upd --apps` es la ejecución normal sin `nix flake update`; el informe lleva
+  `scope: apps`. `upd apps` la lanza y enseña el resultado; `upd apps --apply` aplica
+  en caliente sólo un `ready` que no pida reinicio, y si lo pide se niega y nombra
+  `upd apply --boot`.
+
+Comprobado: el paquete real construye (Nix verificó los hashes del host y de los 13
+módulos), `bump-discord.sh` real llevó 1.0.159 → 1.0.160, 11 pruebas del bump, 4 del
+modo `--apps` en el motor y 7 de `upd apps`; mutadas las guardas y el bump, cada una
+hace fallar su prueba (dos pruebas se afinaron porque la mutación sobrevivía: otra
+guarda aguas abajo tapaba la ausencia de la que se probaba). El motor real en modo
+`apps` dejó `scope: apps`, ningún input movido y `flake.lock` igual al de `main`.
+
+Sin comprobar: Discord 1.0.160 no se ha abierto, sólo construido; y el aplicar en
+caliente de verdad (`upd apps --apply` con `nh os switch`) no se ha ejecutado, porque
+mientras el sistema siga sin reiniciar a la generación preparada cualquier
+preparación pide reinicio (la diferencia con lo que corre incluye kernel y NVIDIA).
