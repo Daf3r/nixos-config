@@ -14,11 +14,11 @@
 #   nix store prefetch-file https://github.com/pingdotgg/t3code/releases/download/v<version>/T3-Code-<version>-x86_64.AppImage
 let
   pname = "t3code";
-  version = "0.0.44";
+  version = "0.0.45";
 
   src = fetchurl {
     url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
-    hash = "sha256-urbPKfEwFa9+lm6VPo7Vqa17bmPLhkz0Hj4IFeqFchk=";
+    hash = "sha256-q3sKhtHqZXzMFitgt3LGH3C8fIueJZtGk51Tuzj6oCo=";
   };
 
   contents = appimageTools.extract { inherit pname version src; };
