@@ -142,8 +142,11 @@ in
 
     # Not the flake's package directly: it needs a flag before it can reach the
     # keyring under niri, or every sign-in is lost on exit. See the file.
+    # Newer than the flake input's pin: see ./pkgs/claude-desktop-newer.nix.
     (pkgs.callPackage ./pkgs/claude-desktop-keyring.nix {
-      claude-desktop = inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      claude-desktop = pkgs.callPackage ./pkgs/claude-desktop-newer.nix {
+        claude-desktop = inputs.claude-desktop.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      };
     })
 
     # ChatGPT Desktop, from OpenAI's official Linux .deb and wrapped for the
