@@ -4,7 +4,7 @@
   pipewire,
 }:
 
-# Claude Desktop 2.26454.2, past the 2.9939.4 that the flake input pins.
+# Claude Desktop 2.37337.1, past the 2.9939.4 that the flake input pins.
 #
 # The flake (poeck/claude-desktop-nix-flake) has not been bumped since its
 # pin, so this overrides only version and .deb hash, from the same Anthropic
@@ -14,12 +14,12 @@
 # auto-patchelf fails the build.
 #
 # Remove this file, and point home.nix back at the flake input, once the flake
-# publishes a version >= 2.26454.2.
+# publishes a version >= 2.37337.1.
 claude-desktop.overrideAttrs (o: {
-  version = "2.26454.2";
+  version = "2.37337.1";
   buildInputs = o.buildInputs ++ [ pipewire ];
   src = fetchurl {
-    url = "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_2.26454.2_amd64.deb";
-    hash = "sha256-slGgIkqGNYdPM1mN+O2JUrQn+EgV7llYDMAi1r2yQw8=";
+    url = "https://downloads.claude.ai/claude-desktop/apt/stable/pool/main/c/claude-desktop/claude-desktop_2.37337.1_amd64.deb";
+    hash = "sha256-QXRbCRTw/1FjGh/xu0A7g2v1yZWEXMpnQt05vKOi2hQ=";
   };
 })
