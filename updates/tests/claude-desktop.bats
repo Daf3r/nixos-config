@@ -25,12 +25,14 @@ claude-desktop.overrideAttrs (o: rec {
 })
 EOF
 
+  # /bin/sh, not /usr/bin/env: the nix build sandbox has no /usr/bin/env, and
+  # these mocks are plain POSIX sh.
   cat > "$WORK/bin/curl" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/sh
 cat "$CD_INDEX"
 EOF
   cat > "$WORK/bin/nix" <<'EOF'
-#!/usr/bin/env bash
+#!/bin/sh
 case "$1" in
   hash) printf '%s\n' "$CD_SRI_INDEX" ;;
   store) printf '{"hash":"%s","storePath":"/nix/store/fake.deb"}\n' "$CD_PREFETCH" ;;
