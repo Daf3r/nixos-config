@@ -13,6 +13,7 @@
     ./tailscale.nix
     ./storage.nix
     ./memory.nix
+    ./coredump.nix
     ./monitor.nix
     ./diagnostics.nix
     ./updates.nix
