@@ -100,6 +100,7 @@ los comentarios de este repo son largos a propósito.
 | `terminal/` | kitty, fish, fastfetch, nvim, herramientas de CLI |
 | `pkgs/brave-origin.nix` | Brave Origin, empaquetado desde el `.deb` de Brave |
 | `pkgs/chatgpt-desktop.nix` | `.deb` oficial de ChatGPT para Linux |
+| `pkgs/claude-desktop-newer.nix` | `.deb` de Claude Desktop desde el repo apt de Anthropic, por delante del pin del flake |
 | `pkgs/t3code-app.nix` | AppImage de T3 Code |
 | `pkgs/minecraft-launcher.nix` | Bootstrap del launcher de Mojang, cuando está activado |
 | `pkgs/discord.nix` + `pkgs/discord-sources.json` | Discord de nixpkgs fijado a la versión del manifiesto oficial de Discord |

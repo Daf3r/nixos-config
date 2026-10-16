@@ -100,6 +100,7 @@ repo are long on purpose.
 | `terminal/` | kitty, fish, fastfetch, nvim, CLI tools |
 | `pkgs/brave-origin.nix` | Brave Origin, packaged from Brave's own `.deb` |
 | `pkgs/chatgpt-desktop.nix` | Official ChatGPT Linux `.deb` |
+| `pkgs/claude-desktop-newer.nix` | Claude Desktop `.deb` from Anthropic's apt repo, ahead of the flake input pin |
 | `pkgs/t3code-app.nix` | T3 Code AppImage |
 | `pkgs/minecraft-launcher.nix` | Mojang launcher bootstrap, when enabled |
 | `pkgs/discord.nix` + `pkgs/discord-sources.json` | nixpkgs' Discord pinned to the release in Discord's own manifest |

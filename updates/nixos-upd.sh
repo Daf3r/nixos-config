@@ -413,6 +413,7 @@ run_local_bump() { # $1 script, $2 report name, $3 target file
 run_local_bump bump-brave-origin.sh brave-origin brave-origin.nix
 run_local_bump bump-t3code-app.sh t3code-app t3code-app.nix
 run_local_bump bump-chatgpt-desktop.sh chatgpt-desktop chatgpt-desktop.nix
+run_local_bump bump-claude-desktop.sh claude-desktop claude-desktop-newer.nix
 run_local_bump bump-minecraft-launcher.sh minecraft-launcher minecraft-launcher.nix
 run_local_bump bump-discord.sh discord discord-sources.json
 
